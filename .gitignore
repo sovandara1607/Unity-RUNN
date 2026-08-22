@@ -1,0 +1,11 @@
+# --- Environment ---
+.env
+.env.local
+
+# --- Go ---
+backend/bin/
+*.test
+*.out
+
+# --- OS ---
+.DS_Store
