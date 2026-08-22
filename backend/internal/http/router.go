@@ -12,6 +12,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/unity-run-club/api/internal/adminauth"
+	"github.com/unity-run-club/api/internal/events"
 	"github.com/unity-run-club/api/internal/middleware"
 )
 
@@ -30,6 +32,9 @@ type Deps struct {
 	Redis  Pinger
 
 	CORSAllowedOrigins []string
+	AdminAPIKey        string
+
+	EventsHandler *events.Handler
 
 	// ReadyTimeout bounds how long each dependency ping may take
 	// when handling /ready. Defaults to 2s if zero.
@@ -47,6 +52,22 @@ func NewRouter(deps Deps) http.Handler {
 
 	r.Get("/health", healthHandler)
 	r.Get("/ready", readyHandler(deps))
+
+	r.Route("/api/v1", func(api chi.Router) {
+		api.Route("/events", func(ev chi.Router) {
+			// Public reads: WithAdminKey doesn't reject, it only
+			// unlocks admin-only visibility (e.g. DRAFT events) when a
+			// valid key is presented, so admins can preview via the
+			// same endpoints.
+			ev.With(adminauth.WithAdminKey(deps.AdminAPIKey)).Get("/", deps.EventsHandler.List)
+			ev.With(adminauth.WithAdminKey(deps.AdminAPIKey)).Get("/{slug}", deps.EventsHandler.GetBySlug)
+
+			// Admin writes: key required.
+			ev.With(adminauth.RequireAdminKey(deps.AdminAPIKey)).Post("/", deps.EventsHandler.Create)
+			ev.With(adminauth.RequireAdminKey(deps.AdminAPIKey)).Patch("/{id}", deps.EventsHandler.Update)
+			ev.With(adminauth.RequireAdminKey(deps.AdminAPIKey)).Delete("/{id}", deps.EventsHandler.Delete)
+		})
+	})
 
 	return r
 }

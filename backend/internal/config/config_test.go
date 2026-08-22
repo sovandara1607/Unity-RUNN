@@ -17,7 +17,7 @@ func withEnv(t *testing.T, kv map[string]string) {
 func clearAll(t *testing.T) {
 	t.Helper()
 	for _, k := range []string{
-		"APP_ENV", "PORT", "LOG_LEVEL", "DATABASE_URL", "DATABASE_MAX_CONN",
+		"APP_ENV", "PORT", "LOG_LEVEL", "DATABASE_URL", "DATABASE_MAX_CONN", "ADMIN_API_KEY",
 		"REDIS_ADDR", "REDIS_PASSWORD", "REDIS_DB", "CORS_ALLOWED_ORIGINS",
 	} {
 		t.Setenv(k, "")
@@ -32,6 +32,7 @@ func TestLoad_ValidEnv(t *testing.T) {
 		"PORT":                 "9090",
 		"DATABASE_URL":         "postgres://user:pass@localhost:5432/unity",
 		"DATABASE_MAX_CONN":    "25",
+		"ADMIN_API_KEY":        "s3cret",
 		"REDIS_ADDR":           "redis:6379",
 		"REDIS_DB":             "2",
 		"CORS_ALLOWED_ORIGINS": "https://unityrunclub.com, https://admin.unityrunclub.com",
@@ -54,6 +55,9 @@ func TestLoad_ValidEnv(t *testing.T) {
 	if cfg.DatabaseMaxConn != 25 {
 		t.Errorf("DatabaseMaxConn = %d, want 25", cfg.DatabaseMaxConn)
 	}
+	if cfg.AdminAPIKey != "s3cret" {
+		t.Errorf("AdminAPIKey = %q, want %q", cfg.AdminAPIKey, "s3cret")
+	}
 	if cfg.RedisAddr != "redis:6379" {
 		t.Errorf("RedisAddr = %q, want %q", cfg.RedisAddr, "redis:6379")
 	}
@@ -74,6 +78,7 @@ func TestLoad_ValidEnv(t *testing.T) {
 func TestLoad_MissingRequiredVar(t *testing.T) {
 	clearAll(t)
 	// DATABASE_URL intentionally left unset.
+	withEnv(t, map[string]string{"ADMIN_API_KEY": "s3cret"})
 
 	_, err := Load()
 	if err == nil {
@@ -81,10 +86,22 @@ func TestLoad_MissingRequiredVar(t *testing.T) {
 	}
 }
 
+func TestLoad_MissingAdminAPIKey(t *testing.T) {
+	clearAll(t)
+	withEnv(t, map[string]string{"DATABASE_URL": "postgres://user:pass@localhost:5432/unity"})
+	// ADMIN_API_KEY intentionally left unset.
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("Load() expected error for missing ADMIN_API_KEY, got nil")
+	}
+}
+
 func TestLoad_Defaults(t *testing.T) {
 	clearAll(t)
 	withEnv(t, map[string]string{
-		"DATABASE_URL": "postgres://user:pass@localhost:5432/unity",
+		"DATABASE_URL":  "postgres://user:pass@localhost:5432/unity",
+		"ADMIN_API_KEY": "s3cret",
 	})
 
 	cfg, err := Load()
@@ -117,6 +134,7 @@ func TestLoad_InvalidIntVars(t *testing.T) {
 	withEnv(t, map[string]string{
 		"DATABASE_URL":      "postgres://user:pass@localhost:5432/unity",
 		"DATABASE_MAX_CONN": "not-a-number",
+		"ADMIN_API_KEY":     "s3cret",
 	})
 
 	if _, err := Load(); err == nil {

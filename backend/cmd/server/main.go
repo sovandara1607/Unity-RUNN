@@ -15,6 +15,7 @@ import (
 
 	"github.com/unity-run-club/api/internal/config"
 	"github.com/unity-run-club/api/internal/database"
+	"github.com/unity-run-club/api/internal/events"
 	apphttp "github.com/unity-run-club/api/internal/http"
 	"github.com/unity-run-club/api/internal/logger"
 	"github.com/unity-run-club/api/internal/redisclient"
@@ -53,11 +54,17 @@ func run() error {
 		}
 	}()
 
+	eventsRepo := events.NewRepository(db.Pool)
+	eventsSvc := events.NewService(eventsRepo)
+	eventsHandler := events.NewHandler(eventsSvc)
+
 	router := apphttp.NewRouter(apphttp.Deps{
 		Logger:             log,
 		DB:                 db,
 		Redis:              redisClient,
 		CORSAllowedOrigins: cfg.CORSAllowedOrigins,
+		AdminAPIKey:        cfg.AdminAPIKey,
+		EventsHandler:      eventsHandler,
 	})
 
 	srv := apphttp.NewServer(":"+cfg.Port, router)

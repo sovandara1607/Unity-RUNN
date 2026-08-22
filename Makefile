@@ -1,4 +1,11 @@
-.PHONY: dev dev-down dev-logs test lint fmt vet migrate seed build run
+.PHONY: dev dev-down dev-logs test test-integration lint fmt vet migrate migrate-down seed build run
+
+# Load .env (if present) so `make run/migrate/seed` see DATABASE_URL,
+# ADMIN_API_KEY, etc. without requiring the caller to export them.
+ifneq (,$(wildcard .env))
+include .env
+export
+endif
 
 # Bring up Postgres, Redis, and the API via docker-compose.
 dev:
@@ -14,9 +21,14 @@ dev-down:
 dev-logs:
 	docker compose logs -f
 
-# Run the Go test suite.
+# Run the Go test suite (unit tests only — no database required).
 test:
 	cd backend && go test ./... -race -count=1
+
+# Run tests that need a real PostgreSQL (repository integration
+# tests). Requires `make dev-infra` (or `make dev`) running first.
+test-integration:
+	cd backend && go test -tags=integration ./... -race -count=1
 
 # go vet + gofmt check (fails if any file is unformatted).
 lint: vet
@@ -34,9 +46,11 @@ build:
 run:
 	cd backend && go run ./cmd/server
 
-# Goose migrations arrive in Phase 2 — placeholders for now.
 migrate:
-	@echo "No migrations yet — added in Phase 2 (database + event domain)."
+	cd backend && go run ./cmd/migrate up
+
+migrate-down:
+	cd backend && go run ./cmd/migrate down
 
 seed:
-	@echo "No seed data yet — added in Phase 2 (database + event domain)."
+	cd backend && go run ./cmd/seed

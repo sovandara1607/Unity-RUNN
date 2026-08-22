@@ -27,6 +27,8 @@ type Config struct {
 
 	CORSAllowedOrigins []string
 
+	AdminAPIKey string
+
 	ShutdownTimeout time.Duration
 }
 
@@ -48,6 +50,12 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 	cfg.DatabaseURL = dbURL
+
+	adminKey, err := requireEnv("ADMIN_API_KEY")
+	if err != nil {
+		return nil, err
+	}
+	cfg.AdminAPIKey = adminKey
 
 	if v := os.Getenv("DATABASE_MAX_CONN"); v != "" {
 		n, err := strconv.Atoi(v)
