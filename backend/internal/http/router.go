@@ -1,7 +1,6 @@
 // Package http wires together the HTTP server: middleware, routes,
 // and the health/readiness endpoints. Business domain routes are
-// registered here in later phases; this phase only exposes /health
-// and /ready.
+// registered here; this package owns wiring only, no business logic.
 package http
 
 import (
@@ -12,7 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/unity-run-club/api/internal/adminauth"
+	"github.com/unity-run-club/api/internal/auth"
 	"github.com/unity-run-club/api/internal/events"
 	"github.com/unity-run-club/api/internal/middleware"
 )
@@ -32,8 +31,9 @@ type Deps struct {
 	Redis  Pinger
 
 	CORSAllowedOrigins []string
-	AdminAPIKey        string
 
+	Tokens        *auth.TokenIssuer
+	AuthHandler   *auth.Handler
 	EventsHandler *events.Handler
 
 	// ReadyTimeout bounds how long each dependency ping may take
@@ -54,18 +54,31 @@ func NewRouter(deps Deps) http.Handler {
 	r.Get("/ready", readyHandler(deps))
 
 	r.Route("/api/v1", func(api chi.Router) {
-		api.Route("/events", func(ev chi.Router) {
-			// Public reads: WithAdminKey doesn't reject, it only
-			// unlocks admin-only visibility (e.g. DRAFT events) when a
-			// valid key is presented, so admins can preview via the
-			// same endpoints.
-			ev.With(adminauth.WithAdminKey(deps.AdminAPIKey)).Get("/", deps.EventsHandler.List)
-			ev.With(adminauth.WithAdminKey(deps.AdminAPIKey)).Get("/{slug}", deps.EventsHandler.GetBySlug)
+		api.Route("/auth", func(a chi.Router) {
+			a.Post("/register", deps.AuthHandler.Register)
+			a.Post("/login", deps.AuthHandler.Login)
+			a.Post("/refresh", deps.AuthHandler.Refresh)
+			a.Post("/logout", deps.AuthHandler.Logout)
+		})
 
-			// Admin writes: key required.
-			ev.With(adminauth.RequireAdminKey(deps.AdminAPIKey)).Post("/", deps.EventsHandler.Create)
-			ev.With(adminauth.RequireAdminKey(deps.AdminAPIKey)).Patch("/{id}", deps.EventsHandler.Update)
-			ev.With(adminauth.RequireAdminKey(deps.AdminAPIKey)).Delete("/{id}", deps.EventsHandler.Delete)
+		api.Route("/me", func(me chi.Router) {
+			me.Use(auth.RequireAuth(deps.Tokens, auth.RoleUser))
+			me.Get("/", deps.AuthHandler.Me)
+			me.Patch("/", deps.AuthHandler.UpdateMe)
+		})
+
+		api.Route("/events", func(ev chi.Router) {
+			// Public reads: OptionalAuth doesn't reject — it only
+			// attaches the caller's role when a valid bearer token is
+			// present, so STAFF+ can preview non-public events (e.g.
+			// DRAFT) via the same endpoints.
+			ev.With(auth.OptionalAuth(deps.Tokens)).Get("/", deps.EventsHandler.List)
+			ev.With(auth.OptionalAuth(deps.Tokens)).Get("/{slug}", deps.EventsHandler.GetBySlug)
+
+			// Admin writes: ADMIN role or higher required.
+			ev.With(auth.RequireAuth(deps.Tokens, auth.RoleAdmin)).Post("/", deps.EventsHandler.Create)
+			ev.With(auth.RequireAuth(deps.Tokens, auth.RoleAdmin)).Patch("/{id}", deps.EventsHandler.Update)
+			ev.With(auth.RequireAuth(deps.Tokens, auth.RoleAdmin)).Delete("/{id}", deps.EventsHandler.Delete)
 		})
 	})
 

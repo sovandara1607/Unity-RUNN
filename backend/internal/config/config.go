@@ -27,7 +27,10 @@ type Config struct {
 
 	CORSAllowedOrigins []string
 
-	AdminAPIKey string
+	JWTSecret       string
+	AccessTokenTTL  time.Duration
+	RefreshTokenTTL time.Duration
+	BcryptCost      int
 
 	ShutdownTimeout time.Duration
 }
@@ -42,6 +45,9 @@ func Load() (*Config, error) {
 		LogLevel:        getEnv("LOG_LEVEL", "info"),
 		DatabaseMaxConn: 10,
 		RedisDB:         0,
+		AccessTokenTTL:  15 * time.Minute,
+		RefreshTokenTTL: 30 * 24 * time.Hour,
+		BcryptCost:      12,
 		ShutdownTimeout: 10 * time.Second,
 	}
 
@@ -51,11 +57,35 @@ func Load() (*Config, error) {
 	}
 	cfg.DatabaseURL = dbURL
 
-	adminKey, err := requireEnv("ADMIN_API_KEY")
+	jwtSecret, err := requireEnv("JWT_SECRET")
 	if err != nil {
 		return nil, err
 	}
-	cfg.AdminAPIKey = adminKey
+	cfg.JWTSecret = jwtSecret
+
+	if v := os.Getenv("ACCESS_TOKEN_TTL"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			return nil, fmt.Errorf("config: invalid ACCESS_TOKEN_TTL %q: %w", v, err)
+		}
+		cfg.AccessTokenTTL = d
+	}
+
+	if v := os.Getenv("REFRESH_TOKEN_TTL"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			return nil, fmt.Errorf("config: invalid REFRESH_TOKEN_TTL %q: %w", v, err)
+		}
+		cfg.RefreshTokenTTL = d
+	}
+
+	if v := os.Getenv("BCRYPT_COST"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return nil, fmt.Errorf("config: invalid BCRYPT_COST %q: %w", v, err)
+		}
+		cfg.BcryptCost = n
+	}
 
 	if v := os.Getenv("DATABASE_MAX_CONN"); v != "" {
 		n, err := strconv.Atoi(v)

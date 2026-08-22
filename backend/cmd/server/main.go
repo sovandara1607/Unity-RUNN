@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/unity-run-club/api/internal/auth"
 	"github.com/unity-run-club/api/internal/config"
 	"github.com/unity-run-club/api/internal/database"
 	"github.com/unity-run-club/api/internal/events"
@@ -54,6 +55,11 @@ func run() error {
 		}
 	}()
 
+	tokens := auth.NewTokenIssuer(cfg.JWTSecret, cfg.AccessTokenTTL)
+	authRepo := auth.NewRepository(db.Pool)
+	authSvc := auth.NewService(authRepo, tokens, cfg.BcryptCost, cfg.RefreshTokenTTL)
+	authHandler := auth.NewHandler(authSvc, cfg.RefreshTokenTTL, cfg.AppEnv != "development")
+
 	eventsRepo := events.NewRepository(db.Pool)
 	eventsSvc := events.NewService(eventsRepo)
 	eventsHandler := events.NewHandler(eventsSvc)
@@ -63,7 +69,8 @@ func run() error {
 		DB:                 db,
 		Redis:              redisClient,
 		CORSAllowedOrigins: cfg.CORSAllowedOrigins,
-		AdminAPIKey:        cfg.AdminAPIKey,
+		Tokens:             tokens,
+		AuthHandler:        authHandler,
 		EventsHandler:      eventsHandler,
 	})
 

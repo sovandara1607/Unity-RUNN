@@ -9,7 +9,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
-	"github.com/unity-run-club/api/internal/adminauth"
+	"github.com/unity-run-club/api/internal/auth"
+	"github.com/unity-run-club/api/internal/httpresponse"
 )
 
 // Handler wires HTTP requests to the event Service. Handlers stay
@@ -23,11 +24,12 @@ func NewHandler(svc *Service) *Handler {
 	return &Handler{svc: svc}
 }
 
-// isAdmin reports whether this request context carries a validated
-// admin key (see internal/adminauth), which relaxes visibility rules
-// and unlocks write endpoints.
-func isAdmin(r *http.Request) bool {
-	return adminauth.IsAdmin(r.Context())
+// isStaffOrAbove reports whether the authenticated caller (see
+// internal/auth) holds STAFF role or higher, which relaxes list/detail
+// visibility to include non-public events (DRAFT, CANCELLED, etc).
+func isStaffOrAbove(r *http.Request) bool {
+	u, ok := auth.UserFromContext(r.Context())
+	return ok && u.Role.AtLeast(auth.RoleStaff)
 }
 
 // List handles GET /api/v1/events.
@@ -46,7 +48,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	admin := isAdmin(r)
+	admin := isStaffOrAbove(r)
 	if admin {
 		if v := q.Get("status"); v != "" {
 			filter.Statuses = []Status{Status(v)}
@@ -55,11 +57,11 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 
 	events, total, err := h.svc.List(r.Context(), &filter, admin)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "failed to list events")
+		httpresponse.WriteError(w, http.StatusInternalServerError, "internal_error", "failed to list events")
 		return
 	}
 
-	writeData(w, http.StatusOK, map[string]any{
+	httpresponse.WriteData(w, http.StatusOK, map[string]any{
 		"events": events,
 		"total":  total,
 		"limit":  filter.Limit,
@@ -71,40 +73,40 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) GetBySlug(w http.ResponseWriter, r *http.Request) {
 	slug := chi.URLParam(r, "slug")
 
-	detail, err := h.svc.GetDetailBySlug(r.Context(), slug, isAdmin(r))
+	detail, err := h.svc.GetDetailBySlug(r.Context(), slug, isStaffOrAbove(r))
 	if errors.Is(err, ErrNotFound) {
-		writeError(w, http.StatusNotFound, "not_found", "event not found")
+		httpresponse.WriteError(w, http.StatusNotFound, "not_found", "event not found")
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "failed to load event")
+		httpresponse.WriteError(w, http.StatusInternalServerError, "internal_error", "failed to load event")
 		return
 	}
 
-	writeData(w, http.StatusOK, detail)
+	httpresponse.WriteData(w, http.StatusOK, detail)
 }
 
-// Create handles POST /api/v1/events (admin only — guarded by
-// adminauth middleware at the route level).
+// Create handles POST /api/v1/events (ADMIN role required — guarded
+// by auth.RequireAuth at the route level).
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	var req CreateEventRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_body", "malformed JSON body")
+		httpresponse.WriteError(w, http.StatusBadRequest, "invalid_body", "malformed JSON body")
 		return
 	}
 	if err := validate.Struct(req); err != nil {
-		writeError(w, http.StatusUnprocessableEntity, "validation_failed", err.Error())
+		httpresponse.WriteError(w, http.StatusUnprocessableEntity, "validation_failed", err.Error())
 		return
 	}
 
 	e, err := h.svc.Create(r.Context(), req)
 	switch {
 	case errors.Is(err, ErrSlugTaken):
-		writeError(w, http.StatusConflict, "slug_taken", "an event with this slug already exists")
+		httpresponse.WriteError(w, http.StatusConflict, "slug_taken", "an event with this slug already exists")
 	case err != nil:
-		writeError(w, http.StatusBadRequest, "create_failed", err.Error())
+		httpresponse.WriteError(w, http.StatusBadRequest, "create_failed", err.Error())
 	default:
-		writeData(w, http.StatusCreated, e)
+		httpresponse.WriteData(w, http.StatusCreated, e)
 	}
 }
 
@@ -112,32 +114,32 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_id", "id must be a UUID")
+		httpresponse.WriteError(w, http.StatusBadRequest, "invalid_id", "id must be a UUID")
 		return
 	}
 
 	var req UpdateEventRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_body", "malformed JSON body")
+		httpresponse.WriteError(w, http.StatusBadRequest, "invalid_body", "malformed JSON body")
 		return
 	}
 	if err := validate.Struct(req); err != nil {
-		writeError(w, http.StatusUnprocessableEntity, "validation_failed", err.Error())
+		httpresponse.WriteError(w, http.StatusUnprocessableEntity, "validation_failed", err.Error())
 		return
 	}
 
 	e, err := h.svc.Update(r.Context(), id, req)
 	switch {
 	case errors.Is(err, ErrNotFound):
-		writeError(w, http.StatusNotFound, "not_found", "event not found")
+		httpresponse.WriteError(w, http.StatusNotFound, "not_found", "event not found")
 	case errors.Is(err, ErrSlugTaken):
-		writeError(w, http.StatusConflict, "slug_taken", "an event with this slug already exists")
+		httpresponse.WriteError(w, http.StatusConflict, "slug_taken", "an event with this slug already exists")
 	case errors.Is(err, ErrInvalidTransition):
-		writeError(w, http.StatusBadRequest, "invalid_transition", "that status transition isn't allowed")
+		httpresponse.WriteError(w, http.StatusBadRequest, "invalid_transition", "that status transition isn't allowed")
 	case err != nil:
-		writeError(w, http.StatusBadRequest, "update_failed", err.Error())
+		httpresponse.WriteError(w, http.StatusBadRequest, "update_failed", err.Error())
 	default:
-		writeData(w, http.StatusOK, e)
+		httpresponse.WriteData(w, http.StatusOK, e)
 	}
 }
 
@@ -145,18 +147,18 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_id", "id must be a UUID")
+		httpresponse.WriteError(w, http.StatusBadRequest, "invalid_id", "id must be a UUID")
 		return
 	}
 
 	err = h.svc.Delete(r.Context(), id)
 	switch {
 	case errors.Is(err, ErrNotFound):
-		writeError(w, http.StatusNotFound, "not_found", "event not found")
+		httpresponse.WriteError(w, http.StatusNotFound, "not_found", "event not found")
 	case errors.Is(err, ErrDeleteNotAllowed):
-		writeError(w, http.StatusConflict, "delete_not_allowed", "only draft events can be deleted; cancel or archive instead")
+		httpresponse.WriteError(w, http.StatusConflict, "delete_not_allowed", "only draft events can be deleted; cancel or archive instead")
 	case err != nil:
-		writeError(w, http.StatusInternalServerError, "internal_error", "failed to delete event")
+		httpresponse.WriteError(w, http.StatusInternalServerError, "internal_error", "failed to delete event")
 	default:
 		w.WriteHeader(http.StatusNoContent)
 	}

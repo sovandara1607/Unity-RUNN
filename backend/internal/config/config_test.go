@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"testing"
+	"time"
 )
 
 // withEnv sets env vars for the duration of the test and restores the
@@ -17,7 +18,8 @@ func withEnv(t *testing.T, kv map[string]string) {
 func clearAll(t *testing.T) {
 	t.Helper()
 	for _, k := range []string{
-		"APP_ENV", "PORT", "LOG_LEVEL", "DATABASE_URL", "DATABASE_MAX_CONN", "ADMIN_API_KEY",
+		"APP_ENV", "PORT", "LOG_LEVEL", "DATABASE_URL", "DATABASE_MAX_CONN", "JWT_SECRET",
+		"ACCESS_TOKEN_TTL", "REFRESH_TOKEN_TTL", "BCRYPT_COST",
 		"REDIS_ADDR", "REDIS_PASSWORD", "REDIS_DB", "CORS_ALLOWED_ORIGINS",
 	} {
 		t.Setenv(k, "")
@@ -32,7 +34,10 @@ func TestLoad_ValidEnv(t *testing.T) {
 		"PORT":                 "9090",
 		"DATABASE_URL":         "postgres://user:pass@localhost:5432/unity",
 		"DATABASE_MAX_CONN":    "25",
-		"ADMIN_API_KEY":        "s3cret",
+		"JWT_SECRET":           "s3cret",
+		"ACCESS_TOKEN_TTL":     "5m",
+		"REFRESH_TOKEN_TTL":    "168h",
+		"BCRYPT_COST":          "4",
 		"REDIS_ADDR":           "redis:6379",
 		"REDIS_DB":             "2",
 		"CORS_ALLOWED_ORIGINS": "https://unityrunclub.com, https://admin.unityrunclub.com",
@@ -55,8 +60,17 @@ func TestLoad_ValidEnv(t *testing.T) {
 	if cfg.DatabaseMaxConn != 25 {
 		t.Errorf("DatabaseMaxConn = %d, want 25", cfg.DatabaseMaxConn)
 	}
-	if cfg.AdminAPIKey != "s3cret" {
-		t.Errorf("AdminAPIKey = %q, want %q", cfg.AdminAPIKey, "s3cret")
+	if cfg.JWTSecret != "s3cret" {
+		t.Errorf("JWTSecret = %q, want %q", cfg.JWTSecret, "s3cret")
+	}
+	if cfg.AccessTokenTTL != 5*time.Minute {
+		t.Errorf("AccessTokenTTL = %v, want %v", cfg.AccessTokenTTL, 5*time.Minute)
+	}
+	if cfg.RefreshTokenTTL != 168*time.Hour {
+		t.Errorf("RefreshTokenTTL = %v, want %v", cfg.RefreshTokenTTL, 168*time.Hour)
+	}
+	if cfg.BcryptCost != 4 {
+		t.Errorf("BcryptCost = %d, want 4", cfg.BcryptCost)
 	}
 	if cfg.RedisAddr != "redis:6379" {
 		t.Errorf("RedisAddr = %q, want %q", cfg.RedisAddr, "redis:6379")
@@ -75,10 +89,10 @@ func TestLoad_ValidEnv(t *testing.T) {
 	}
 }
 
-func TestLoad_MissingRequiredVar(t *testing.T) {
+func TestLoad_MissingDatabaseURL(t *testing.T) {
 	clearAll(t)
 	// DATABASE_URL intentionally left unset.
-	withEnv(t, map[string]string{"ADMIN_API_KEY": "s3cret"})
+	withEnv(t, map[string]string{"JWT_SECRET": "s3cret"})
 
 	_, err := Load()
 	if err == nil {
@@ -86,22 +100,22 @@ func TestLoad_MissingRequiredVar(t *testing.T) {
 	}
 }
 
-func TestLoad_MissingAdminAPIKey(t *testing.T) {
+func TestLoad_MissingJWTSecret(t *testing.T) {
 	clearAll(t)
 	withEnv(t, map[string]string{"DATABASE_URL": "postgres://user:pass@localhost:5432/unity"})
-	// ADMIN_API_KEY intentionally left unset.
+	// JWT_SECRET intentionally left unset.
 
 	_, err := Load()
 	if err == nil {
-		t.Fatal("Load() expected error for missing ADMIN_API_KEY, got nil")
+		t.Fatal("Load() expected error for missing JWT_SECRET, got nil")
 	}
 }
 
 func TestLoad_Defaults(t *testing.T) {
 	clearAll(t)
 	withEnv(t, map[string]string{
-		"DATABASE_URL":  "postgres://user:pass@localhost:5432/unity",
-		"ADMIN_API_KEY": "s3cret",
+		"DATABASE_URL": "postgres://user:pass@localhost:5432/unity",
+		"JWT_SECRET":   "s3cret",
 	})
 
 	cfg, err := Load()
@@ -121,6 +135,15 @@ func TestLoad_Defaults(t *testing.T) {
 	if cfg.DatabaseMaxConn != 10 {
 		t.Errorf("DatabaseMaxConn default = %d, want 10", cfg.DatabaseMaxConn)
 	}
+	if cfg.AccessTokenTTL != 15*time.Minute {
+		t.Errorf("AccessTokenTTL default = %v, want %v", cfg.AccessTokenTTL, 15*time.Minute)
+	}
+	if cfg.RefreshTokenTTL != 30*24*time.Hour {
+		t.Errorf("RefreshTokenTTL default = %v, want %v", cfg.RefreshTokenTTL, 30*24*time.Hour)
+	}
+	if cfg.BcryptCost != 12 {
+		t.Errorf("BcryptCost default = %d, want 12", cfg.BcryptCost)
+	}
 	if cfg.RedisAddr != "localhost:6379" {
 		t.Errorf("RedisAddr default = %q, want %q", cfg.RedisAddr, "localhost:6379")
 	}
@@ -134,10 +157,23 @@ func TestLoad_InvalidIntVars(t *testing.T) {
 	withEnv(t, map[string]string{
 		"DATABASE_URL":      "postgres://user:pass@localhost:5432/unity",
 		"DATABASE_MAX_CONN": "not-a-number",
-		"ADMIN_API_KEY":     "s3cret",
+		"JWT_SECRET":        "s3cret",
 	})
 
 	if _, err := Load(); err == nil {
 		t.Fatal("Load() expected error for invalid DATABASE_MAX_CONN, got nil")
+	}
+}
+
+func TestLoad_InvalidDurationVars(t *testing.T) {
+	clearAll(t)
+	withEnv(t, map[string]string{
+		"DATABASE_URL":     "postgres://user:pass@localhost:5432/unity",
+		"JWT_SECRET":       "s3cret",
+		"ACCESS_TOKEN_TTL": "not-a-duration",
+	})
+
+	if _, err := Load(); err == nil {
+		t.Fatal("Load() expected error for invalid ACCESS_TOKEN_TTL, got nil")
 	}
 }
