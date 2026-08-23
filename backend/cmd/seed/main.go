@@ -44,6 +44,15 @@ func run() error {
 	}
 	defer tx.Rollback(ctx)
 
+	// Dates are relative to "now" (not hardcoded) so the seeded event
+	// is always a genuinely usable, registration-open demo event,
+	// regardless of when `make seed` is run.
+	now := time.Now().UTC()
+	eventDate := now.AddDate(0, 0, 90).Format("2006-01-02")
+	registrationOpenAt := now.AddDate(0, 0, -7)
+	registrationCloseAt := now.AddDate(0, 0, 85)
+	categoryDeadline := registrationCloseAt
+
 	var eventID string
 	err = tx.QueryRow(ctx, `
 		INSERT INTO events (
@@ -53,13 +62,18 @@ func run() error {
 			'Unity Founders Run 2025', $1,
 			'The run that started it all — Unity Run Club''s inaugural community run through Phnom Penh, celebrating our first year of bringing runners together.',
 			'https://assets.unityrunclub.com/events/founders-run-2025/cover.jpg',
-			'2025-12-06', '06:00', 'Diamond Island, Phnom Penh',
+			$2, '06:00', 'Diamond Island, Phnom Penh',
 			11.5564, 104.9282,
-			'2025-10-01T00:00:00Z', '2025-12-01T23:59:59Z',
-			'PUBLISHED'
+			$3, $4,
+			'REGISTRATION_OPEN'
 		)
-		ON CONFLICT (slug) DO UPDATE SET name = EXCLUDED.name
-		RETURNING id`, seedSlug).Scan(&eventID)
+		ON CONFLICT (slug) DO UPDATE SET
+			name = EXCLUDED.name,
+			event_date = EXCLUDED.event_date,
+			registration_open_at = EXCLUDED.registration_open_at,
+			registration_close_at = EXCLUDED.registration_close_at,
+			status = EXCLUDED.status
+		RETURNING id`, seedSlug, eventDate, registrationOpenAt, registrationCloseAt).Scan(&eventID)
 	if err != nil {
 		return err
 	}
@@ -75,9 +89,9 @@ func run() error {
 	_, err = tx.Exec(ctx, `
 		INSERT INTO event_categories (event_id, name, distance, price_cents, capacity, registration_deadline, status)
 		VALUES
-			($1, '5K', '5K', 500000, 300, '2025-12-01T23:59:59Z', 'OPEN'),
-			($1, '10K', '10K', 800000, 200, '2025-12-01T23:59:59Z', 'OPEN'),
-			($1, 'Fun Run', '3K', 0, 500, '2025-12-01T23:59:59Z', 'OPEN')`, eventID)
+			($1, '5K', '5K', 500000, 300, $2, 'OPEN'),
+			($1, '10K', '10K', 800000, 200, $2, 'OPEN'),
+			($1, 'Fun Run', '3K', 0, 500, $2, 'OPEN')`, eventID, categoryDeadline)
 	if err != nil {
 		return err
 	}

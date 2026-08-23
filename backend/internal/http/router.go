@@ -14,6 +14,7 @@ import (
 	"github.com/unity-run-club/api/internal/auth"
 	"github.com/unity-run-club/api/internal/events"
 	"github.com/unity-run-club/api/internal/middleware"
+	"github.com/unity-run-club/api/internal/registrations"
 )
 
 // Pinger is implemented by any dependency whose health can be checked
@@ -32,9 +33,10 @@ type Deps struct {
 
 	CORSAllowedOrigins []string
 
-	Tokens        *auth.TokenIssuer
-	AuthHandler   *auth.Handler
-	EventsHandler *events.Handler
+	Tokens               *auth.TokenIssuer
+	AuthHandler          *auth.Handler
+	EventsHandler        *events.Handler
+	RegistrationsHandler *registrations.Handler
 
 	// ReadyTimeout bounds how long each dependency ping may take
 	// when handling /ready. Defaults to 2s if zero.
@@ -65,6 +67,7 @@ func NewRouter(deps Deps) http.Handler {
 			me.Use(auth.RequireAuth(deps.Tokens, auth.RoleUser))
 			me.Get("/", deps.AuthHandler.Me)
 			me.Patch("/", deps.AuthHandler.UpdateMe)
+			me.Get("/registrations", deps.RegistrationsHandler.ListMine)
 		})
 
 		api.Route("/events", func(ev chi.Router) {
@@ -79,6 +82,17 @@ func NewRouter(deps Deps) http.Handler {
 			ev.With(auth.RequireAuth(deps.Tokens, auth.RoleAdmin)).Post("/", deps.EventsHandler.Create)
 			ev.With(auth.RequireAuth(deps.Tokens, auth.RoleAdmin)).Patch("/{id}", deps.EventsHandler.Update)
 			ev.With(auth.RequireAuth(deps.Tokens, auth.RoleAdmin)).Delete("/{id}", deps.EventsHandler.Delete)
+
+			// Registration sub-resources.
+			ev.Get("/{eventId}/categories/{categoryId}/availability", deps.RegistrationsHandler.Availability)
+			ev.With(auth.RequireAuth(deps.Tokens, auth.RoleUser)).
+				Post("/{eventId}/registrations", deps.RegistrationsHandler.Register)
+		})
+
+		api.Route("/registrations", func(reg chi.Router) {
+			reg.Use(auth.RequireAuth(deps.Tokens, auth.RoleUser))
+			reg.Get("/{id}", deps.RegistrationsHandler.GetByID)
+			reg.Post("/{id}/cancel", deps.RegistrationsHandler.Cancel)
 		})
 	})
 

@@ -27,8 +27,12 @@ test:
 
 # Run tests that need a real PostgreSQL (repository integration
 # tests). Requires `make dev-infra` (or `make dev`) running first.
+# -p 1 forces packages to run sequentially: several packages'
+# integration tests truncate shared tables (events, users) against
+# the same database, so running packages concurrently causes them to
+# race each other and fail spuriously.
 test-integration:
-	cd backend && go test -tags=integration ./... -race -count=1
+	cd backend && go test -tags=integration ./... -race -count=1 -p 1
 
 # go vet + gofmt check (fails if any file is unformatted).
 lint: vet

@@ -217,6 +217,27 @@ func scanEvent(row rowScanner) (Event, error) {
 	return e, err
 }
 
+// GetCategoryByID fetches a single event category by ID, for callers
+// (e.g. internal/registrations) that need to validate a category
+// without loading the full event detail.
+func (r *Repository) GetCategoryByID(ctx context.Context, id uuid.UUID) (*EventCategory, error) {
+	const query = `
+		SELECT id, event_id, name, distance, price_cents, capacity,
+		       registration_deadline, status, created_at, updated_at
+		FROM event_categories WHERE id = $1`
+
+	var c EventCategory
+	err := r.pool.QueryRow(ctx, query, id).Scan(&c.ID, &c.EventID, &c.Name, &c.Distance,
+		&c.PriceCents, &c.Capacity, &c.RegistrationDeadline, &c.Status, &c.CreatedAt, &c.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("events: get category by id: %w", err)
+	}
+	return &c, nil
+}
+
 func (r *Repository) listCategories(ctx context.Context, eventID uuid.UUID) ([]EventCategory, error) {
 	const query = `
 		SELECT id, event_id, name, distance, price_cents, capacity,

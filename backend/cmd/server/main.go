@@ -19,7 +19,19 @@ import (
 	"github.com/unity-run-club/api/internal/events"
 	apphttp "github.com/unity-run-club/api/internal/http"
 	"github.com/unity-run-club/api/internal/logger"
+	"github.com/unity-run-club/api/internal/payments"
 	"github.com/unity-run-club/api/internal/redisclient"
+	"github.com/unity-run-club/api/internal/registrations"
+)
+
+// Redis-backed registration tuning. Not exposed as env vars yet — the
+// values are conservative defaults; promote to config if a later
+// phase needs them tunable per-environment.
+const (
+	registrationLockTTL    = 5 * time.Second
+	availabilityCacheTTL   = 5 * time.Second
+	registrationRateLimit  = 5 // attempts
+	registrationRateWindow = time.Minute
 )
 
 func main() {
@@ -64,14 +76,30 @@ func run() error {
 	eventsSvc := events.NewService(eventsRepo)
 	eventsHandler := events.NewHandler(eventsSvc)
 
+	regRepo := registrations.NewRepository(db.Pool)
+	regLocker := registrations.NewLocker(redisClient.Raw(), registrationLockTTL)
+	regAvailCache := registrations.NewAvailabilityCache(redisClient.Raw(), availabilityCacheTTL)
+	regRateLimiter := registrations.NewRateLimiter(redisClient.Raw(), registrationRateLimit, registrationRateWindow)
+	// MockProvider is the only payment provider until a real Cambodian
+	// gateway is integrated (see internal/payments.Provider) — it must
+	// never run in production.
+	if cfg.AppEnv == "production" {
+		log.Warn("mock_payment_provider_in_production",
+			"detail", "no real payment gateway is wired yet; all paid registrations will auto-succeed")
+	}
+	paymentProvider := payments.NewMockProvider()
+	regSvc := registrations.NewService(regRepo, eventsRepo, paymentProvider, regLocker, regAvailCache, regRateLimiter)
+	regHandler := registrations.NewHandler(regSvc)
+
 	router := apphttp.NewRouter(apphttp.Deps{
-		Logger:             log,
-		DB:                 db,
-		Redis:              redisClient,
-		CORSAllowedOrigins: cfg.CORSAllowedOrigins,
-		Tokens:             tokens,
-		AuthHandler:        authHandler,
-		EventsHandler:      eventsHandler,
+		Logger:               log,
+		DB:                   db,
+		Redis:                redisClient,
+		CORSAllowedOrigins:   cfg.CORSAllowedOrigins,
+		Tokens:               tokens,
+		AuthHandler:          authHandler,
+		EventsHandler:        eventsHandler,
+		RegistrationsHandler: regHandler,
 	})
 
 	srv := apphttp.NewServer(":"+cfg.Port, router)
