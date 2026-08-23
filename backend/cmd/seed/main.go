@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"golang.org/x/crypto/bcrypt"
 )
 
 const seedSlug = "unity-founders-run-2025"
@@ -131,5 +132,52 @@ func run() error {
 	}
 
 	log.Printf("seeded event %q (id=%s)", seedSlug, eventID)
+
+	// Seed default accounts (admin, staff, runner)
+	type seedUser struct {
+		email    string
+		password string
+		role     string
+		fullName string
+	}
+
+	usersToSeed := []seedUser{
+		{email: "admin@unityrunclub.com", password: "admin12345", role: "SUPER_ADMIN", fullName: "Admin Organizer"},
+		{email: "staff@unityrunclub.com", password: "staff12345", role: "STAFF", fullName: "Staff Volunteer"},
+		{email: "runner@unityrunclub.com", password: "runner12345", role: "USER", fullName: "Demo Runner"},
+	}
+
+	for _, u := range usersToSeed {
+		hash, err := bcrypt.GenerateFromPassword([]byte(u.password), bcrypt.DefaultCost)
+		if err != nil {
+			return err
+		}
+
+		var userID string
+		err = pool.QueryRow(ctx, `
+			INSERT INTO users (email, password_hash, role)
+			VALUES ($1, $2, $3)
+			ON CONFLICT (email) DO UPDATE SET
+				password_hash = EXCLUDED.password_hash,
+				role = EXCLUDED.role,
+				updated_at = now()
+			RETURNING id`, u.email, string(hash), u.role).Scan(&userID)
+		if err != nil {
+			return err
+		}
+
+		_, err = pool.Exec(ctx, `
+			INSERT INTO profiles (user_id, full_name, phone, gender, emergency_contact_name, emergency_contact_phone, tshirt_size)
+			VALUES ($1, $2, '+855 12 345 678', 'OTHER', 'Emergency Contact', '+855 98 765 432', 'L')
+			ON CONFLICT (user_id) DO UPDATE SET
+				full_name = EXCLUDED.full_name,
+				updated_at = now()`, userID, u.fullName)
+		if err != nil {
+			return err
+		}
+
+		log.Printf("seeded user %q (role=%s, password=%s)", u.email, u.role, u.password)
+	}
+
 	return nil
 }
