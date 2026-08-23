@@ -33,12 +33,30 @@ Full per-phase detail, design rationale, and what was explicitly deferred is in 
 
 ## What's NOT built yet
 
-- **Next.js frontend** — nothing started. This is the natural next phase per the original roadmap (public site, runner dashboard, admin dashboard).
 - **Real payment provider** — `internal/payments.MockProvider` auto-succeeds; a real Cambodian gateway is a dedicated later phase per the original plan, behind the existing `Provider` interface.
 - **Cloudflare R2** (image/asset storage) — env vars are placeholder-commented in `.env.example`, nothing wired.
 - **CI/CD** (GitHub Actions) — not set up.
 - **Production deployment** — no Dockerfile hardening pass, no Vercel/container-platform config yet.
 - Known gap flagged during Phase 5: `check_ins.staff_user_id` has no `ON DELETE` behavior, so a staff account that's ever performed a check-in can't be hard-deleted. Worth a soft-delete approach whenever user management gets built out.
+
+## Phase 7: Next.js Frontend & Admin Panel (in progress)
+
+Frontend built with Next.js, TypeScript, and Tailwind CSS. Key pages implemented:
+
+- **Public & Participant Pages**:
+  - **Auth**: Login (`/auth/login`) and Register (`/auth/register`) with API integration
+  - **Events**: Events listing (`/events`) with status badges and registration CTA
+  - **Event Register**: Dynamic event registration (`/events/[slug]`) per event
+  - **Dashboard**: User dashboard (`/dashboard`) showing registrations, profile, and organizer shortcut
+
+- **Admin Panel (`/admin`)**:
+  - **Dashboard Overview (`/admin`)**: Metrics (total events, active registrations, ticket revenue, check-in count), quick actions, active events breakdown, and recent registrations.
+  - **Check-in Station (`/admin/checkin`)**: Race-day QR scanner with live camera feed (`html5-qrcode`), continuous USB barcode / text search input, Web Audio API sound synthesis (success chime, already-checked-in warning, error tone), and real-time live check-in tally.
+  - **Events Management (`/admin/events`)**: Events table with status filters (`Draft`, `Open & Live`, `Published`, `Closed/Done`), draft deletion, create wizard (`/admin/events/new`), and editor (`/admin/events/[id]/edit`) with status transition controls (`DRAFT → PUBLISHED → REGISTRATION_OPEN → REGISTRATION_CLOSED → COMPLETED → ARCHIVED` / `CANCELLED`).
+  - **Registrations & Attendee Roster (`/admin/registrations`)**: Multi-parameter search & filtering (by event, category, status), participant detail drawer with contact info & emergency snapshot, and one-click CSV export for timing chips/bib assignment.
+  - **User & Staff RBAC Management (`/admin/users`)**: Super Admin directory with role assignment dropdown (`USER`, `STAFF`, `ADMIN`, `SUPER_ADMIN`).
+  - **System Audit Trail (`/admin/audit-logs`)**: Activity log table tracking sensitive actions, state changes, actor IDs, and timestamps.
+  - **Role-Guarded Navigation (`AdminLayout`)**: Sidebar and header navigation with dynamic role permission gating and user profile menu.
 
 ## How to run it locally
 
