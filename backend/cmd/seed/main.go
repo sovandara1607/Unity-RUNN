@@ -86,11 +86,12 @@ func run() error {
 		}
 	}
 
+	// price_cents is USD cents: 1500 = $15.00, 2500 = $25.00.
 	_, err = tx.Exec(ctx, `
 		INSERT INTO event_categories (event_id, name, distance, price_cents, capacity, registration_deadline, status)
 		VALUES
-			($1, '5K', '5K', 500000, 300, $2, 'OPEN'),
-			($1, '10K', '10K', 800000, 200, $2, 'OPEN'),
+			($1, '5K', '5K', 1500, 300, $2, 'OPEN'),
+			($1, '10K', '10K', 2500, 200, $2, 'OPEN'),
 			($1, 'Fun Run', '3K', 0, 500, $2, 'OPEN')`, eventID, categoryDeadline)
 	if err != nil {
 		return err

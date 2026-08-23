@@ -58,11 +58,24 @@ type eventsReader interface {
 	GetCategoryByID(ctx context.Context, id uuid.UUID) (*events.EventCategory, error)
 }
 
+// RegistrationNotifier is implemented by internal/notifications
+// (wired in from main.go) to send registration-related emails. The
+// interface lives here, in the consumer package, so registrations
+// never imports notifications — same pattern as auditlog in
+// checkin/service.go. Nil-safe: a Service built without a notifier
+// (e.g. in unit tests) simply doesn't send anything.
+type RegistrationNotifier interface {
+	NotifyRegistrationConfirmed(ctx context.Context, reg Registration)
+	NotifyPaymentConfirmed(ctx context.Context, reg Registration, amountCents int)
+	NotifyRegistrationCancelled(ctx context.Context, reg Registration)
+}
+
 // Service implements registration business rules.
 type Service struct {
 	repo       regRepository
 	eventsRepo eventsReader
 	provider   payments.Provider
+	notifier   RegistrationNotifier
 
 	// locker, availCache, and rateLimiter are optional (nil-safe) —
 	// unit tests can omit them to exercise the service without Redis;
@@ -74,13 +87,15 @@ type Service struct {
 	now func() time.Time
 }
 
-// NewService builds a Service.
+// NewService builds a Service. notifier may be nil (no emails sent —
+// used by unit tests).
 func NewService(repo regRepository, eventsRepo eventsReader, provider payments.Provider,
-	locker *Locker, availCache *AvailabilityCache, rateLimiter *RateLimiter) *Service {
+	locker *Locker, availCache *AvailabilityCache, rateLimiter *RateLimiter, notifier RegistrationNotifier) *Service {
 	return &Service{
 		repo:        repo,
 		eventsRepo:  eventsRepo,
 		provider:    provider,
+		notifier:    notifier,
 		locker:      locker,
 		availCache:  availCache,
 		rateLimiter: rateLimiter,
@@ -222,6 +237,10 @@ func (s *Service) registerFree(ctx context.Context, userID, eventID, categoryID 
 		return nil, err
 	}
 
+	if s.notifier != nil {
+		s.notifier.NotifyRegistrationConfirmed(ctx, res.Registration)
+	}
+
 	return &RegisterResult{Registration: res.Registration, TicketToken: rawToken}, nil
 }
 
@@ -263,6 +282,11 @@ func (s *Service) registerPaid(ctx context.Context, userID, eventID, categoryID 
 	}, tokenHash)
 	if err != nil {
 		return nil, err
+	}
+
+	if s.notifier != nil {
+		s.notifier.NotifyRegistrationConfirmed(ctx, confirmed.Registration)
+		s.notifier.NotifyPaymentConfirmed(ctx, confirmed.Registration, priceCents)
 	}
 
 	return &RegisterResult{Registration: confirmed.Registration, TicketToken: rawToken}, nil
@@ -329,6 +353,9 @@ func (s *Service) Cancel(ctx context.Context, callerID uuid.UUID, callerRole aut
 
 	if s.availCache != nil {
 		_ = s.availCache.Invalidate(ctx, reg.EventCategoryID)
+	}
+	if s.notifier != nil {
+		s.notifier.NotifyRegistrationCancelled(ctx, *reg)
 	}
 	return nil
 }

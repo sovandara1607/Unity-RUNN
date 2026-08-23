@@ -87,7 +87,7 @@ func validCreateReq(name string) CreateEventRequest {
 }
 
 func TestService_Create_GeneratesSlugFromName(t *testing.T) {
-	svc := NewService(newFakeRepo())
+	svc := NewService(newFakeRepo(), nil)
 
 	e, err := svc.Create(context.Background(), validCreateReq("Unity Founders Run 2025"))
 	if err != nil {
@@ -102,7 +102,7 @@ func TestService_Create_GeneratesSlugFromName(t *testing.T) {
 }
 
 func TestService_Create_DuplicateSlugRejected(t *testing.T) {
-	svc := NewService(newFakeRepo())
+	svc := NewService(newFakeRepo(), nil)
 	ctx := context.Background()
 
 	req := validCreateReq("Founders Run")
@@ -119,7 +119,7 @@ func TestService_Create_DuplicateSlugRejected(t *testing.T) {
 
 func TestService_Update_StatusTransition(t *testing.T) {
 	repo := newFakeRepo()
-	svc := NewService(repo)
+	svc := NewService(repo, nil)
 	ctx := context.Background()
 
 	e, err := svc.Create(ctx, validCreateReq("Founders Run"))
@@ -139,7 +139,7 @@ func TestService_Update_StatusTransition(t *testing.T) {
 
 func TestService_Update_InvalidStatusTransitionRejected(t *testing.T) {
 	repo := newFakeRepo()
-	svc := NewService(repo)
+	svc := NewService(repo, nil)
 	ctx := context.Background()
 
 	e, err := svc.Create(ctx, validCreateReq("Founders Run"))
@@ -157,7 +157,7 @@ func TestService_Update_InvalidStatusTransitionRejected(t *testing.T) {
 
 func TestService_Delete_OnlyAllowedWhileDraft(t *testing.T) {
 	repo := newFakeRepo()
-	svc := NewService(repo)
+	svc := NewService(repo, nil)
 	ctx := context.Background()
 
 	e, err := svc.Create(ctx, validCreateReq("Founders Run"))
@@ -177,7 +177,7 @@ func TestService_Delete_OnlyAllowedWhileDraft(t *testing.T) {
 
 func TestService_Delete_AllowedWhileDraft(t *testing.T) {
 	repo := newFakeRepo()
-	svc := NewService(repo)
+	svc := NewService(repo, nil)
 	ctx := context.Background()
 
 	e, err := svc.Create(ctx, validCreateReq("Founders Run"))
@@ -196,7 +196,7 @@ func TestService_Delete_AllowedWhileDraft(t *testing.T) {
 
 func TestService_GetDetailBySlug_HidesNonPublicStatusFromPublic(t *testing.T) {
 	repo := newFakeRepo()
-	svc := NewService(repo)
+	svc := NewService(repo, nil)
 	ctx := context.Background()
 
 	e, err := svc.Create(ctx, validCreateReq("Founders Run")) // starts DRAFT
@@ -223,5 +223,109 @@ func TestSlugify(t *testing.T) {
 		if got := slugify(input); got != want {
 			t.Errorf("slugify(%q) = %q, want %q", input, got, want)
 		}
+	}
+}
+
+// fakeEventNotifier records which notify calls fired.
+type fakeEventNotifier struct {
+	updated       []Event
+	updatedFields [][]string
+	cancelled     []Event
+}
+
+func (f *fakeEventNotifier) NotifyEventUpdated(ctx context.Context, ev Event, changedFields []string) {
+	f.updated = append(f.updated, ev)
+	f.updatedFields = append(f.updatedFields, changedFields)
+}
+
+func (f *fakeEventNotifier) NotifyEventCancelled(ctx context.Context, ev Event) {
+	f.cancelled = append(f.cancelled, ev)
+}
+
+func TestService_Update_NotifiesOnDateChange(t *testing.T) {
+	repo := newFakeRepo()
+	notifier := &fakeEventNotifier{}
+	svc := NewService(repo, notifier)
+	ctx := context.Background()
+
+	e, err := svc.Create(ctx, validCreateReq("Founders Run"))
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	newDate := "2026-06-01"
+	if _, err := svc.Update(ctx, e.ID, UpdateEventRequest{EventDate: &newDate}); err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+
+	if len(notifier.updated) != 1 {
+		t.Fatalf("updated notifications = %d, want 1", len(notifier.updated))
+	}
+	if len(notifier.cancelled) != 0 {
+		t.Errorf("cancelled notifications = %d, want 0", len(notifier.cancelled))
+	}
+	if len(notifier.updatedFields[0]) == 0 {
+		t.Error("expected changed fields to be non-empty")
+	}
+}
+
+func TestService_Update_NoNotificationForUnrelatedFieldChange(t *testing.T) {
+	repo := newFakeRepo()
+	notifier := &fakeEventNotifier{}
+	svc := NewService(repo, notifier)
+	ctx := context.Background()
+
+	e, err := svc.Create(ctx, validCreateReq("Founders Run"))
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	newDescription := "Updated description text"
+	if _, err := svc.Update(ctx, e.ID, UpdateEventRequest{Description: &newDescription}); err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+
+	if len(notifier.updated) != 0 {
+		t.Errorf("updated notifications = %d, want 0 (description isn't a notify-worthy field)", len(notifier.updated))
+	}
+}
+
+func TestService_Update_NotifiesCancellationNotUpdate(t *testing.T) {
+	repo := newFakeRepo()
+	notifier := &fakeEventNotifier{}
+	svc := NewService(repo, notifier)
+	ctx := context.Background()
+
+	e, err := svc.Create(ctx, validCreateReq("Founders Run")) // starts DRAFT
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	cancelled := StatusCancelled
+	if _, err := svc.Update(ctx, e.ID, UpdateEventRequest{Status: &cancelled}); err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+
+	if len(notifier.cancelled) != 1 {
+		t.Errorf("cancelled notifications = %d, want 1", len(notifier.cancelled))
+	}
+	if len(notifier.updated) != 0 {
+		t.Errorf("updated notifications = %d, want 0 (cancellation takes priority)", len(notifier.updated))
+	}
+}
+
+func TestService_Update_NilNotifierIsSafe(t *testing.T) {
+	repo := newFakeRepo()
+	svc := NewService(repo, nil)
+	ctx := context.Background()
+
+	e, err := svc.Create(ctx, validCreateReq("Founders Run"))
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	newDate := "2026-06-01"
+	if _, err := svc.Update(ctx, e.ID, UpdateEventRequest{EventDate: &newDate}); err != nil {
+		t.Fatalf("Update() with nil notifier error = %v, want nil", err)
 	}
 }

@@ -1,12 +1,12 @@
-// Command server is the Unity Run Club API entrypoint. This phase
-// wires up configuration, logging, PostgreSQL/Redis connections, and
-// the HTTP server with health/readiness endpoints only — business
-// domains are added in later phases.
+// Command server is the Unity Run Club API entrypoint. It wires up
+// configuration, logging, PostgreSQL/Redis connections, every
+// business domain, and the HTTP server.
 package main
 
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -19,9 +19,11 @@ import (
 	"github.com/unity-run-club/api/internal/checkin"
 	"github.com/unity-run-club/api/internal/config"
 	"github.com/unity-run-club/api/internal/database"
+	"github.com/unity-run-club/api/internal/email"
 	"github.com/unity-run-club/api/internal/events"
 	apphttp "github.com/unity-run-club/api/internal/http"
 	"github.com/unity-run-club/api/internal/logger"
+	"github.com/unity-run-club/api/internal/notifications"
 	"github.com/unity-run-club/api/internal/payments"
 	"github.com/unity-run-club/api/internal/redisclient"
 	"github.com/unity-run-club/api/internal/registrations"
@@ -75,11 +77,21 @@ func run() error {
 	authSvc := auth.NewService(authRepo, tokens, cfg.BcryptCost, cfg.RefreshTokenTTL)
 	authHandler := auth.NewHandler(authSvc, cfg.RefreshTokenTTL, cfg.AppEnv != "development")
 
+	// notifications wiring comes before events/registrations: both of
+	// those define their own notifier interfaces (no import of
+	// notifications), and notifications.Service implements them —
+	// interface-in-consumer, implementation-in-producer, wired here.
+	notifRepo := notifications.NewRepository(db.Pool)
+	notifQueue := notifications.NewQueue(redisClient.Raw())
+	notifSvc := notifications.NewService(notifRepo, notifQueue, log)
+
 	eventsRepo := events.NewRepository(db.Pool)
-	eventsSvc := events.NewService(eventsRepo)
+	regRepo := registrations.NewRepository(db.Pool)
+
+	eventNotifier := notifications.NewEventNotifier(notifSvc, regRepo, log)
+	eventsSvc := events.NewService(eventsRepo, eventNotifier)
 	eventsHandler := events.NewHandler(eventsSvc)
 
-	regRepo := registrations.NewRepository(db.Pool)
 	regLocker := registrations.NewLocker(redisClient.Raw(), registrationLockTTL)
 	regAvailCache := registrations.NewAvailabilityCache(redisClient.Raw(), availabilityCacheTTL)
 	regRateLimiter := registrations.NewRateLimiter(redisClient.Raw(), registrationRateLimit, registrationRateWindow)
@@ -91,7 +103,8 @@ func run() error {
 			"detail", "no real payment gateway is wired yet; all paid registrations will auto-succeed")
 	}
 	paymentProvider := payments.NewMockProvider()
-	regSvc := registrations.NewService(regRepo, eventsRepo, paymentProvider, regLocker, regAvailCache, regRateLimiter)
+	regNotifier := notifications.NewRegistrationNotifier(notifSvc)
+	regSvc := registrations.NewService(regRepo, eventsRepo, paymentProvider, regLocker, regAvailCache, regRateLimiter, regNotifier)
 	regHandler := registrations.NewHandler(regSvc)
 
 	auditRepo := auditlog.NewRepository(db.Pool)
@@ -102,6 +115,17 @@ func run() error {
 	checkinHandler := checkin.NewHandler(checkinSvc)
 
 	adminHandler := admin.NewHandler(regSvc)
+
+	emailSender := buildEmailSender(cfg, log)
+	notifWorker := notifications.NewWorker(notifRepo, notifQueue, regRepo, eventsRepo, emailSender, log,
+		cfg.NotificationSweepInterval, cfg.NotificationMaxAttempts)
+	reminderScheduler := notifications.NewReminderScheduler(notifSvc, eventsRepo, regRepo, log,
+		cfg.ReminderPollInterval, cfg.ReminderWindow)
+
+	backgroundCtx, stopBackground := context.WithCancel(context.Background())
+	defer stopBackground()
+	go notifWorker.Run(backgroundCtx)
+	go reminderScheduler.Run(backgroundCtx)
 
 	router := apphttp.NewRouter(apphttp.Deps{
 		Logger:               log,
@@ -151,4 +175,26 @@ func run() error {
 	}
 
 	return nil
+}
+
+// buildEmailSender returns a real SMTPSender when SMTP is configured,
+// or a NoopSender (logs instead of sending) otherwise — same
+// dev-safe-default precedent as payments.MockProvider. Production
+// without SMTP configured is allowed to start (emails just won't
+// send) but logs a warning, same pattern as the mock payment provider.
+func buildEmailSender(cfg *config.Config, log *slog.Logger) email.Sender {
+	if cfg.SMTPHost == "" {
+		if cfg.AppEnv == "production" {
+			log.Warn("smtp_not_configured_in_production",
+				"detail", "SMTP_HOST is unset; emails will be logged, not sent")
+		}
+		return email.NewNoopSender(log)
+	}
+
+	sender, err := email.NewSMTPSender(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUser, cfg.SMTPPassword, cfg.SMTPFrom)
+	if err != nil {
+		log.Error("smtp_sender_init_failed", "error", err)
+		return email.NewNoopSender(log)
+	}
+	return sender
 }

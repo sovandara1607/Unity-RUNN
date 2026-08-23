@@ -44,7 +44,7 @@ func newTestRouter(h *Handler, tokens *auth.TokenIssuer) http.Handler {
 
 func TestHandler_GetBySlug_HiddenForPublicWhenDraft(t *testing.T) {
 	repo := newFakeRepo()
-	svc := NewService(repo)
+	svc := NewService(repo, nil)
 	h := NewHandler(svc)
 	tokens := newTestTokens()
 	router := newTestRouter(h, tokens)
@@ -65,7 +65,7 @@ func TestHandler_GetBySlug_HiddenForPublicWhenDraft(t *testing.T) {
 
 func TestHandler_GetBySlug_VisibleForStaff(t *testing.T) {
 	repo := newFakeRepo()
-	svc := NewService(repo)
+	svc := NewService(repo, nil)
 	h := NewHandler(svc)
 	tokens := newTestTokens()
 	router := newTestRouter(h, tokens)
@@ -88,7 +88,7 @@ func TestHandler_GetBySlug_VisibleForStaff(t *testing.T) {
 func TestHandler_Create_RequiresAuth(t *testing.T) {
 	repo := newFakeRepo()
 	tokens := newTestTokens()
-	router := newTestRouter(NewHandler(NewService(repo)), tokens)
+	router := newTestRouter(NewHandler(NewService(repo, nil)), tokens)
 
 	body, _ := json.Marshal(validCreateReq("Founders Run"))
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/events/", bytes.NewReader(body))
@@ -103,7 +103,7 @@ func TestHandler_Create_RequiresAuth(t *testing.T) {
 func TestHandler_Create_InsufficientRoleForbidden(t *testing.T) {
 	repo := newFakeRepo()
 	tokens := newTestTokens()
-	router := newTestRouter(NewHandler(NewService(repo)), tokens)
+	router := newTestRouter(NewHandler(NewService(repo, nil)), tokens)
 
 	body, _ := json.Marshal(validCreateReq("Founders Run"))
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/events/", bytes.NewReader(body))
@@ -119,7 +119,7 @@ func TestHandler_Create_InsufficientRoleForbidden(t *testing.T) {
 func TestHandler_Create_ValidationFailure(t *testing.T) {
 	repo := newFakeRepo()
 	tokens := newTestTokens()
-	router := newTestRouter(NewHandler(NewService(repo)), tokens)
+	router := newTestRouter(NewHandler(NewService(repo, nil)), tokens)
 
 	// Missing required fields (name, event_date, start_time).
 	body, _ := json.Marshal(map[string]string{})
@@ -136,7 +136,7 @@ func TestHandler_Create_ValidationFailure(t *testing.T) {
 func TestHandler_Create_Success(t *testing.T) {
 	repo := newFakeRepo()
 	tokens := newTestTokens()
-	router := newTestRouter(NewHandler(NewService(repo)), tokens)
+	router := newTestRouter(NewHandler(NewService(repo, nil)), tokens)
 
 	body, _ := json.Marshal(validCreateReq("Founders Run"))
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/events/", bytes.NewReader(body))
@@ -152,7 +152,7 @@ func TestHandler_Create_Success(t *testing.T) {
 func TestHandler_Create_DuplicateSlugConflict(t *testing.T) {
 	repo := newFakeRepo()
 	tokens := newTestTokens()
-	router := newTestRouter(NewHandler(NewService(repo)), tokens)
+	router := newTestRouter(NewHandler(NewService(repo, nil)), tokens)
 	adminBearer := "Bearer " + bearerToken(t, tokens, auth.RoleAdmin)
 
 	req1 := validCreateReq("Founders Run")

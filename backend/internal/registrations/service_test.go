@@ -199,8 +199,36 @@ func (f *fakePaymentProvider) RefundPayment(ctx context.Context, ref string, amo
 func newTestSetup(provider *fakePaymentProvider) (*Service, *fakeRegRepo, *fakeEventsReader) {
 	repo := newFakeRegRepo()
 	er := newFakeEventsReader()
-	svc := NewService(repo, er, provider, nil, nil, nil) // no Redis in unit tests
+	svc := NewService(repo, er, provider, nil, nil, nil, nil) // no Redis/notifier in unit tests
 	return svc, repo, er
+}
+
+// fakeRegistrationNotifier records which notify calls fired, for
+// tests asserting the right trigger fires at the right point.
+type fakeRegistrationNotifier struct {
+	confirmed []Registration
+	paid      []Registration
+	cancelled []Registration
+}
+
+func (f *fakeRegistrationNotifier) NotifyRegistrationConfirmed(ctx context.Context, reg Registration) {
+	f.confirmed = append(f.confirmed, reg)
+}
+
+func (f *fakeRegistrationNotifier) NotifyPaymentConfirmed(ctx context.Context, reg Registration, amountCents int) {
+	f.paid = append(f.paid, reg)
+}
+
+func (f *fakeRegistrationNotifier) NotifyRegistrationCancelled(ctx context.Context, reg Registration) {
+	f.cancelled = append(f.cancelled, reg)
+}
+
+func newTestSetupWithNotifier(provider *fakePaymentProvider) (*Service, *fakeEventsReader, *fakeRegistrationNotifier) {
+	repo := newFakeRegRepo()
+	er := newFakeEventsReader()
+	notifier := &fakeRegistrationNotifier{}
+	svc := NewService(repo, er, provider, nil, nil, nil, notifier)
+	return svc, er, notifier
 }
 
 func seedEventAndCategory(er *fakeEventsReader, priceCents, capacity int) (uuid.UUID, uuid.UUID) {
@@ -399,5 +427,70 @@ func TestService_GetByID_StaffCanViewAnyRegistration(t *testing.T) {
 
 	if _, err := svc.GetByID(context.Background(), uuid.New(), auth.RoleStaff, result.Registration.ID); err != nil {
 		t.Fatalf("GetByID() by staff error = %v", err)
+	}
+}
+
+func TestService_Register_Free_NotifiesConfirmedOnly(t *testing.T) {
+	svc, er, notifier := newTestSetupWithNotifier(&fakePaymentProvider{status: payments.StatusSucceeded})
+	eventID, categoryID := seedEventAndCategory(er, 0, 10)
+
+	if _, err := svc.Register(context.Background(), uuid.New(), eventID, validRegisterReq(categoryID)); err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
+
+	if len(notifier.confirmed) != 1 {
+		t.Errorf("confirmed notifications = %d, want 1", len(notifier.confirmed))
+	}
+	if len(notifier.paid) != 0 {
+		t.Errorf("payment notifications = %d, want 0 (free category)", len(notifier.paid))
+	}
+}
+
+func TestService_Register_Paid_NotifiesConfirmedAndPaid(t *testing.T) {
+	svc, er, notifier := newTestSetupWithNotifier(&fakePaymentProvider{status: payments.StatusSucceeded})
+	eventID, categoryID := seedEventAndCategory(er, 5000, 10)
+
+	if _, err := svc.Register(context.Background(), uuid.New(), eventID, validRegisterReq(categoryID)); err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
+
+	if len(notifier.confirmed) != 1 {
+		t.Errorf("confirmed notifications = %d, want 1", len(notifier.confirmed))
+	}
+	if len(notifier.paid) != 1 {
+		t.Errorf("payment notifications = %d, want 1", len(notifier.paid))
+	}
+}
+
+func TestService_Register_PaymentFailure_NoNotification(t *testing.T) {
+	svc, er, notifier := newTestSetupWithNotifier(&fakePaymentProvider{status: payments.StatusFailed})
+	eventID, categoryID := seedEventAndCategory(er, 5000, 10)
+
+	if _, err := svc.Register(context.Background(), uuid.New(), eventID, validRegisterReq(categoryID)); err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
+
+	if len(notifier.confirmed) != 0 || len(notifier.paid) != 0 {
+		t.Errorf("expected no notifications for a payment that stayed PENDING, got confirmed=%d paid=%d",
+			len(notifier.confirmed), len(notifier.paid))
+	}
+}
+
+func TestService_Cancel_NotifiesCancellation(t *testing.T) {
+	svc, er, notifier := newTestSetupWithNotifier(&fakePaymentProvider{status: payments.StatusSucceeded})
+	eventID, categoryID := seedEventAndCategory(er, 0, 10)
+	userID := uuid.New()
+
+	result, err := svc.Register(context.Background(), userID, eventID, validRegisterReq(categoryID))
+	if err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
+
+	if err := svc.Cancel(context.Background(), userID, auth.RoleUser, result.Registration.ID); err != nil {
+		t.Fatalf("Cancel() error = %v", err)
+	}
+
+	if len(notifier.cancelled) != 1 {
+		t.Errorf("cancelled notifications = %d, want 1", len(notifier.cancelled))
 	}
 }

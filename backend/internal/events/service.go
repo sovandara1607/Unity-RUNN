@@ -34,14 +34,27 @@ type eventRepository interface {
 	Delete(ctx context.Context, id uuid.UUID) error
 }
 
-// Service implements event business rules on top of a repository.
-type Service struct {
-	repo eventRepository
+// EventNotifier is implemented by internal/notifications (wired in
+// from main.go) to email confirmed registrants when an event's key
+// details change or it's cancelled. The interface lives here, in the
+// consumer package, so events never imports notifications or
+// registrations — same pattern as RegistrationNotifier in
+// internal/registrations/service.go. Nil-safe.
+type EventNotifier interface {
+	NotifyEventUpdated(ctx context.Context, ev Event, changedFields []string)
+	NotifyEventCancelled(ctx context.Context, ev Event)
 }
 
-// NewService builds a Service backed by repo.
-func NewService(repo eventRepository) *Service {
-	return &Service{repo: repo}
+// Service implements event business rules on top of a repository.
+type Service struct {
+	repo     eventRepository
+	notifier EventNotifier
+}
+
+// NewService builds a Service backed by repo. notifier may be nil (no
+// emails sent — used by unit tests).
+func NewService(repo eventRepository, notifier EventNotifier) *Service {
+	return &Service{repo: repo, notifier: notifier}
 }
 
 const (
@@ -139,6 +152,10 @@ func (s *Service) Update(ctx context.Context, id uuid.UUID, req UpdateEventReque
 		return nil, err
 	}
 
+	// Snapshot before mutation, to detect what actually changed for
+	// the notifier — compared after the fields below are applied.
+	before := *e
+
 	if req.Slug != nil && *req.Slug != e.Slug {
 		taken, err := s.repo.SlugExists(ctx, *req.Slug, &id)
 		if err != nil {
@@ -201,7 +218,39 @@ func (s *Service) Update(ctx context.Context, id uuid.UUID, req UpdateEventReque
 	if err := s.repo.Update(ctx, e); err != nil {
 		return nil, err
 	}
+
+	s.notifyOfChange(ctx, before, *e)
+
 	return e, nil
+}
+
+// notifyOfChange compares before/after and fires the appropriate
+// notifier call, if any. Cancellation takes priority over a generic
+// update notice — a registrant who just had their event cancelled
+// shouldn't also get an "updated" email for the same transition.
+func (s *Service) notifyOfChange(ctx context.Context, before, after Event) {
+	if s.notifier == nil {
+		return
+	}
+
+	if before.Status != StatusCancelled && after.Status == StatusCancelled {
+		s.notifier.NotifyEventCancelled(ctx, after)
+		return
+	}
+
+	var changed []string
+	if !before.EventDate.Equal(after.EventDate) {
+		changed = append(changed, "event date")
+	}
+	if !before.StartTime.Equal(after.StartTime) {
+		changed = append(changed, "start time")
+	}
+	if before.Location != after.Location {
+		changed = append(changed, "location")
+	}
+	if len(changed) > 0 {
+		s.notifier.NotifyEventUpdated(ctx, after, changed)
+	}
 }
 
 // Delete removes an event, but only while it's still in DRAFT status.

@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html>
+<body style="font-family: sans-serif; color: #1a1a1a;">
+  <h1>Payment received</h1>
+  <p>Hi {{.FullName}},</p>
+  <p>We've received your payment for <strong>{{.EventName}}</strong> ({{.CategoryName}}).</p>
+  <ul>
+    <li>Registration number: <strong>{{.RegistrationNumber}}</strong></li>
+    <li>Amount: {{.AmountFormatted}}</li>
+  </ul>
+  <p>Thanks for running with us!</p>
+  <p>— Unity Run Club</p>
+</body>
+</html>

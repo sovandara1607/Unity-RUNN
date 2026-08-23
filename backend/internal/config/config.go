@@ -32,6 +32,20 @@ type Config struct {
 	RefreshTokenTTL time.Duration
 	BcryptCost      int
 
+	// SMTP is optional: empty SMTPHost means emails are logged, not
+	// sent (see internal/email.NoopSender) — for local development
+	// without real Gmail credentials. Required in production.
+	SMTPHost     string
+	SMTPPort     int
+	SMTPUser     string
+	SMTPPassword string
+	SMTPFrom     string
+
+	ReminderWindow            time.Duration
+	ReminderPollInterval      time.Duration
+	NotificationSweepInterval time.Duration
+	NotificationMaxAttempts   int
+
 	ShutdownTimeout time.Duration
 }
 
@@ -40,15 +54,20 @@ type Config struct {
 // variable is missing or malformed.
 func Load() (*Config, error) {
 	cfg := &Config{
-		AppEnv:          getEnv("APP_ENV", "development"),
-		Port:            getEnv("PORT", "8080"),
-		LogLevel:        getEnv("LOG_LEVEL", "info"),
-		DatabaseMaxConn: 10,
-		RedisDB:         0,
-		AccessTokenTTL:  15 * time.Minute,
-		RefreshTokenTTL: 30 * 24 * time.Hour,
-		BcryptCost:      12,
-		ShutdownTimeout: 10 * time.Second,
+		AppEnv:                    getEnv("APP_ENV", "development"),
+		Port:                      getEnv("PORT", "8080"),
+		LogLevel:                  getEnv("LOG_LEVEL", "info"),
+		DatabaseMaxConn:           10,
+		RedisDB:                   0,
+		AccessTokenTTL:            15 * time.Minute,
+		RefreshTokenTTL:           30 * 24 * time.Hour,
+		BcryptCost:                12,
+		SMTPPort:                  587,
+		ReminderWindow:            24 * time.Hour,
+		ReminderPollInterval:      15 * time.Minute,
+		NotificationSweepInterval: 30 * time.Second,
+		NotificationMaxAttempts:   5,
+		ShutdownTimeout:           10 * time.Second,
 	}
 
 	dbURL, err := requireEnv("DATABASE_URL")
@@ -108,6 +127,51 @@ func Load() (*Config, error) {
 
 	origins := getEnv("CORS_ALLOWED_ORIGINS", "http://localhost:3000")
 	cfg.CORSAllowedOrigins = splitAndTrim(origins)
+
+	cfg.SMTPHost = os.Getenv("SMTP_HOST")
+	cfg.SMTPUser = os.Getenv("SMTP_USER")
+	cfg.SMTPPassword = os.Getenv("SMTP_PASSWORD")
+	cfg.SMTPFrom = os.Getenv("SMTP_FROM")
+
+	if v := os.Getenv("SMTP_PORT"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return nil, fmt.Errorf("config: invalid SMTP_PORT %q: %w", v, err)
+		}
+		cfg.SMTPPort = n
+	}
+
+	if v := os.Getenv("REMINDER_WINDOW"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			return nil, fmt.Errorf("config: invalid REMINDER_WINDOW %q: %w", v, err)
+		}
+		cfg.ReminderWindow = d
+	}
+
+	if v := os.Getenv("REMINDER_POLL_INTERVAL"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			return nil, fmt.Errorf("config: invalid REMINDER_POLL_INTERVAL %q: %w", v, err)
+		}
+		cfg.ReminderPollInterval = d
+	}
+
+	if v := os.Getenv("NOTIFICATION_SWEEP_INTERVAL"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			return nil, fmt.Errorf("config: invalid NOTIFICATION_SWEEP_INTERVAL %q: %w", v, err)
+		}
+		cfg.NotificationSweepInterval = d
+	}
+
+	if v := os.Getenv("NOTIFICATION_MAX_ATTEMPTS"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return nil, fmt.Errorf("config: invalid NOTIFICATION_MAX_ATTEMPTS %q: %w", v, err)
+		}
+		cfg.NotificationMaxAttempts = n
+	}
 
 	return cfg, nil
 }
