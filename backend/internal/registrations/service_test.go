@@ -15,12 +15,13 @@ import (
 
 // fakeRegRepo is an in-memory regRepository for service unit tests.
 type fakeRegRepo struct {
-	regs     map[uuid.UUID]*Registration
-	payments []Payment
+	regs         map[uuid.UUID]*Registration
+	payments     []Payment
+	ticketHashes map[string]uuid.UUID
 }
 
 func newFakeRegRepo() *fakeRegRepo {
-	return &fakeRegRepo{regs: map[uuid.UUID]*Registration{}}
+	return &fakeRegRepo{regs: map[uuid.UUID]*Registration{}, ticketHashes: map[string]uuid.UUID{}}
 }
 
 func (f *fakeRegRepo) HasActiveRegistration(ctx context.Context, userID, eventID uuid.UUID) (bool, error) {
@@ -65,6 +66,7 @@ func (f *fakeRegRepo) Create(ctx context.Context, p CreateParams) (*CreateResult
 	result := &CreateResult{Registration: *reg}
 	if p.Confirm {
 		result.Ticket = &Ticket{ID: uuid.New(), RegistrationID: reg.ID, TokenHash: p.TicketTokenHash}
+		f.ticketHashes[p.TicketTokenHash] = reg.ID
 	}
 	return result, nil
 }
@@ -76,7 +78,30 @@ func (f *fakeRegRepo) ConfirmWithPayment(ctx context.Context, registrationID uui
 	}
 	reg.Status = StatusConfirmed
 	f.payments = append(f.payments, *payment)
+	f.ticketHashes[ticketTokenHash] = reg.ID
 	return &CreateResult{Registration: *reg, Ticket: &Ticket{ID: uuid.New(), RegistrationID: reg.ID, TokenHash: ticketTokenHash}}, nil
+}
+
+func (f *fakeRegRepo) GetRegistrationIDByTicketTokenHash(ctx context.Context, tokenHash string) (uuid.UUID, error) {
+	id, ok := f.ticketHashes[tokenHash]
+	if !ok {
+		return uuid.Nil, ErrNotFound
+	}
+	return id, nil
+}
+
+func (f *fakeRegRepo) ListAll(ctx context.Context, filter AdminListFilter) ([]Registration, int, error) {
+	var out []Registration
+	for _, r := range f.regs {
+		if filter.EventID != nil && r.EventID != *filter.EventID {
+			continue
+		}
+		if filter.Status != nil && r.Status != *filter.Status {
+			continue
+		}
+		out = append(out, *r)
+	}
+	return out, len(out), nil
 }
 
 func (f *fakeRegRepo) CreatePayment(ctx context.Context, p *Payment) error {

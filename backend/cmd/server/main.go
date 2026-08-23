@@ -13,7 +13,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/unity-run-club/api/internal/admin"
+	"github.com/unity-run-club/api/internal/auditlog"
 	"github.com/unity-run-club/api/internal/auth"
+	"github.com/unity-run-club/api/internal/checkin"
 	"github.com/unity-run-club/api/internal/config"
 	"github.com/unity-run-club/api/internal/database"
 	"github.com/unity-run-club/api/internal/events"
@@ -91,6 +94,15 @@ func run() error {
 	regSvc := registrations.NewService(regRepo, eventsRepo, paymentProvider, regLocker, regAvailCache, regRateLimiter)
 	regHandler := registrations.NewHandler(regSvc)
 
+	auditRepo := auditlog.NewRepository(db.Pool)
+	auditSvc := auditlog.NewService(auditRepo, log)
+
+	checkinRepo := checkin.NewRepository(db.Pool)
+	checkinSvc := checkin.NewService(checkinRepo, regRepo, auditSvc)
+	checkinHandler := checkin.NewHandler(checkinSvc)
+
+	adminHandler := admin.NewHandler(regSvc)
+
 	router := apphttp.NewRouter(apphttp.Deps{
 		Logger:               log,
 		DB:                   db,
@@ -100,6 +112,8 @@ func run() error {
 		AuthHandler:          authHandler,
 		EventsHandler:        eventsHandler,
 		RegistrationsHandler: regHandler,
+		CheckinHandler:       checkinHandler,
+		AdminHandler:         adminHandler,
 	})
 
 	srv := apphttp.NewServer(":"+cfg.Port, router)

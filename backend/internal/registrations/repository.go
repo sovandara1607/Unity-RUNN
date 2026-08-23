@@ -217,6 +217,86 @@ func (r *Repository) GetByID(ctx context.Context, id uuid.UUID) (*Registration, 
 	return &reg, nil
 }
 
+// GetRegistrationIDByTicketTokenHash finds the registration a ticket
+// belongs to, by the SHA-256 hash of its raw QR token (see
+// internal/tokenhash — never the raw token). Used by
+// internal/checkin to resolve a scanned token to a registration
+// without checkin needing to know about the tickets table's schema.
+func (r *Repository) GetRegistrationIDByTicketTokenHash(ctx context.Context, tokenHash string) (uuid.UUID, error) {
+	var registrationID uuid.UUID
+	err := r.pool.QueryRow(ctx,
+		`SELECT registration_id FROM tickets WHERE token_hash = $1`, tokenHash).Scan(&registrationID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return uuid.Nil, ErrNotFound
+	}
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("registrations: get registration by ticket token: %w", err)
+	}
+	return registrationID, nil
+}
+
+// ListFilter narrows an admin ListAll query.
+type AdminListFilter struct {
+	EventID *uuid.UUID
+	Status  *Status
+	Limit   int
+	Offset  int
+}
+
+// ListAll returns registrations across all users (STAFF+ only,
+// enforced by the caller), optionally filtered by event/status, most
+// recent first, plus the total matching count for pagination.
+func (r *Repository) ListAll(ctx context.Context, filter AdminListFilter) ([]Registration, int, error) {
+	where := "WHERE 1=1"
+	args := []any{}
+	argN := 1
+
+	if filter.EventID != nil {
+		where += fmt.Sprintf(" AND event_id = $%d", argN)
+		args = append(args, *filter.EventID)
+		argN++
+	}
+	if filter.Status != nil {
+		where += fmt.Sprintf(" AND status = $%d", argN)
+		args = append(args, *filter.Status)
+		argN++
+	}
+
+	var total int
+	countQuery := "SELECT count(*) FROM registrations " + where
+	if err := r.pool.QueryRow(ctx, countQuery, args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("registrations: admin count: %w", err)
+	}
+
+	limit, offset := filter.Limit, filter.Offset
+	args = append(args, limit, offset)
+	query := fmt.Sprintf(`
+		SELECT id, registration_number, user_id, event_id, event_category_id, status,
+		       full_name, email, phone, date_of_birth, gender,
+		       emergency_contact_name, emergency_contact_phone, tshirt_size,
+		       created_at, updated_at
+		FROM registrations %s ORDER BY created_at DESC LIMIT $%d OFFSET $%d`, where, argN, argN+1)
+
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("registrations: admin list: %w", err)
+	}
+	defer rows.Close()
+
+	var out []Registration
+	for rows.Next() {
+		var reg Registration
+		if err := rows.Scan(&reg.ID, &reg.RegistrationNumber, &reg.UserID, &reg.EventID,
+			&reg.EventCategoryID, &reg.Status, &reg.FullName, &reg.Email, &reg.Phone,
+			&reg.DateOfBirth, &reg.Gender, &reg.EmergencyContactName, &reg.EmergencyContactPhone,
+			&reg.TshirtSize, &reg.CreatedAt, &reg.UpdatedAt); err != nil {
+			return nil, 0, fmt.Errorf("registrations: admin scan: %w", err)
+		}
+		out = append(out, reg)
+	}
+	return out, total, rows.Err()
+}
+
 // ListForUser returns all registrations belonging to userID, most
 // recent first.
 func (r *Repository) ListForUser(ctx context.Context, userID uuid.UUID) ([]Registration, error) {

@@ -11,7 +11,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/unity-run-club/api/internal/admin"
 	"github.com/unity-run-club/api/internal/auth"
+	"github.com/unity-run-club/api/internal/checkin"
 	"github.com/unity-run-club/api/internal/events"
 	"github.com/unity-run-club/api/internal/middleware"
 	"github.com/unity-run-club/api/internal/registrations"
@@ -37,6 +39,8 @@ type Deps struct {
 	AuthHandler          *auth.Handler
 	EventsHandler        *events.Handler
 	RegistrationsHandler *registrations.Handler
+	CheckinHandler       *checkin.Handler
+	AdminHandler         *admin.Handler
 
 	// ReadyTimeout bounds how long each dependency ping may take
 	// when handling /ready. Defaults to 2s if zero.
@@ -93,6 +97,14 @@ func NewRouter(deps Deps) http.Handler {
 			reg.Use(auth.RequireAuth(deps.Tokens, auth.RoleUser))
 			reg.Get("/{id}", deps.RegistrationsHandler.GetByID)
 			reg.Post("/{id}/cancel", deps.RegistrationsHandler.Cancel)
+		})
+
+		api.With(auth.RequireAuth(deps.Tokens, auth.RoleStaff)).Post("/check-in", deps.CheckinHandler.CheckIn)
+
+		api.Route("/admin", func(a chi.Router) {
+			a.Use(auth.RequireAuth(deps.Tokens, auth.RoleStaff))
+			a.Get("/registrations", deps.AdminHandler.ListRegistrations)
+			a.Get("/registrations/{id}", deps.AdminHandler.GetRegistration)
 		})
 	})
 

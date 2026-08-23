@@ -2,10 +2,6 @@ package registrations
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/base64"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"time"
@@ -15,6 +11,12 @@ import (
 	"github.com/unity-run-club/api/internal/auth"
 	"github.com/unity-run-club/api/internal/events"
 	"github.com/unity-run-club/api/internal/payments"
+	"github.com/unity-run-club/api/internal/tokenhash"
+)
+
+const (
+	defaultListLimit = 20
+	maxListLimit     = 100
 )
 
 // ErrInvalidCategory is returned when the given category doesn't
@@ -42,8 +44,10 @@ type regRepository interface {
 	CreatePayment(ctx context.Context, p *Payment) error
 	GetByID(ctx context.Context, id uuid.UUID) (*Registration, error)
 	ListForUser(ctx context.Context, userID uuid.UUID) ([]Registration, error)
+	ListAll(ctx context.Context, filter AdminListFilter) ([]Registration, int, error)
 	Cancel(ctx context.Context, id uuid.UUID) error
 	CountActive(ctx context.Context, categoryID uuid.UUID) (int, error)
+	GetRegistrationIDByTicketTokenHash(ctx context.Context, tokenHash string) (uuid.UUID, error)
 }
 
 // eventsReader is the read-only slice of the events domain this
@@ -282,6 +286,29 @@ func (s *Service) ListForUser(ctx context.Context, userID uuid.UUID) ([]Registra
 	return s.repo.ListForUser(ctx, userID)
 }
 
+// ListAll returns registrations across all users, for STAFF+ admin
+// views. Callers (the admin handler) are responsible for the role
+// check — this method trusts it's only reached by an authorized
+// caller, matching the thin-handler/service pattern used elsewhere.
+func (s *Service) ListAll(ctx context.Context, filter AdminListFilter) ([]Registration, int, error) {
+	if filter.Limit <= 0 {
+		filter.Limit = defaultListLimit
+	}
+	if filter.Limit > maxListLimit {
+		filter.Limit = maxListLimit
+	}
+	if filter.Offset < 0 {
+		filter.Offset = 0
+	}
+	return s.repo.ListAll(ctx, filter)
+}
+
+// FindRegistrationIDByTicketToken hashes rawToken and resolves it to
+// a registration ID. Used by internal/checkin.
+func (s *Service) FindRegistrationIDByTicketToken(ctx context.Context, rawToken string) (uuid.UUID, error) {
+	return s.repo.GetRegistrationIDByTicketTokenHash(ctx, tokenhash.Hash(rawToken))
+}
+
 // Cancel cancels a registration, if callerID owns it or callerRole is
 // STAFF+, freeing its capacity slot.
 func (s *Service) Cancel(ctx context.Context, callerID uuid.UUID, callerRole auth.Role, id uuid.UUID) error {
@@ -338,16 +365,13 @@ func (s *Service) GetAvailability(ctx context.Context, categoryID uuid.UUID) (*A
 }
 
 // generateTicketToken returns a cryptographically random raw QR token
-// and its SHA-256 hash for storage — never the raw value. Same
-// pattern as internal/auth's refresh tokens (kept separate rather
-// than a shared package for two small functions).
+// and its hash for storage — never the raw value. Uses
+// internal/tokenhash so internal/checkin verifies against the exact
+// same hashing scheme.
 func generateTicketToken() (raw, hash string, err error) {
-	buf := make([]byte, 32)
-	if _, err := rand.Read(buf); err != nil {
+	raw, err = tokenhash.GenerateRaw()
+	if err != nil {
 		return "", "", fmt.Errorf("registrations: generate ticket token: %w", err)
 	}
-	raw = base64.RawURLEncoding.EncodeToString(buf)
-	sum := sha256.Sum256([]byte(raw))
-	hash = hex.EncodeToString(sum[:])
-	return raw, hash, nil
+	return raw, tokenhash.Hash(raw), nil
 }
