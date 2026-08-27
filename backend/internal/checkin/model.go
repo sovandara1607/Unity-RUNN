@@ -1,6 +1,3 @@
-// Package checkin implements event-day QR check-in: resolving a
-// scanned ticket token to a registration, validating it, and
-// recording a check-in exactly once.
 package checkin
 
 import (
@@ -9,7 +6,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// CheckIn is a recorded check-in for one registration.
+// CheckIn is a recorded check-in for one registration
 type CheckIn struct {
 	ID             uuid.UUID `json:"id"`
 	RegistrationID uuid.UUID `json:"registration_id"`

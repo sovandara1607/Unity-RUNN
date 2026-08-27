@@ -70,10 +70,7 @@ func TestReminderScheduler_SecondPollDoesNotDuplicate(t *testing.T) {
 		ev.ID: {{ID: regID, UserID: uuid.New(), EventID: ev.ID, Email: "runner@unityrunclub.com", Status: registrations.StatusConfirmed}},
 	}}
 	eventLister := &fakeEventLister{events: []events.Event{ev}}
-
-	// dedupCreator simulates the real repository's unique-constraint
-	// behavior: a second Create for the same (type, entity_type,
-	// entity_id) returns ErrAlreadyExists.
+	// dedupCreator 
 	repo := &dedupCreator{seen: map[string]bool{}}
 	queue := &fakePusher{}
 	svc := NewService(repo, queue, discardLogger())

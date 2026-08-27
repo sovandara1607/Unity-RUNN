@@ -8,22 +8,48 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
-// fakePinger is a test double for Pinger.
+// fakePinger is a test double for Pinger
 type fakePinger struct {
 	err error
 }
 
+// TestFilesOnlyFS_DisablesDirectoryListing tests the FilesOnlyFS that disables directory listing
+func TestFilesOnlyFS_DisablesDirectoryListing(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "events"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "events", "poster.png"), []byte("png"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	secureFS := filesOnlyFS{root: http.Dir(root)}
+	if dir, err := secureFS.Open("/events"); err == nil {
+		_ = dir.Close()
+		t.Fatal("directory opened successfully; listing should be disabled")
+	}
+	file, err := secureFS.Open("/events/poster.png")
+	if err != nil {
+		t.Fatalf("open uploaded file: %v", err)
+	}
+	_ = file.Close()
+}
+
+// Ping pings the dependency
 func (f fakePinger) Ping(ctx context.Context) error {
 	return f.err
 }
 
+// discardLogger returns a logger that discards logs
 func discardLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
+// TestHealthHandler_AlwaysOK tests the HealthHandler that always returns OK
 func TestHealthHandler_AlwaysOK(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	rec := httptest.NewRecorder()
@@ -43,6 +69,7 @@ func TestHealthHandler_AlwaysOK(t *testing.T) {
 	}
 }
 
+// TestReadyHandler_AllDependenciesHealthy tests the ReadyHandler that all dependencies are healthy
 func TestReadyHandler_AllDependenciesHealthy(t *testing.T) {
 	deps := Deps{
 		Logger: discardLogger(),
@@ -71,6 +98,7 @@ func TestReadyHandler_AllDependenciesHealthy(t *testing.T) {
 	}
 }
 
+// TestReadyHandler_DependencyDown tests the ReadyHandler that a dependency is down
 func TestReadyHandler_DependencyDown(t *testing.T) {
 	deps := Deps{
 		Logger: discardLogger(),
@@ -102,6 +130,7 @@ func TestReadyHandler_DependencyDown(t *testing.T) {
 	}
 }
 
+// TestReadyHandler_DependencyNotConfigured tests the ReadyHandler that a dependency is not configured
 func TestReadyHandler_DependencyNotConfigured(t *testing.T) {
 	deps := Deps{
 		Logger: discardLogger(),

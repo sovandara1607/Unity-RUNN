@@ -1,0 +1,15 @@
+{{define "base"}}<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{{template "emailTitle" .}}</title></head>
+<body style="margin:0;background:#111111;color:#111111;font-family:'TT Norms Pro','Arial Narrow',Arial,sans-serif;">
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">{{template "preheader" .}}</div>
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#111111;"><tr><td align="center" style="padding:28px 12px;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;max-width:640px;">
+      <tr><td style="background:#d9ff00;width:10px;font-size:0;line-height:0;">&nbsp;</td><td style="background:#171717;padding:23px 26px;border-bottom:1px solid #343434;">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0"><tr><td style="color:#d9ff00;font-size:11px;font-weight:800;letter-spacing:2px;text-transform:uppercase;">URC / Race Control</td><td align="right" style="color:#a5a5a5;font-size:10px;font-weight:700;letter-spacing:1.6px;text-transform:uppercase;">Official Dispatch</td></tr></table>
+      </td></tr>
+      <tr><td colspan="2" style="background:#f8f8f6;padding:0;">{{template "emailContent" .}}</td></tr>
+      <tr><td style="background:#3155ff;width:10px;font-size:0;line-height:0;">&nbsp;</td><td style="background:#171717;padding:20px 26px;color:#858585;font-size:11px;line-height:1.6;"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0"><tr><td style="color:#f8f8f6;font-weight:800;letter-spacing:1px;text-transform:uppercase;">Unity Runn Club</td><td align="right">Phnom Penh / Cambodia</td></tr></table></td></tr>
+    </table>
+  </td></tr></table>
+</body></html>{{end}}

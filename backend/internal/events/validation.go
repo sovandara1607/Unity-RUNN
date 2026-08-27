@@ -8,7 +8,7 @@ import (
 
 var validate = validator.New(validator.WithRequiredStructEnabled())
 
-// CreateEventRequest is the payload for POST /api/v1/events.
+// CreateEventRequest is the payload for POST /api/v1/events
 type CreateEventRequest struct {
 	Name                string     `json:"name" validate:"required,max=200"`
 	Slug                string     `json:"slug" validate:"omitempty,max=200,slug"`
@@ -23,8 +23,7 @@ type CreateEventRequest struct {
 	RegistrationCloseAt *time.Time `json:"registration_close_at"`
 }
 
-// UpdateEventRequest is the payload for PATCH /api/v1/events/:id.
-// All fields are optional pointers; only non-nil fields are applied.
+// UpdateEventRequest is the payload for PATCH /api/v1/events/:id
 type UpdateEventRequest struct {
 	Name                *string    `json:"name" validate:"omitempty,max=200"`
 	Slug                *string    `json:"slug" validate:"omitempty,max=200,slug"`
@@ -35,11 +34,50 @@ type UpdateEventRequest struct {
 	Location            *string    `json:"location"`
 	Latitude            *float64   `json:"latitude" validate:"omitempty,min=-90,max=90"`
 	Longitude           *float64   `json:"longitude" validate:"omitempty,min=-180,max=180"`
+	ClearCoordinates    bool       `json:"clear_coordinates"`
 	RegistrationOpenAt  *time.Time `json:"registration_open_at"`
 	RegistrationCloseAt *time.Time `json:"registration_close_at"`
 	Status              *Status    `json:"status"`
 }
 
+// CreateCategoryRequest is the payload for POST /api/v1/events/:id/categories
+type CreateCategoryRequest struct {
+	Name                 string     `json:"name" validate:"required,max=100"`
+	Distance             string     `json:"distance" validate:"required,max=50"`
+	PriceCents           int        `json:"price_cents" validate:"min=0"`
+	Currency             string     `json:"currency" validate:"omitempty,oneof=USD KHR"`
+	Capacity             int        `json:"capacity" validate:"required,min=0"`
+	RegistrationDeadline *time.Time `json:"registration_deadline"`
+}
+
+// UpdateCategoryRequest is the payload for PATCH /api/v1/events/:id/categories/:categoryId
+type UpdateCategoryRequest struct {
+	Name                 *string    `json:"name" validate:"omitempty,max=100"`
+	Distance             *string    `json:"distance" validate:"omitempty,max=50"`
+	PriceCents           *int       `json:"price_cents" validate:"omitempty,min=0"`
+	Currency             *string    `json:"currency" validate:"omitempty,oneof=USD KHR"`
+	Capacity             *int       `json:"capacity" validate:"omitempty,min=0"`
+	RegistrationDeadline *time.Time `json:"registration_deadline"`
+	Status               *string    `json:"status" validate:"omitempty,oneof=OPEN CLOSED SOLD_OUT"`
+}
+
+// CreateScheduleRequest is the payload for POST /api/v1/events/:id/schedules
+type CreateScheduleRequest struct {
+	Time        string `json:"time" validate:"required,datetime=15:04:05"`
+	Title       string `json:"title" validate:"required,max=200"`
+	Description string `json:"description" validate:"max=1000"`
+	SortOrder   int    `json:"sort_order"`
+}
+
+// UpdateScheduleRequest is the payload for PATCH /api/v1/events/:id/schedules/:scheduleId
+type UpdateScheduleRequest struct {
+	Time        *string `json:"time" validate:"omitempty,datetime=15:04:05"`
+	Title       *string `json:"title" validate:"omitempty,max=200"`
+	Description *string `json:"description" validate:"omitempty,max=1000"`
+	SortOrder   *int    `json:"sort_order"`
+}
+
+// init registers the slug validation
 func init() {
 	_ = validate.RegisterValidation("slug", func(fl validator.FieldLevel) bool {
 		s := fl.Field().String()

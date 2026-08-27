@@ -1,6 +1,3 @@
-// Command seed inserts one example Unity Run Club event (with a
-// category, schedule, FAQs, and rules) for local development. It is
-// idempotent: re-running it upserts by slug instead of erroring.
 package main
 
 import (
@@ -11,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"golang.org/x/crypto/bcrypt"
 )
 
 const seedSlug = "unity-founders-run-2025"
@@ -44,9 +42,7 @@ func run() error {
 	}
 	defer tx.Rollback(ctx)
 
-	// Dates are relative to "now" (not hardcoded) so the seeded event
-	// is always a genuinely usable, registration-open demo event,
-	// regardless of when `make seed` is run.
+	// Dates are relative 
 	now := time.Now().UTC()
 	eventDate := now.AddDate(0, 0, 90).Format("2006-01-02")
 	registrationOpenAt := now.AddDate(0, 0, -7)
@@ -61,7 +57,7 @@ func run() error {
 		) VALUES (
 			'Unity Founders Run 2025', $1,
 			'The run that started it all — Unity Run Club''s inaugural community run through Phnom Penh, celebrating our first year of bringing runners together.',
-			'https://assets.unityrunclub.com/events/founders-run-2025/cover.jpg',
+			'/images/club/race-start.jpg',
 			$2, '06:00', 'Diamond Island, Phnom Penh',
 			11.5564, 104.9282,
 			$3, $4,
@@ -77,10 +73,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-
-	// Clear and re-insert child rows so re-running stays idempotent
-	// without needing per-row upsert keys.
-	for _, table := range []string{"event_categories", "event_schedules", "event_faqs", "event_rules"} {
+	for _, table := range []string{"event_schedules", "event_faqs", "event_rules"} {
 		if _, err := tx.Exec(ctx, "DELETE FROM "+table+" WHERE event_id = $1", eventID); err != nil {
 			return err
 		}
@@ -88,11 +81,19 @@ func run() error {
 
 	// price_cents is USD cents: 1500 = $15.00, 2500 = $25.00.
 	_, err = tx.Exec(ctx, `
-		INSERT INTO event_categories (event_id, name, distance, price_cents, capacity, registration_deadline, status)
+		INSERT INTO event_categories (event_id, name, distance, price_cents, currency, capacity, registration_deadline, status)
 		VALUES
-			($1, '5K', '5K', 1500, 300, $2, 'OPEN'),
-			($1, '10K', '10K', 2500, 200, $2, 'OPEN'),
-			($1, 'Fun Run', '3K', 0, 500, $2, 'OPEN')`, eventID, categoryDeadline)
+			($1, '5K', '5K', 1500, 'USD', 300, $2, 'OPEN'),
+			($1, '10K', '10K', 2500, 'USD', 200, $2, 'OPEN'),
+			($1, 'Fun Run', '3K', 0, 'USD', 500, $2, 'OPEN')
+		ON CONFLICT (event_id, name) DO UPDATE SET
+			distance = EXCLUDED.distance,
+			price_cents = EXCLUDED.price_cents,
+			currency = EXCLUDED.currency,
+			capacity = EXCLUDED.capacity,
+			registration_deadline = EXCLUDED.registration_deadline,
+			status = EXCLUDED.status,
+			updated_at = now()`, eventID, categoryDeadline)
 	if err != nil {
 		return err
 	}
@@ -131,5 +132,52 @@ func run() error {
 	}
 
 	log.Printf("seeded event %q (id=%s)", seedSlug, eventID)
+
+	// Seed default accounts (admin, staff, runner)
+	type seedUser struct {
+		email    string
+		password string
+		role     string
+		fullName string
+	}
+
+	usersToSeed := []seedUser{
+		{email: "admin@unityrunclub.com", password: "admin12345", role: "SUPER_ADMIN", fullName: "Admin Organizer"},
+		{email: "staff@unityrunclub.com", password: "staff12345", role: "STAFF", fullName: "Staff Volunteer"},
+		{email: "runner@unityrunclub.com", password: "runner12345", role: "USER", fullName: "Demo Runner"},
+	}
+
+	for _, u := range usersToSeed {
+		hash, err := bcrypt.GenerateFromPassword([]byte(u.password), bcrypt.DefaultCost)
+		if err != nil {
+			return err
+		}
+
+		var userID string
+		err = pool.QueryRow(ctx, `
+			INSERT INTO users (email, password_hash, role)
+			VALUES ($1, $2, $3)
+			ON CONFLICT (email) DO UPDATE SET
+				password_hash = EXCLUDED.password_hash,
+				role = EXCLUDED.role,
+				updated_at = now()
+			RETURNING id`, u.email, string(hash), u.role).Scan(&userID)
+		if err != nil {
+			return err
+		}
+
+		_, err = pool.Exec(ctx, `
+			INSERT INTO profiles (user_id, full_name, phone, gender, emergency_contact_name, emergency_contact_phone, tshirt_size)
+			VALUES ($1, $2, '+855 12 345 678', 'OTHER', 'Emergency Contact', '+855 98 765 432', 'L')
+			ON CONFLICT (user_id) DO UPDATE SET
+				full_name = EXCLUDED.full_name,
+				updated_at = now()`, userID, u.fullName)
+		if err != nil {
+			return err
+		}
+
+		log.Printf("seeded user %q (role=%s, password=%s)", u.email, u.role, u.password)
+	}
+
 	return nil
 }

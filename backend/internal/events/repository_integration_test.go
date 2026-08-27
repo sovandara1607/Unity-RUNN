@@ -1,5 +1,3 @@
-//go:build integration
-
 package events
 
 import (
@@ -12,9 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// testPool opens a pool against DATABASE_URL (the docker-compose
-// Postgres) and truncates event tables before each test so tests
-// don't interfere with each other.
+// testPool opens a pool against DATABASE_URL (the docker-compose Postgres) and truncates event tables before each test so tests don't interfere with each other
 func testPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 
@@ -39,6 +35,7 @@ func testPool(t *testing.T) *pgxpool.Pool {
 	return pool
 }
 
+// testEvent creates a new test event
 func testEvent(name, slug string) *Event {
 	return &Event{
 		Name:      name,
@@ -49,6 +46,7 @@ func testEvent(name, slug string) *Event {
 	}
 }
 
+// TestRepository_CreateAndGetByID tests the CreateAndGetByID method
 func TestRepository_CreateAndGetByID(t *testing.T) {
 	pool := testPool(t)
 	repo := NewRepository(pool)
@@ -71,6 +69,7 @@ func TestRepository_CreateAndGetByID(t *testing.T) {
 	}
 }
 
+// TestRepository_GetByID_NotFound tests the GetByID method that returns an error for a not found event
 func TestRepository_GetByID_NotFound(t *testing.T) {
 	pool := testPool(t)
 	repo := NewRepository(pool)
@@ -81,6 +80,7 @@ func TestRepository_GetByID_NotFound(t *testing.T) {
 	}
 }
 
+// TestRepository_SlugExists tests the SlugExists method
 func TestRepository_SlugExists(t *testing.T) {
 	pool := testPool(t)
 	repo := NewRepository(pool)
@@ -108,6 +108,7 @@ func TestRepository_SlugExists(t *testing.T) {
 	}
 }
 
+// TestRepository_Update tests the Update method
 func TestRepository_Update(t *testing.T) {
 	pool := testPool(t)
 	repo := NewRepository(pool)
@@ -132,6 +133,7 @@ func TestRepository_Update(t *testing.T) {
 	}
 }
 
+// TestRepository_DeleteCascadesChildRows tests the Delete method that cascades child rows
 func TestRepository_DeleteCascadesChildRows(t *testing.T) {
 	pool := testPool(t)
 	repo := NewRepository(pool)
@@ -162,6 +164,7 @@ func TestRepository_DeleteCascadesChildRows(t *testing.T) {
 	}
 }
 
+// TestRepository_GetDetailBySlug_IncludesChildren tests the GetDetailBySlug method that includes children
 func TestRepository_GetDetailBySlug_IncludesChildren(t *testing.T) {
 	pool := testPool(t)
 	repo := NewRepository(pool)
@@ -194,6 +197,7 @@ func TestRepository_GetDetailBySlug_IncludesChildren(t *testing.T) {
 	}
 }
 
+// TestRepository_List_FiltersByStatus tests the List method that filters by status
 func TestRepository_List_FiltersByStatus(t *testing.T) {
 	pool := testPool(t)
 	repo := NewRepository(pool)

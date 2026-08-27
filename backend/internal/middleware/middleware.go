@@ -1,12 +1,10 @@
-// Package middleware provides HTTP middleware shared across the API:
-// request ID propagation, panic recovery, CORS, and structured
-// per-request access logging.
 package middleware
 
 import (
 	"log/slog"
 	"net/http"
 	"runtime/debug"
+	"strings"
 	"time"
 
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
@@ -15,15 +13,68 @@ import (
 	applogger "github.com/unity-run-club/api/internal/logger"
 )
 
-// RequestID assigns/propagates an X-Request-ID header and makes it
-// available via chi's request ID context (which our logger helpers
-// read through logger.FromContext after RequestLogger stores it).
+// SecurityHeaders applies conservative response headers to every API 
+func SecurityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'; base-uri 'none'")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		next.ServeHTTP(w, r)
+	})
+}
+
+// LimitJSONBody caps JSON request bodies before handlers decode them
+func LimitJSONBody(maxBytes int64) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Body != nil && strings.Contains(strings.ToLower(r.Header.Get("Content-Type")), "application/json") {
+				if r.ContentLength > maxBytes {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusRequestEntityTooLarge)
+					_, _ = w.Write([]byte(`{"error":{"code":"body_too_large","message":"request body is too large"}}`))
+					return
+				}
+				r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// RequireAllowedOrigin blocks browser cross-site requests 
+func RequireAllowedOrigin(allowedOrigins []string) func(http.Handler) http.Handler {
+	allowed := make(map[string]struct{}, len(allowedOrigins))
+	for _, origin := range allowedOrigins {
+		origin = strings.TrimRight(strings.TrimSpace(origin), "/")
+		if origin != "" {
+			allowed[origin] = struct{}{}
+		}
+	}
+
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			origin := strings.TrimRight(strings.TrimSpace(r.Header.Get("Origin")), "/")
+			if origin != "" {
+				if _, ok := allowed[origin]; !ok {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusForbidden)
+					_, _ = w.Write([]byte(`{"error":{"code":"invalid_origin","message":"request origin is not allowed"}}`))
+					return
+				}
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// RequestID assigns/propagates an X-Request-ID header 
 func RequestID(next http.Handler) http.Handler {
 	return chimiddleware.RequestID(next)
 }
 
-// RequestLogger logs one structured line per request: method, path,
-// status, duration, and request ID.
+// RequestLogger logs one structured line per request
 func RequestLogger(log *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -48,9 +99,7 @@ func RequestLogger(log *slog.Logger) func(http.Handler) http.Handler {
 	}
 }
 
-// Recoverer recovers from panics in downstream handlers, logs the
-// panic with a stack trace, and returns a 500 JSON error instead of
-// crashing the process.
+// Recoverer recovers from panics in downstream handlers
 func Recoverer(log *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

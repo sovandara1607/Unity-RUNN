@@ -1,5 +1,3 @@
-//go:build integration
-
 package auditlog
 
 import (
@@ -39,8 +37,7 @@ func testPool(t *testing.T) *pgxpool.Pool {
 	return pool
 }
 
-// seedUser creates a minimal user row (audit_logs.actor_id has a
-// foreign key to users) and returns its ID.
+// seedUser creates a minimal user row and returns its ID
 func seedUser(t *testing.T, pool *pgxpool.Pool) uuid.UUID {
 	t.Helper()
 	var userID uuid.UUID

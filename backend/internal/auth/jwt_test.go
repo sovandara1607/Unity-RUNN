@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 )
 
@@ -50,6 +51,28 @@ func TestTokenIssuer_TamperedSignatureRejected(t *testing.T) {
 	otherIssuer := NewTokenIssuer("different-secret", time.Hour)
 	if _, err := otherIssuer.ParseAccessToken(token); err == nil {
 		t.Fatal("ParseAccessToken() expected error for token signed with a different secret, got nil")
+	}
+}
+
+func TestTokenIssuer_RejectsDifferentHMACAlgorithm(t *testing.T) {
+	issuer := NewTokenIssuer("test-secret", time.Hour)
+	userID := uuid.New()
+	now := time.Now()
+	claims := Claims{
+		UserID: userID,
+		Role:   RoleUser,
+		RegisteredClaims: jwt.RegisteredClaims{
+			Subject: userID.String(), Issuer: accessTokenIssuer,
+			Audience: jwt.ClaimStrings{accessTokenAudience},
+			IssuedAt: jwt.NewNumericDate(now), ExpiresAt: jwt.NewNumericDate(now.Add(time.Hour)),
+		},
+	}
+	raw, err := jwt.NewWithClaims(jwt.SigningMethodHS512, claims).SignedString([]byte("test-secret"))
+	if err != nil {
+		t.Fatalf("sign HS512 token: %v", err)
+	}
+	if _, err := issuer.ParseAccessToken(raw); err == nil {
+		t.Fatal("ParseAccessToken() accepted HS512 token, want HS256 only")
 	}
 }
 

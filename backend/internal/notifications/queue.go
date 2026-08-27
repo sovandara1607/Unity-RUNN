@@ -8,11 +8,12 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-const queueKey = "notifications:queue"
+const (
+	queueKey     = "notifications:queue"
+	heartbeatKey = "notifications:worker:heartbeat"
+)
 
-// Queue is a thin Redis list wrapper: push enqueues a notification
-// ID, pop blocks (with timeout) for the next one. push/pop are
-// unexported — only Service/Worker in this package call them.
+// Queue is a thin Redis list wrapper
 type Queue struct {
 	rdb *redis.Client
 }
@@ -29,8 +30,7 @@ func (q *Queue) push(ctx context.Context, notificationID string) error {
 	return nil
 }
 
-// pop blocks up to timeout for the next notification ID. Returns
-// ("", nil) on timeout (nothing to do — not an error).
+// pop blocks up to timeout for the next notification ID
 func (q *Queue) pop(ctx context.Context, timeout time.Duration) (string, error) {
 	result, err := q.rdb.BRPop(ctx, timeout, queueKey).Result()
 	if err == redis.Nil {
@@ -44,4 +44,12 @@ func (q *Queue) pop(ctx context.Context, timeout time.Duration) (string, error) 
 		return "", nil
 	}
 	return result[1], nil
+}
+
+func (q *Queue) heartbeat(ctx context.Context, ttl time.Duration) error {
+	seenAt := time.Now().UTC().Format(time.RFC3339Nano)
+	if err := q.rdb.Set(ctx, heartbeatKey, seenAt, ttl).Err(); err != nil {
+		return fmt.Errorf("notifications: worker heartbeat: %w", err)
+	}
+	return nil
 }

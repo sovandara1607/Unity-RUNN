@@ -1,0 +1,15 @@
+{
+  "name": "unity-runn-realtime",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs",
+    "check": "node --check server.mjs"
+  },
+  "dependencies": {
+    "@socket.io/redis-adapter": "8.3.0",
+    "ioredis": "6.0.0",
+    "socket.io": "4.8.3"
+  }
+}

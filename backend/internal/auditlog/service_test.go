@@ -9,11 +9,13 @@ import (
 	"github.com/google/uuid"
 )
 
+// fakeWriter is a test double for auditlog.Repository
 type fakeWriter struct {
 	entries []Entry
 	err     error
 }
 
+// Insert records e, populating e.ID/CreatedAt
 func (f *fakeWriter) Insert(ctx context.Context, e *Entry) error {
 	if f.err != nil {
 		return f.err

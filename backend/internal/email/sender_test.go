@@ -7,6 +7,7 @@ import (
 	"testing"
 )
 
+// TestNoopSender_SendNeverErrors tests the NoopSender that never errors	
 func TestNoopSender_SendNeverErrors(t *testing.T) {
 	sender := NewNoopSender(slog.New(slog.NewTextHandler(io.Discard, nil)))
 

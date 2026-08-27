@@ -1,6 +1,3 @@
-// Package auth implements identity: user accounts, password
-// authentication, JWT access tokens, refresh-token rotation, and the
-// RBAC middleware every other domain's admin routes depend on.
 package auth
 
 import (
@@ -9,9 +6,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// Role is a user's access level. Roles form a fixed hierarchy —
-// there's no separate roles table, since the set is small and static
-// (mirrors the same TEXT+CHECK choice made for events.status).
+// Role is a user's access level. Roles form a fixed hierarchy — there's no separate roles table, since the set is small and static (mirrors the same TEXT+CHECK choice made for events.status)
 type Role string
 
 const (
@@ -21,7 +16,7 @@ const (
 	RoleSuperAdmin Role = "SUPER_ADMIN"
 )
 
-// roleRank orders roles from least to most privileged.
+// roleRank orders roles from least to most privileged
 var roleRank = map[Role]int{
 	RoleUser:       0,
 	RoleStaff:      1,
@@ -29,13 +24,13 @@ var roleRank = map[Role]int{
 	RoleSuperAdmin: 3,
 }
 
-// IsValid reports whether r is one of the known roles.
+// IsValid reports whether r is one of the known roles
 func (r Role) IsValid() bool {
 	_, ok := roleRank[r]
 	return ok
 }
 
-// AtLeast reports whether r is at or above min in the role hierarchy.
+// AtLeast reports whether r is at or above min in the role hierarchy
 // An unrecognized role is never at least anything.
 func (r Role) AtLeast(min Role) bool {
 	rr, ok := roleRank[r]
@@ -50,7 +45,7 @@ func (r Role) AtLeast(min Role) bool {
 }
 
 // User is an account record. PasswordHash is never serialized to
-// JSON or logged.
+// JSON or logged
 type User struct {
 	ID           uuid.UUID
 	Email        string
@@ -60,8 +55,7 @@ type User struct {
 	UpdatedAt    time.Time
 }
 
-// Profile holds the participant-facing details for a user — the same
-// fields event registrations will reuse in a later phase.
+// Profile holds the participant-facing details for a user — the same fields event registrations will reuse in a later phase
 type Profile struct {
 	ID                    uuid.UUID  `json:"id"`
 	UserID                uuid.UUID  `json:"user_id"`
@@ -77,8 +71,7 @@ type Profile struct {
 	UpdatedAt             time.Time  `json:"updated_at"`
 }
 
-// RefreshToken is a persisted, hashed refresh token. The raw token
-// value is never stored — only TokenHash (sha256 of the raw token).
+// RefreshToken is a persisted, hashed refresh token. The raw token value is never stored — only TokenHash (sha256 of the raw token)
 type RefreshToken struct {
 	ID        uuid.UUID
 	UserID    uuid.UUID
@@ -88,8 +81,28 @@ type RefreshToken struct {
 	CreatedAt time.Time
 }
 
-// IsActive reports whether the refresh token is neither expired nor
-// revoked as of now.
+// OAuthIdentity links a local account to a stable identity-provider subject
+// Provider access and refresh tokens are deliberately never persisted
+type OAuthIdentity struct {
+	ID        uuid.UUID
+	UserID    uuid.UUID
+	Provider  string
+	Subject   string
+	Email     string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+// GoogleProfile is the minimum verified OpenID profile needed to sign in
+type GoogleProfile struct {
+	Subject       string
+	Email         string
+	EmailVerified bool
+	FullName      string
+	AvatarURL     string
+}
+
+// IsActive reports whether the refresh token is neither expired nor revoked as of now
 func (t RefreshToken) IsActive(now time.Time) bool {
 	return t.RevokedAt == nil && now.Before(t.ExpiresAt)
 }

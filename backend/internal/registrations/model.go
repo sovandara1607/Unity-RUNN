@@ -1,6 +1,3 @@
-// Package registrations implements the Registration domain: creating
-// a capacity-safe registration for an event category, cancellation,
-// payment (via internal/payments.Provider), and QR ticket issuance.
 package registrations
 
 import (
@@ -19,8 +16,6 @@ const (
 	StatusRefunded  Status = "REFUNDED"
 )
 
-// activeStatuses count toward a category's capacity and toward the
-// one-registration-per-user-per-event rule.
 var activeStatuses = map[Status]bool{
 	StatusPending:   true,
 	StatusConfirmed: true,
@@ -49,24 +44,31 @@ type Registration struct {
 	TshirtSize            string     `json:"tshirt_size"`
 	CreatedAt             time.Time  `json:"created_at"`
 	UpdatedAt             time.Time  `json:"updated_at"`
+	CheckedInAt           *time.Time `json:"checked_in_at,omitempty"`
 }
 
 // Payment records a payment attempt for a registration.
 type Payment struct {
-	ID                uuid.UUID `json:"id"`
-	RegistrationID    uuid.UUID `json:"registration_id"`
-	Provider          string    `json:"provider"`
-	ProviderReference string    `json:"provider_reference"`
-	AmountCents       int       `json:"amount_cents"`
-	Currency          string    `json:"currency"`
-	Status            string    `json:"status"`
-	CreatedAt         time.Time `json:"created_at"`
-	UpdatedAt         time.Time `json:"updated_at"`
+	ID                  uuid.UUID  `json:"id"`
+	RegistrationID      uuid.UUID  `json:"registration_id"`
+	Provider            string     `json:"provider"`
+	ProviderReference   string     `json:"provider_reference"`
+	AmountCents         int        `json:"amount_cents"`
+	Currency            string     `json:"currency"`
+	Status              string     `json:"status"`
+	CheckoutPayload     string     `json:"-"`
+	ExpiresAt           *time.Time `json:"expires_at,omitempty"`
+	VerifiedAt          *time.Time `json:"verified_at,omitempty"`
+	ReconcileAfter      time.Time  `json:"-"`
+	ReconcileLeaseUntil *time.Time `json:"-"`
+	ReconcileWorkerID   string     `json:"-"`
+	LastCheckedAt       *time.Time `json:"last_checked_at,omitempty"`
+	ReconcileAttempts   int        `json:"reconcile_attempts"`
+	ReconcileError      string     `json:"-"`
+	CreatedAt           time.Time  `json:"created_at"`
+	UpdatedAt           time.Time  `json:"updated_at"`
 }
 
-// Ticket is the QR ticket issued for a confirmed registration. The
-// raw token is never persisted — only TokenHash — so it's returned to
-// the caller exactly once, at issuance time.
 type Ticket struct {
 	ID             uuid.UUID `json:"id"`
 	RegistrationID uuid.UUID `json:"registration_id"`
@@ -76,8 +78,6 @@ type Ticket struct {
 	UpdatedAt      time.Time `json:"updated_at"`
 }
 
-// ParticipantInfo is the participant-facing data captured at
-// registration time (a snapshot — not a live join to profiles).
 type ParticipantInfo struct {
 	FullName              string
 	Email                 string

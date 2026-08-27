@@ -2,8 +2,10 @@ package registrations
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -16,27 +18,21 @@ import (
 
 const (
 	defaultListLimit = 20
-	maxListLimit     = 100
+	maxListLimit     = 1000
 )
 
-// ErrInvalidCategory is returned when the given category doesn't
-// exist or doesn't belong to the given event.
 var ErrInvalidCategory = errors.New("registrations: invalid category for this event")
-
-// ErrRegistrationClosed is returned when the event/category isn't
-// currently accepting registrations.
 var ErrRegistrationClosed = errors.New("registrations: registration is not open")
-
-// ErrForbidden is returned when a caller tries to view/cancel a
-// registration they don't own and isn't STAFF+.
 var ErrForbidden = errors.New("registrations: forbidden")
-
-// ErrAlreadyCancelled is returned when cancelling a registration
-// that's already cancelled or refunded.
 var ErrAlreadyCancelled = errors.New("registrations: already cancelled")
+var ErrCannotCancelCheckedIn = errors.New("registrations: checked-in registration cannot be cancelled")
 
-// regRepository is the subset of Repository the service depends on.
-// Defined here (consumer side) so tests can supply a fake.
+var (
+	ErrPaymentUnavailable = errors.New("registrations: payment is unavailable")
+	ErrPaymentMismatch    = errors.New("registrations: settled payment does not match the registration")
+	ErrPaymentExpired     = errors.New("registrations: payment has expired")
+)
+
 type regRepository interface {
 	HasActiveRegistration(ctx context.Context, userID, eventID uuid.UUID) (bool, error)
 	Create(ctx context.Context, p CreateParams) (*CreateResult, error)
@@ -48,22 +44,15 @@ type regRepository interface {
 	Cancel(ctx context.Context, id uuid.UUID) error
 	CountActive(ctx context.Context, categoryID uuid.UUID) (int, error)
 	GetRegistrationIDByTicketTokenHash(ctx context.Context, tokenHash string) (uuid.UUID, error)
+	GetByRegistrationNumber(ctx context.Context, number string) (*Registration, error)
+	HasCheckIn(ctx context.Context, registrationID uuid.UUID) (bool, error)
 }
 
-// eventsReader is the read-only slice of the events domain this
-// service needs, to validate an event/category before registering.
-// registrations depends on events, never the other way around.
 type eventsReader interface {
 	GetByID(ctx context.Context, id uuid.UUID) (*events.Event, error)
 	GetCategoryByID(ctx context.Context, id uuid.UUID) (*events.EventCategory, error)
 }
 
-// RegistrationNotifier is implemented by internal/notifications
-// (wired in from main.go) to send registration-related emails. The
-// interface lives here, in the consumer package, so registrations
-// never imports notifications — same pattern as auditlog in
-// checkin/service.go. Nil-safe: a Service built without a notifier
-// (e.g. in unit tests) simply doesn't send anything.
 type RegistrationNotifier interface {
 	NotifyRegistrationConfirmed(ctx context.Context, reg Registration)
 	NotifyPaymentConfirmed(ctx context.Context, reg Registration, amountCents int)
@@ -76,10 +65,6 @@ type Service struct {
 	eventsRepo eventsReader
 	provider   payments.Provider
 	notifier   RegistrationNotifier
-
-	// locker, availCache, and rateLimiter are optional (nil-safe) —
-	// unit tests can omit them to exercise the service without Redis;
-	// production wiring always supplies them.
 	locker      *Locker
 	availCache  *AvailabilityCache
 	rateLimiter *RateLimiter
@@ -87,8 +72,6 @@ type Service struct {
 	now func() time.Time
 }
 
-// NewService builds a Service. notifier may be nil (no emails sent —
-// used by unit tests).
 func NewService(repo regRepository, eventsRepo eventsReader, provider payments.Provider,
 	locker *Locker, availCache *AvailabilityCache, rateLimiter *RateLimiter, notifier RegistrationNotifier) *Service {
 	return &Service{
@@ -103,24 +86,62 @@ func NewService(repo regRepository, eventsRepo eventsReader, provider payments.P
 	}
 }
 
-// RegisterResult bundles a registration with its (one-time) raw QR
-// ticket token, when confirmed immediately.
 type RegisterResult struct {
 	Registration Registration
-	TicketToken  string // raw token, empty if not yet confirmed
+	TicketToken  string           // raw token, empty if not yet confirmed
+	Payment      *PaymentCheckout `json:"payment,omitempty"`
 }
 
-// Register validates the event/category, enforces the
-// one-active-registration-per-event rule and category capacity, and
-// creates the registration — confirming immediately for free
-// categories, or reserving a PENDING slot and running it through the
-// payment provider for paid ones.
+type PaymentCheckout struct {
+	RegistrationID string     `json:"registration_id"`
+	Provider       string     `json:"provider"`
+	Status         string     `json:"status"`
+	AmountCents    int        `json:"amount_cents"`
+	Currency       string     `json:"currency"`
+	QRString       string     `json:"qr_string,omitempty"`
+	DeepLink       string     `json:"deep_link,omitempty"`
+	ExpiresAt      *time.Time `json:"expires_at,omitempty"`
+}
+
+type paymentRepository interface {
+	GetPaymentForRegistration(context.Context, uuid.UUID) (*Payment, error)
+	ConfirmStoredPayment(context.Context, uuid.UUID, uuid.UUID, string) (*Registration, bool, error)
+}
+
+type paymentReconciliationRepository interface {
+	ClaimPendingPayments(context.Context, string, time.Time, time.Duration, int) ([]Payment, error)
+	SchedulePaymentReconciliation(context.Context, uuid.UUID, string, time.Time, string) error
+	ExpireClaimedPayment(context.Context, uuid.UUID, uuid.UUID, string) (uuid.UUID, bool, error)
+}
+
+type expiringPaymentRepository interface {
+	ExpirePendingPayments(context.Context, time.Time) ([]uuid.UUID, error)
+}
+
+func (s *Service) expirePendingPayments(ctx context.Context) error {
+	repo, ok := s.repo.(expiringPaymentRepository)
+	if !ok {
+		return nil
+	}
+	categories, err := repo.ExpirePendingPayments(ctx, s.now())
+	if err != nil {
+		return err
+	}
+	if s.availCache != nil {
+		for _, categoryID := range categories {
+			_ = s.availCache.Invalidate(ctx, categoryID)
+		}
+	}
+	return nil
+}
+
 func (s *Service) Register(ctx context.Context, userID, eventID uuid.UUID, req RegisterRequest) (*RegisterResult, error) {
+	if err := s.expirePendingPayments(ctx); err != nil {
+		return nil, err
+	}
 	if s.rateLimiter != nil {
 		allowed, err := s.rateLimiter.Allow(ctx, userID.String())
 		if err != nil {
-			// Fail open: log-worthy, but don't block registration on a
-			// Redis hiccup.
 			_ = err
 		} else if !allowed {
 			return nil, ErrRateLimited
@@ -165,10 +186,12 @@ func (s *Service) Register(ctx context.Context, userID, eventID uuid.UUID, req R
 
 	if s.locker != nil {
 		lock, err := s.locker.TryLock(ctx, categoryID)
-		if err != nil {
-			return nil, err // ErrLockNotAcquired, or a Redis error (fails closed here — see lock.go)
+		if errors.Is(err, ErrLockNotAcquired) {
+			return nil, err
 		}
-		defer lock.Release(ctx)
+		if err == nil {
+			defer lock.Release(ctx)
+		}
 	}
 
 	dob, err := time.Parse("2006-01-02", req.DateOfBirth)
@@ -190,7 +213,11 @@ func (s *Service) Register(ctx context.Context, userID, eventID uuid.UUID, req R
 	if category.PriceCents == 0 {
 		result, err = s.registerFree(ctx, userID, eventID, categoryID, category.Capacity, participant)
 	} else {
-		result, err = s.registerPaid(ctx, userID, eventID, categoryID, category.Capacity, category.PriceCents, participant)
+		currency := strings.ToUpper(strings.TrimSpace(category.Currency))
+		if currency == "" {
+			currency = "USD"
+		}
+		result, err = s.registerPaid(ctx, userID, eventID, categoryID, category.Capacity, category.PriceCents, currency, participant)
 	}
 	if err != nil {
 		return nil, err
@@ -244,9 +271,7 @@ func (s *Service) registerFree(ctx context.Context, userID, eventID, categoryID 
 	return &RegisterResult{Registration: res.Registration, TicketToken: rawToken}, nil
 }
 
-func (s *Service) registerPaid(ctx context.Context, userID, eventID, categoryID uuid.UUID, capacity, priceCents int, participant ParticipantInfo) (*RegisterResult, error) {
-	// Reserve the slot as PENDING first — this is what makes capacity
-	// safe even while payment is in flight.
+func (s *Service) registerPaid(ctx context.Context, userID, eventID, categoryID uuid.UUID, capacity, priceCents int, currency string, participant ParticipantInfo) (*RegisterResult, error) {
 	res, err := s.repo.Create(ctx, CreateParams{
 		UserID: userID, EventID: eventID, EventCategoryID: categoryID, Capacity: capacity,
 		Participant: participant, Confirm: false,
@@ -256,19 +281,36 @@ func (s *Service) registerPaid(ctx context.Context, userID, eventID, categoryID 
 	}
 	reg := res.Registration
 
-	payment, err := s.provider.CreatePayment(ctx, reg.ID.String(), "USD", priceCents)
+	payment, err := s.provider.CreatePayment(ctx, reg.ID.String(), currency, priceCents)
 	if err != nil {
-		return nil, fmt.Errorf("registrations: create payment: %w", err)
+		return nil, s.releaseFailedPaymentRegistration(ctx, reg.ID, fmt.Errorf("registrations: create payment: %w", err))
 	}
 
 	if payment.Status != payments.StatusSucceeded {
-		_ = s.repo.CreatePayment(ctx, &Payment{
+		var checkoutJSON string
+		var checkout *PaymentCheckout
+		if payment.Checkout != nil {
+			raw, marshalErr := json.Marshal(payment.Checkout)
+			if marshalErr != nil {
+				return nil, fmt.Errorf("registrations: encode payment checkout: %w", marshalErr)
+			}
+			checkoutJSON = string(raw)
+			checkout = &PaymentCheckout{RegistrationID: reg.ID.String(), Provider: s.provider.Name(), Status: string(payment.Status), AmountCents: priceCents, Currency: currency, QRString: payment.Checkout.QRString, DeepLink: payment.Checkout.DeepLink, ExpiresAt: &payment.Checkout.ExpiresAt}
+		}
+		dbPayment := &Payment{
 			RegistrationID: reg.ID, Provider: s.provider.Name(), ProviderReference: payment.ProviderReference,
-			AmountCents: priceCents, Currency: "USD", Status: string(payment.Status),
-		})
-		// Registration stays PENDING — retry/payment-recovery flows are
-		// a later phase; the slot remains reserved for now.
-		return &RegisterResult{Registration: reg}, nil
+			AmountCents: priceCents, Currency: currency, Status: string(payment.Status), CheckoutPayload: checkoutJSON,
+		}
+		if payment.Checkout != nil {
+			dbPayment.ExpiresAt = &payment.Checkout.ExpiresAt
+		}
+		if err := s.repo.CreatePayment(ctx, dbPayment); err != nil {
+			return nil, s.releaseFailedPaymentRegistration(ctx, reg.ID, err)
+		}
+		if payment.Status == payments.StatusFailed {
+			return nil, s.releaseFailedPaymentRegistration(ctx, reg.ID, ErrPaymentUnavailable)
+		}
+		return &RegisterResult{Registration: reg, Payment: checkout}, nil
 	}
 
 	rawToken, tokenHash, err := generateTicketToken()
@@ -278,7 +320,7 @@ func (s *Service) registerPaid(ctx context.Context, userID, eventID, categoryID 
 
 	confirmed, err := s.repo.ConfirmWithPayment(ctx, reg.ID, &Payment{
 		Provider: s.provider.Name(), ProviderReference: payment.ProviderReference,
-		AmountCents: priceCents, Currency: "USD", Status: string(payments.StatusSucceeded),
+		AmountCents: priceCents, Currency: currency, Status: string(payments.StatusSucceeded),
 	}, tokenHash)
 	if err != nil {
 		return nil, err
@@ -292,8 +334,171 @@ func (s *Service) registerPaid(ctx context.Context, userID, eventID, categoryID 
 	return &RegisterResult{Registration: confirmed.Registration, TicketToken: rawToken}, nil
 }
 
-// GetByID returns a registration if callerID owns it or callerRole is
-// STAFF+.
+func (s *Service) releaseFailedPaymentRegistration(ctx context.Context, registrationID uuid.UUID, cause error) error {
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+	defer cancel()
+	if err := s.repo.Cancel(cleanupCtx, registrationID); err != nil {
+		return errors.Join(cause, fmt.Errorf("release failed payment reservation: %w", err))
+	}
+	return cause
+}
+
+func (s *Service) ReconcilePendingPayments(ctx context.Context, workerID string, limit int) error {
+	repo, ok := s.repo.(paymentReconciliationRepository)
+	if !ok {
+		return nil
+	}
+	now := s.now()
+	claimed, err := repo.ClaimPendingPayments(ctx, workerID, now, 30*time.Second, limit)
+	if err != nil {
+		return err
+	}
+	for _, stored := range claimed {
+		s.reconcilePayment(ctx, repo, workerID, stored)
+	}
+	return nil
+}
+
+func (s *Service) reconcilePayment(ctx context.Context, repo paymentReconciliationRepository, workerID string, stored Payment) {
+	now := s.now()
+	reschedule := func(delay time.Duration, message string) {
+		_ = repo.SchedulePaymentReconciliation(ctx, stored.ID, workerID, now.Add(delay), message)
+	}
+	if stored.Provider != s.provider.Name() || stored.ProviderReference == "" {
+		reschedule(15*time.Minute, "payment provider or reference is unavailable")
+		return
+	}
+	providerPayment, err := s.provider.GetPaymentStatus(ctx, stored.ProviderReference)
+	if err != nil {
+		delay := time.Duration(1<<min(stored.ReconcileAttempts, 6)) * 15 * time.Second
+		reschedule(delay, err.Error())
+		return
+	}
+	if providerPayment.Status == payments.StatusPending {
+		if stored.ExpiresAt != nil && now.After(*stored.ExpiresAt) {
+			categoryID, expired, expireErr := repo.ExpireClaimedPayment(ctx, stored.RegistrationID, stored.ID, workerID)
+			if expireErr != nil {
+				reschedule(time.Minute, expireErr.Error())
+			} else if expired && s.availCache != nil {
+				_ = s.availCache.Invalidate(ctx, categoryID)
+			}
+			return
+		}
+		reschedule(15*time.Second, "")
+		return
+	}
+	if providerPayment.Status != payments.StatusSucceeded || providerPayment.Verification == nil {
+		reschedule(5*time.Minute, "provider returned a non-settled payment state")
+		return
+	}
+	verified := providerPayment.Verification
+	if verified.AmountCents != stored.AmountCents || !strings.EqualFold(verified.Currency, stored.Currency) {
+		reschedule(15*time.Minute, ErrPaymentMismatch.Error())
+		return
+	}
+	_, tokenHash, err := generateTicketToken()
+	if err != nil {
+		reschedule(time.Minute, err.Error())
+		return
+	}
+	confirmed, newlyConfirmed, err := s.repo.(paymentRepository).ConfirmStoredPayment(ctx, stored.RegistrationID, stored.ID, tokenHash)
+	if err != nil {
+		reschedule(time.Minute, err.Error())
+		return
+	}
+	if s.availCache != nil {
+		_ = s.availCache.Invalidate(ctx, confirmed.EventCategoryID)
+	}
+	if newlyConfirmed && s.notifier != nil {
+		s.notifier.NotifyRegistrationConfirmed(ctx, *confirmed)
+		s.notifier.NotifyPaymentConfirmed(ctx, *confirmed, stored.AmountCents)
+	}
+}
+
+func (s *Service) GetPayment(ctx context.Context, callerID uuid.UUID, callerRole auth.Role, registrationID uuid.UUID) (*PaymentCheckout, error) {
+	reg, err := s.GetByID(ctx, callerID, callerRole, registrationID)
+	if err != nil {
+		return nil, err
+	}
+	pr, ok := s.repo.(paymentRepository)
+	if !ok {
+		return nil, ErrPaymentUnavailable
+	}
+	p, err := pr.GetPaymentForRegistration(ctx, registrationID)
+	if err != nil {
+		return nil, err
+	}
+	checkout := &payments.Checkout{}
+	if p.CheckoutPayload != "" {
+		if err := json.Unmarshal([]byte(p.CheckoutPayload), checkout); err != nil {
+			return nil, fmt.Errorf("registrations: decode payment checkout: %w", err)
+		}
+	}
+	view := &PaymentCheckout{RegistrationID: reg.ID.String(), Provider: p.Provider, Status: p.Status, AmountCents: p.AmountCents, Currency: p.Currency, QRString: checkout.QRString, DeepLink: checkout.DeepLink, ExpiresAt: p.ExpiresAt}
+	return view, nil
+}
+
+func (s *Service) VerifyPayment(ctx context.Context, callerID uuid.UUID, callerRole auth.Role, registrationID uuid.UUID) (*RegisterResult, error) {
+	reg, err := s.GetByID(ctx, callerID, callerRole, registrationID)
+	if err != nil {
+		return nil, err
+	}
+	checkout, err := s.GetPayment(ctx, callerID, callerRole, registrationID)
+	if err != nil {
+		return nil, err
+	}
+	if reg.Status == StatusConfirmed {
+		return &RegisterResult{Registration: *reg, Payment: checkout}, nil
+	}
+	if reg.Status != StatusPending {
+		return nil, ErrPaymentUnavailable
+	}
+	pr := s.repo.(paymentRepository)
+	stored, err := pr.GetPaymentForRegistration(ctx, registrationID)
+	if err != nil {
+		return nil, err
+	}
+	if stored.ExpiresAt != nil && s.now().After(*stored.ExpiresAt) {
+		_ = s.expirePendingPayments(ctx)
+		return nil, ErrPaymentExpired
+	}
+	if stored.Provider != s.provider.Name() {
+		return nil, ErrPaymentUnavailable
+	}
+	providerPayment, err := s.provider.GetPaymentStatus(ctx, stored.ProviderReference)
+	if err != nil {
+		return nil, err
+	}
+	checkout.Status = string(providerPayment.Status)
+	if providerPayment.Status == payments.StatusPending {
+		return &RegisterResult{Registration: *reg, Payment: checkout}, nil
+	}
+	if providerPayment.Status != payments.StatusSucceeded || providerPayment.Verification == nil {
+		return nil, ErrPaymentUnavailable
+	}
+	verified := providerPayment.Verification
+	if verified.AmountCents != stored.AmountCents || !strings.EqualFold(verified.Currency, stored.Currency) {
+		return nil, ErrPaymentMismatch
+	}
+	_, tokenHash, err := generateTicketToken()
+	if err != nil {
+		return nil, err
+	}
+	confirmed, newlyConfirmed, err := pr.ConfirmStoredPayment(ctx, registrationID, stored.ID, tokenHash)
+	if err != nil {
+		return nil, err
+	}
+	checkout.Status = string(payments.StatusSucceeded)
+	if s.availCache != nil {
+		_ = s.availCache.Invalidate(ctx, confirmed.EventCategoryID)
+	}
+	if newlyConfirmed && s.notifier != nil {
+		s.notifier.NotifyRegistrationConfirmed(ctx, *confirmed)
+		s.notifier.NotifyPaymentConfirmed(ctx, *confirmed, stored.AmountCents)
+	}
+	return &RegisterResult{Registration: *confirmed, Payment: checkout}, nil
+}
+
 func (s *Service) GetByID(ctx context.Context, callerID uuid.UUID, callerRole auth.Role, id uuid.UUID) (*Registration, error) {
 	reg, err := s.repo.GetByID(ctx, id)
 	if err != nil {
@@ -307,13 +512,12 @@ func (s *Service) GetByID(ctx context.Context, callerID uuid.UUID, callerRole au
 
 // ListForUser returns the caller's own registrations.
 func (s *Service) ListForUser(ctx context.Context, userID uuid.UUID) ([]Registration, error) {
+	if err := s.expirePendingPayments(ctx); err != nil {
+		return nil, err
+	}
 	return s.repo.ListForUser(ctx, userID)
 }
 
-// ListAll returns registrations across all users, for STAFF+ admin
-// views. Callers (the admin handler) are responsible for the role
-// check — this method trusts it's only reached by an authorized
-// caller, matching the thin-handler/service pattern used elsewhere.
 func (s *Service) ListAll(ctx context.Context, filter AdminListFilter) ([]Registration, int, error) {
 	if filter.Limit <= 0 {
 		filter.Limit = defaultListLimit
@@ -327,14 +531,26 @@ func (s *Service) ListAll(ctx context.Context, filter AdminListFilter) ([]Regist
 	return s.repo.ListAll(ctx, filter)
 }
 
-// FindRegistrationIDByTicketToken hashes rawToken and resolves it to
-// a registration ID. Used by internal/checkin.
 func (s *Service) FindRegistrationIDByTicketToken(ctx context.Context, rawToken string) (uuid.UUID, error) {
 	return s.repo.GetRegistrationIDByTicketTokenHash(ctx, tokenhash.Hash(rawToken))
 }
 
-// Cancel cancels a registration, if callerID owns it or callerRole is
-// STAFF+, freeing its capacity slot.
+var ErrNotConfirmed = errors.New("registrations: registration is not confirmed")
+func (s *Service) IssueTicketToken(ctx context.Context, callerID uuid.UUID, callerRole auth.Role, id uuid.UUID) (string, error) {
+	reg, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	if reg.UserID != callerID && !callerRole.AtLeast(auth.RoleStaff) {
+		return "", ErrForbidden
+	}
+	if reg.Status != StatusConfirmed {
+		return "", ErrNotConfirmed
+	}
+
+	return reg.RegistrationNumber, nil
+}
+
 func (s *Service) Cancel(ctx context.Context, callerID uuid.UUID, callerRole auth.Role, id uuid.UUID) error {
 	reg, err := s.repo.GetByID(ctx, id)
 	if err != nil {
@@ -345,6 +561,13 @@ func (s *Service) Cancel(ctx context.Context, callerID uuid.UUID, callerRole aut
 	}
 	if !reg.Status.IsActive() {
 		return ErrAlreadyCancelled
+	}
+	checkedIn, err := s.repo.HasCheckIn(ctx, id)
+	if err != nil {
+		return err
+	}
+	if checkedIn {
+		return ErrCannotCancelCheckedIn
 	}
 
 	if err := s.repo.Cancel(ctx, id); err != nil {
@@ -360,18 +583,22 @@ func (s *Service) Cancel(ctx context.Context, callerID uuid.UUID, callerRole aut
 	return nil
 }
 
-// GetAvailability returns the capacity snapshot for a category,
-// serving from cache when possible.
-func (s *Service) GetAvailability(ctx context.Context, categoryID uuid.UUID) (*Availability, error) {
+func (s *Service) GetAvailability(ctx context.Context, eventID, categoryID uuid.UUID) (*Availability, error) {
+	if err := s.expirePendingPayments(ctx); err != nil {
+		return nil, err
+	}
+	category, err := s.eventsRepo.GetCategoryByID(ctx, categoryID)
+	if err != nil {
+		return nil, err
+	}
+	if category.EventID != eventID {
+		return nil, events.ErrNotFound
+	}
+
 	if s.availCache != nil {
 		if cached, err := s.availCache.Get(ctx, categoryID); err == nil && cached != nil {
 			return cached, nil
 		}
-	}
-
-	category, err := s.eventsRepo.GetCategoryByID(ctx, categoryID)
-	if err != nil {
-		return nil, err
 	}
 
 	taken, err := s.repo.CountActive(ctx, categoryID)
@@ -391,10 +618,6 @@ func (s *Service) GetAvailability(ctx context.Context, categoryID uuid.UUID) (*A
 	return &avail, nil
 }
 
-// generateTicketToken returns a cryptographically random raw QR token
-// and its hash for storage — never the raw value. Uses
-// internal/tokenhash so internal/checkin verifies against the exact
-// same hashing scheme.
 func generateTicketToken() (raw, hash string, err error) {
 	raw, err = tokenhash.GenerateRaw()
 	if err != nil {

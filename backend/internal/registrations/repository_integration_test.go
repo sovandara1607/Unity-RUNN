@@ -1,5 +1,3 @@
-//go:build integration
-
 package registrations
 
 import (
@@ -15,9 +13,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// testPool opens a pool against DATABASE_URL and truncates the
-// registration-related tables before each test, mirroring the
-// testPool pattern in events/auth's integration tests.
 func testPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 
@@ -48,9 +43,6 @@ func testPool(t *testing.T) *pgxpool.Pool {
 	return pool
 }
 
-// seedEventCategoryUser creates a minimal event + category + user
-// directly via SQL (bypassing the events/auth packages, since this
-// test only needs foreign keys to exist) and returns their IDs.
 func seedEventCategoryUser(t *testing.T, pool *pgxpool.Pool, capacity int) (eventID, categoryID uuid.UUID) {
 	t.Helper()
 	ctx := context.Background()
@@ -180,13 +172,6 @@ func TestRepository_Cancel_FreesCapacity(t *testing.T) {
 	}
 }
 
-// TestRepository_ConcurrentRegistration_NeverExceedsCapacity is the
-// core correctness proof for this phase: N goroutines race to
-// register for a category with capacity much smaller than N. Exactly
-// `capacity` must succeed; the rest must fail with ErrCapacityFull.
-// This exercises the FOR UPDATE row lock directly against real
-// Postgres — no Redis lock is used here, so this proves Postgres
-// alone is sufficient for correctness.
 func TestRepository_ConcurrentRegistration_NeverExceedsCapacity(t *testing.T) {
 	pool := testPool(t)
 	repo := NewRepository(pool)

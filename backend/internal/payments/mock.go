@@ -7,11 +7,6 @@ import (
 	"github.com/google/uuid"
 )
 
-// MockProvider is a synchronous, always-succeeding payment provider.
-// It exists to exercise the full registration -> payment ->
-// confirmation code path in development and tests before a real
-// Cambodian payment gateway is integrated. It must never be used in
-// production.
 type MockProvider struct{}
 
 // NewMockProvider builds a MockProvider.
@@ -25,11 +20,14 @@ func (m *MockProvider) CreatePayment(ctx context.Context, registrationID, curren
 	return Payment{
 		ProviderReference: fmt.Sprintf("mock_%s", uuid.NewString()),
 		Status:            StatusSucceeded,
+		Verification: &Verification{
+			AmountCents: amountCents, Currency: currency, ReceiverAccount: "mock",
+		},
 	}, nil
 }
 
-func (m *MockProvider) GetPaymentStatus(ctx context.Context, providerReference string) (Status, error) {
-	return StatusSucceeded, nil
+func (m *MockProvider) GetPaymentStatus(ctx context.Context, providerReference string) (Payment, error) {
+	return Payment{ProviderReference: providerReference, Status: StatusSucceeded}, nil
 }
 
 func (m *MockProvider) HandleWebhook(ctx context.Context, payload []byte, signature string) (WebhookEvent, error) {

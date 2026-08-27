@@ -15,13 +15,15 @@ import (
 
 // fakeRegRepo is an in-memory regRepository for service unit tests.
 type fakeRegRepo struct {
-	regs         map[uuid.UUID]*Registration
-	payments     []Payment
-	ticketHashes map[string]uuid.UUID
+	regs             map[uuid.UUID]*Registration
+	payments         []Payment
+	createPaymentErr error
+	ticketHashes     map[string]uuid.UUID
+	checkedIn        map[uuid.UUID]bool
 }
 
 func newFakeRegRepo() *fakeRegRepo {
-	return &fakeRegRepo{regs: map[uuid.UUID]*Registration{}, ticketHashes: map[string]uuid.UUID{}}
+	return &fakeRegRepo{regs: map[uuid.UUID]*Registration{}, ticketHashes: map[string]uuid.UUID{}, checkedIn: map[uuid.UUID]bool{}}
 }
 
 func (f *fakeRegRepo) HasActiveRegistration(ctx context.Context, userID, eventID uuid.UUID) (bool, error) {
@@ -90,6 +92,27 @@ func (f *fakeRegRepo) GetRegistrationIDByTicketTokenHash(ctx context.Context, to
 	return id, nil
 }
 
+func (f *fakeRegRepo) GetByRegistrationNumber(ctx context.Context, number string) (*Registration, error) {
+	for _, r := range f.regs {
+		if r.RegistrationNumber == number {
+			return r, nil
+		}
+	}
+	return nil, ErrNotFound
+}
+
+func (f *fakeRegRepo) RotateTicketToken(ctx context.Context, registrationID uuid.UUID, tokenHash string) error {
+	if _, ok := f.regs[registrationID]; !ok {
+		return ErrNotFound
+	}
+	f.ticketHashes[tokenHash] = registrationID
+	return nil
+}
+
+func (f *fakeRegRepo) HasCheckIn(ctx context.Context, registrationID uuid.UUID) (bool, error) {
+	return f.checkedIn[registrationID], nil
+}
+
 func (f *fakeRegRepo) ListAll(ctx context.Context, filter AdminListFilter) ([]Registration, int, error) {
 	var out []Registration
 	for _, r := range f.regs {
@@ -105,8 +128,85 @@ func (f *fakeRegRepo) ListAll(ctx context.Context, filter AdminListFilter) ([]Re
 }
 
 func (f *fakeRegRepo) CreatePayment(ctx context.Context, p *Payment) error {
+	if f.createPaymentErr != nil {
+		return f.createPaymentErr
+	}
+	if p.ID == uuid.Nil {
+		p.ID = uuid.New()
+	}
+	p.CreatedAt, p.UpdatedAt = time.Now(), time.Now()
 	f.payments = append(f.payments, *p)
 	return nil
+}
+
+func (f *fakeRegRepo) GetPaymentForRegistration(ctx context.Context, registrationID uuid.UUID) (*Payment, error) {
+	for i := range f.payments {
+		if f.payments[i].RegistrationID == registrationID {
+			return &f.payments[i], nil
+		}
+	}
+	return nil, ErrNotFound
+}
+
+func (f *fakeRegRepo) ConfirmStoredPayment(ctx context.Context, registrationID, paymentID uuid.UUID, ticketTokenHash string) (*Registration, bool, error) {
+	reg, ok := f.regs[registrationID]
+	if !ok {
+		return nil, false, ErrNotFound
+	}
+	newlyConfirmed := reg.Status == StatusPending
+	reg.Status = StatusConfirmed
+	for i := range f.payments {
+		if f.payments[i].ID == paymentID {
+			f.payments[i].Status = string(payments.StatusSucceeded)
+		}
+	}
+	f.ticketHashes[ticketTokenHash] = registrationID
+	return reg, newlyConfirmed, nil
+}
+
+func (f *fakeRegRepo) ClaimPendingPayments(ctx context.Context, workerID string, now time.Time, lease time.Duration, limit int) ([]Payment, error) {
+	var claimed []Payment
+	for i := range f.payments {
+		p := &f.payments[i]
+		if p.Status != string(payments.StatusPending) || len(claimed) >= limit {
+			continue
+		}
+		p.ReconcileWorkerID = workerID
+		until := now.Add(lease)
+		p.ReconcileLeaseUntil = &until
+		claimed = append(claimed, *p)
+	}
+	return claimed, nil
+}
+
+func (f *fakeRegRepo) SchedulePaymentReconciliation(ctx context.Context, paymentID uuid.UUID, workerID string, next time.Time, message string) error {
+	for i := range f.payments {
+		if f.payments[i].ID == paymentID {
+			f.payments[i].ReconcileAfter = next
+			f.payments[i].ReconcileAttempts++
+			f.payments[i].ReconcileError = message
+			f.payments[i].ReconcileWorkerID = ""
+			f.payments[i].ReconcileLeaseUntil = nil
+		}
+	}
+	return nil
+}
+
+func (f *fakeRegRepo) ExpireClaimedPayment(ctx context.Context, registrationID, paymentID uuid.UUID, workerID string) (uuid.UUID, bool, error) {
+	reg, ok := f.regs[registrationID]
+	if !ok {
+		return uuid.Nil, false, ErrNotFound
+	}
+	wasPending := reg.Status == StatusPending
+	if wasPending {
+		reg.Status = StatusCancelled
+	}
+	for i := range f.payments {
+		if f.payments[i].ID == paymentID {
+			f.payments[i].Status = string(payments.StatusFailed)
+		}
+	}
+	return reg.EventCategoryID, wasPending, nil
 }
 
 func (f *fakeRegRepo) GetByID(ctx context.Context, id uuid.UUID) (*Registration, error) {
@@ -175,19 +275,25 @@ func (f *fakeEventsReader) GetCategoryByID(ctx context.Context, id uuid.UUID) (*
 
 // fakePaymentProvider lets tests control payment outcomes.
 type fakePaymentProvider struct {
-	status payments.Status
-	err    error
+	status       payments.Status
+	err          error
+	currency     string
+	verification *payments.Verification
 }
 
 func (f *fakePaymentProvider) Name() string { return "fake" }
 func (f *fakePaymentProvider) CreatePayment(ctx context.Context, registrationID, currency string, amountCents int) (payments.Payment, error) {
+	f.currency = currency
 	if f.err != nil {
 		return payments.Payment{}, f.err
 	}
 	return payments.Payment{ProviderReference: "fake_ref", Status: f.status}, nil
 }
-func (f *fakePaymentProvider) GetPaymentStatus(ctx context.Context, ref string) (payments.Status, error) {
-	return f.status, nil
+func (f *fakePaymentProvider) GetPaymentStatus(ctx context.Context, ref string) (payments.Payment, error) {
+	if f.err != nil {
+		return payments.Payment{}, f.err
+	}
+	return payments.Payment{ProviderReference: ref, Status: f.status, Verification: f.verification}, nil
 }
 func (f *fakePaymentProvider) HandleWebhook(ctx context.Context, payload []byte, sig string) (payments.WebhookEvent, error) {
 	return payments.WebhookEvent{}, nil
@@ -203,8 +309,6 @@ func newTestSetup(provider *fakePaymentProvider) (*Service, *fakeRegRepo, *fakeE
 	return svc, repo, er
 }
 
-// fakeRegistrationNotifier records which notify calls fired, for
-// tests asserting the right trigger fires at the right point.
 type fakeRegistrationNotifier struct {
 	confirmed []Registration
 	paid      []Registration
@@ -236,7 +340,7 @@ func seedEventAndCategory(er *fakeEventsReader, priceCents, capacity int) (uuid.
 	categoryID := uuid.New()
 	er.eventsByID[eventID] = &events.Event{ID: eventID, Status: events.StatusRegistrationOpen}
 	er.categoriesByID[categoryID] = &events.EventCategory{
-		ID: categoryID, EventID: eventID, PriceCents: priceCents, Capacity: capacity, Status: "OPEN",
+		ID: categoryID, EventID: eventID, PriceCents: priceCents, Currency: "USD", Capacity: capacity, Status: "OPEN",
 	}
 	return eventID, categoryID
 }
@@ -281,19 +385,102 @@ func TestService_Register_PaidCategoryConfirmsAfterPayment(t *testing.T) {
 	}
 }
 
-func TestService_Register_PaidCategoryStaysPendingOnPaymentFailure(t *testing.T) {
-	svc, _, er := newTestSetup(&fakePaymentProvider{status: payments.StatusFailed})
+func TestService_Register_PaidCategoryReleasesReservationOnPaymentFailure(t *testing.T) {
+	svc, repo, er := newTestSetup(&fakePaymentProvider{status: payments.StatusFailed})
 	eventID, categoryID := seedEventAndCategory(er, 5000, 10)
 
+	_, err := svc.Register(context.Background(), uuid.New(), eventID, validRegisterReq(categoryID))
+	if !errors.Is(err, ErrPaymentUnavailable) {
+		t.Fatalf("Register() error = %v, want ErrPaymentUnavailable", err)
+	}
+	for _, registration := range repo.regs {
+		if registration.Status != StatusCancelled {
+			t.Errorf("Status = %q, want %q", registration.Status, StatusCancelled)
+		}
+	}
+}
+
+func TestService_Register_PaidReleasesReservationWhenProviderErrors(t *testing.T) {
+	provider := &fakePaymentProvider{err: errors.New("provider unavailable")}
+	svc, repo, er := newTestSetup(provider)
+	eventID, categoryID := seedEventAndCategory(er, 5000, 10)
+	if _, err := svc.Register(context.Background(), uuid.New(), eventID, validRegisterReq(categoryID)); err == nil {
+		t.Fatal("Register() expected provider error")
+	}
+	for _, registration := range repo.regs {
+		if registration.Status != StatusCancelled {
+			t.Fatalf("registration status = %q, want CANCELLED", registration.Status)
+		}
+	}
+}
+
+func TestService_Register_PaidReleasesReservationWhenPaymentPersistenceFails(t *testing.T) {
+	provider := &fakePaymentProvider{status: payments.StatusPending}
+	svc, repo, er := newTestSetup(provider)
+	repo.createPaymentErr = errors.New("database write failed")
+	eventID, categoryID := seedEventAndCategory(er, 5000, 10)
+	if _, err := svc.Register(context.Background(), uuid.New(), eventID, validRegisterReq(categoryID)); err == nil {
+		t.Fatal("Register() expected persistence error")
+	}
+	for _, registration := range repo.regs {
+		if registration.Status != StatusCancelled {
+			t.Fatalf("registration status = %q, want CANCELLED", registration.Status)
+		}
+	}
+}
+
+func TestService_Register_PaidUsesCategoryCurrency(t *testing.T) {
+	provider := &fakePaymentProvider{status: payments.StatusPending}
+	svc, _, er := newTestSetup(provider)
+	eventID, categoryID := seedEventAndCategory(er, 25000, 10)
+	er.categoriesByID[categoryID].Currency = "KHR"
+	if _, err := svc.Register(context.Background(), uuid.New(), eventID, validRegisterReq(categoryID)); err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
+	if provider.currency != "KHR" {
+		t.Fatalf("provider currency = %q, want KHR", provider.currency)
+	}
+}
+
+func TestService_ReconcilePendingPaymentConfirmsWithoutBrowser(t *testing.T) {
+	provider := &fakePaymentProvider{status: payments.StatusPending}
+	repo := newFakeRegRepo()
+	er := newFakeEventsReader()
+	notifier := &fakeRegistrationNotifier{}
+	svc := NewService(repo, er, provider, nil, nil, nil, notifier)
+	eventID, categoryID := seedEventAndCategory(er, 2500, 10)
 	result, err := svc.Register(context.Background(), uuid.New(), eventID, validRegisterReq(categoryID))
 	if err != nil {
 		t.Fatalf("Register() error = %v", err)
 	}
-	if result.Registration.Status != StatusPending {
-		t.Errorf("Status = %q, want %q", result.Registration.Status, StatusPending)
+	provider.status = payments.StatusSucceeded
+	provider.verification = &payments.Verification{AmountCents: 2500, Currency: "USD", ReceiverAccount: "test"}
+	if err := svc.ReconcilePendingPayments(context.Background(), "worker-1", 25); err != nil {
+		t.Fatalf("ReconcilePendingPayments() error = %v", err)
 	}
-	if result.TicketToken != "" {
-		t.Error("expected no ticket token when payment fails")
+	if repo.regs[result.Registration.ID].Status != StatusConfirmed {
+		t.Fatalf("registration status = %q, want CONFIRMED", repo.regs[result.Registration.ID].Status)
+	}
+	if len(notifier.confirmed) != 1 || len(notifier.paid) != 1 {
+		t.Fatalf("notifications confirmed=%d paid=%d, want 1 each", len(notifier.confirmed), len(notifier.paid))
+	}
+}
+
+func TestService_ReconcileExpiredPendingPaymentReleasesCapacity(t *testing.T) {
+	provider := &fakePaymentProvider{status: payments.StatusPending}
+	svc, repo, er := newTestSetup(provider)
+	eventID, categoryID := seedEventAndCategory(er, 2500, 1)
+	result, err := svc.Register(context.Background(), uuid.New(), eventID, validRegisterReq(categoryID))
+	if err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
+	expired := time.Now().Add(-time.Minute)
+	repo.payments[0].ExpiresAt = &expired
+	if err := svc.ReconcilePendingPayments(context.Background(), "worker-1", 25); err != nil {
+		t.Fatalf("ReconcilePendingPayments() error = %v", err)
+	}
+	if repo.regs[result.Registration.ID].Status != StatusCancelled {
+		t.Fatalf("registration status = %q, want CANCELLED", repo.regs[result.Registration.ID].Status)
 	}
 }
 
@@ -415,6 +602,22 @@ func TestService_Cancel_ForbiddenForNonOwnerNonStaff(t *testing.T) {
 	}
 }
 
+func TestService_Cancel_CheckedInRegistrationRejected(t *testing.T) {
+	svc, repo, er := newTestSetup(&fakePaymentProvider{status: payments.StatusSucceeded})
+	eventID, categoryID := seedEventAndCategory(er, 0, 10)
+	owner := uuid.New()
+	result, err := svc.Register(context.Background(), owner, eventID, validRegisterReq(categoryID))
+	if err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
+	repo.checkedIn[result.Registration.ID] = true
+
+	err = svc.Cancel(context.Background(), owner, auth.RoleUser, result.Registration.ID)
+	if !errors.Is(err, ErrCannotCancelCheckedIn) {
+		t.Fatalf("Cancel() error = %v, want ErrCannotCancelCheckedIn", err)
+	}
+}
+
 func TestService_GetByID_StaffCanViewAnyRegistration(t *testing.T) {
 	svc, _, er := newTestSetup(&fakePaymentProvider{status: payments.StatusSucceeded})
 	eventID, categoryID := seedEventAndCategory(er, 0, 10)
@@ -466,8 +669,8 @@ func TestService_Register_PaymentFailure_NoNotification(t *testing.T) {
 	svc, er, notifier := newTestSetupWithNotifier(&fakePaymentProvider{status: payments.StatusFailed})
 	eventID, categoryID := seedEventAndCategory(er, 5000, 10)
 
-	if _, err := svc.Register(context.Background(), uuid.New(), eventID, validRegisterReq(categoryID)); err != nil {
-		t.Fatalf("Register() error = %v", err)
+	if _, err := svc.Register(context.Background(), uuid.New(), eventID, validRegisterReq(categoryID)); !errors.Is(err, ErrPaymentUnavailable) {
+		t.Fatalf("Register() error = %v, want ErrPaymentUnavailable", err)
 	}
 
 	if len(notifier.confirmed) != 0 || len(notifier.paid) != 0 {

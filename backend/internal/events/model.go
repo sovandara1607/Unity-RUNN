@@ -1,7 +1,3 @@
-// Package events implements the Event domain: events, their
-// categories, schedule, FAQs, and rules. It follows the standard
-// handler -> validation -> service -> repository layering used
-// throughout the backend.
 package events
 
 import (
@@ -23,8 +19,7 @@ const (
 	StatusArchived           Status = "ARCHIVED"
 )
 
-// publicStatuses is the set of statuses visible to unauthenticated
-// callers. DRAFT, CANCELLED, and ARCHIVED are hidden from the public.
+// publicStatuses is the set of statuses visible to unauthenticated callers. DRAFT, CANCELLED, and ARCHIVED are hidden from the public
 var publicStatuses = map[Status]bool{
 	StatusPublished:          true,
 	StatusRegistrationOpen:   true,
@@ -33,28 +28,34 @@ var publicStatuses = map[Status]bool{
 }
 
 // IsPublic reports whether events in this status should be visible
-// to unauthenticated callers.
+// to unauthenticated callers
 func (s Status) IsPublic() bool {
 	return publicStatuses[s]
 }
 
 // validStatuses is the full set of allowed status values, mirroring
-// the database CHECK constraint.
+// the database CHECK constraint
 var validStatuses = map[Status]bool{
 	StatusDraft: true, StatusPublished: true, StatusRegistrationOpen: true,
 	StatusRegistrationClosed: true, StatusCompleted: true,
 	StatusCancelled: true, StatusArchived: true,
 }
 
-// IsValid reports whether s is one of the known event statuses.
+// allStatuses returns every known event status, in no particular order. Used when an admin caller lists events without an explicit status filter — they should see drafts and archived events too, unlike the public default (see publicStatuses)
+func allStatuses() []Status {
+	out := make([]Status, 0, len(validStatuses))
+	for s := range validStatuses {
+		out = append(out, s)
+	}
+	return out
+}
+
+// IsValid reports whether s is one of the known event statuses
 func (s Status) IsValid() bool {
 	return validStatuses[s]
 }
 
-// allowedTransitions maps each status to the set of statuses it may
-// move to. Terminal statuses (COMPLETED, CANCELLED, ARCHIVED... aside
-// from COMPLETED->ARCHIVED and CANCELLED->ARCHIVED) have no further
-// transitions.
+// allowedTransitions maps each status to the set of statuses it may move to. Terminal statuses (COMPLETED, CANCELLED, ARCHIVED... aside from COMPLETED->ARCHIVED and CANCELLED->ARCHIVED) have no further transitions
 var allowedTransitions = map[Status]map[Status]bool{
 	StatusDraft:              {StatusPublished: true, StatusCancelled: true},
 	StatusPublished:          {StatusRegistrationOpen: true, StatusCancelled: true},
@@ -65,7 +66,7 @@ var allowedTransitions = map[Status]map[Status]bool{
 	StatusArchived:           {},
 }
 
-// CanTransitionTo reports whether moving from s to next is allowed.
+// CanTransitionTo reports whether moving from s to next is allowed
 // Transitioning to the same status is always a no-op allowed case.
 func (s Status) CanTransitionTo(next Status) bool {
 	if s == next {
@@ -93,8 +94,7 @@ type Event struct {
 	UpdatedAt           time.Time  `json:"updated_at"`
 }
 
-// EventDetail bundles an event with its child collections, as
-// returned by GET /events/:slug.
+// EventDetail bundles an event with its child collections, as returned by GET /events/:slug
 type EventDetail struct {
 	Event
 	Categories []EventCategory `json:"categories"`
@@ -103,13 +103,14 @@ type EventDetail struct {
 	Rules      []EventRule     `json:"rules"`
 }
 
-// EventCategory is a registerable category within an event (e.g. 10K).
+// EventCategory is a registerable category within an event (e.g. 10K)
 type EventCategory struct {
 	ID                   uuid.UUID  `json:"id"`
 	EventID              uuid.UUID  `json:"event_id"`
 	Name                 string     `json:"name"`
 	Distance             string     `json:"distance"`
 	PriceCents           int        `json:"price_cents"`
+	Currency             string     `json:"currency"`
 	Capacity             int        `json:"capacity"`
 	RegistrationDeadline *time.Time `json:"registration_deadline"`
 	Status               string     `json:"status"`
@@ -117,7 +118,7 @@ type EventCategory struct {
 	UpdatedAt            time.Time  `json:"updated_at"`
 }
 
-// EventSchedule is one line item in an event's day-of schedule.
+// EventSchedule is one line item in an event's day-of schedule
 type EventSchedule struct {
 	ID          uuid.UUID `json:"id"`
 	EventID     uuid.UUID `json:"event_id"`
@@ -129,7 +130,7 @@ type EventSchedule struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
-// EventFAQ is one question/answer pair for an event.
+// EventFAQ is one question/answer pair for an event
 type EventFAQ struct {
 	ID        uuid.UUID `json:"id"`
 	EventID   uuid.UUID `json:"event_id"`
@@ -140,7 +141,7 @@ type EventFAQ struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// EventRule is one rule line item for an event.
+// EventRule is one rule line item for an event
 type EventRule struct {
 	ID        uuid.UUID `json:"id"`
 	EventID   uuid.UUID `json:"event_id"`
@@ -150,11 +151,9 @@ type EventRule struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// ListFilter narrows a List query.
+// ListFilter narrows a List query
 type ListFilter struct {
-	// Statuses restricts results to these statuses. Empty means "use
-	// the public status set" — callers pass explicit statuses only
-	// when the admin key was presented.
+	// Statuses restricts results to these statuses. Empty means "use the public status set" — callers pass explicit statuses only when the admin key was presented
 	Statuses []Status
 	Limit    int
 	Offset   int

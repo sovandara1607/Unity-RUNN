@@ -10,28 +10,23 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// ErrNotFound is returned when a check-in doesn't exist.
+// ErrNotFound is returned when a check-in doesn't exist
 var ErrNotFound = errors.New("checkin: not found")
 
-// ErrAlreadyCheckedIn is returned when a registration already has a
-// check-in record — the unique constraint on check_ins.registration_id
-// is the authoritative guarantee; this error surfaces that violation.
+// ErrAlreadyCheckedIn is returned when a registration already has a check-in record — the unique constraint on check_ins.registration_id is the authoritative guarantee; this error surfaces that violation
 var ErrAlreadyCheckedIn = errors.New("checkin: registration already checked in")
 
-// Repository persists check-in records in PostgreSQL.
+// Repository persists check-in records in PostgreSQL
 type Repository struct {
 	pool *pgxpool.Pool
 }
 
-// NewRepository builds a Repository backed by pool.
+// NewRepository builds a Repository backed by pool
 func NewRepository(pool *pgxpool.Pool) *Repository {
 	return &Repository{pool: pool}
 }
 
-// Create records a check-in. The unique constraint on
-// registration_id is what actually prevents double check-in under
-// concurrency — this method surfaces that as ErrAlreadyCheckedIn
-// rather than a raw constraint-violation error.
+// Create records a check-in. The unique constraint on registration_id is what actually prevents double check-in under concurrency — this method surfaces that as ErrAlreadyCheckedIn rather than a raw constraint-violation error
 func (r *Repository) Create(ctx context.Context, registrationID, staffUserID uuid.UUID) (*CheckIn, error) {
 	const query = `
 		INSERT INTO check_ins (registration_id, staff_user_id)
@@ -50,7 +45,7 @@ func (r *Repository) Create(ctx context.Context, registrationID, staffUserID uui
 	return &c, nil
 }
 
-// GetByRegistrationID fetches the check-in for a registration, if any.
+// GetByRegistrationID fetches the check-in for a registration, if any
 func (r *Repository) GetByRegistrationID(ctx context.Context, registrationID uuid.UUID) (*CheckIn, error) {
 	const query = `
 		SELECT id, registration_id, staff_user_id, checked_in_at, created_at

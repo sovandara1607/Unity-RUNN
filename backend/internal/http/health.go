@@ -10,27 +10,23 @@ import (
 
 const defaultReadyTimeout = 2 * time.Second
 
-// healthResponse is the payload for /health.
+// healthResponse is the payload for /health
 type healthResponse struct {
 	Status string `json:"status"`
 }
 
-// readyResponse is the payload for /ready.
+// readyResponse is the payload for /ready
 type readyResponse struct {
 	Status       string            `json:"status"`
 	Dependencies map[string]string `json:"dependencies"`
 }
 
-// healthHandler reports liveness only: if the process can respond at
-// all, it's healthy. No dependency checks — that's /ready's job.
+// healthHandler reports liveness only: if the process can respond at all, it's healthy. No dependency checks — that's /ready's job.
 func healthHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, healthResponse{Status: "ok"})
 }
 
-// readyHandler reports readiness by pinging PostgreSQL and Redis
-// concurrently, each bounded by deps.ReadyTimeout. Returns 200 only
-// if every configured dependency responds; 503 otherwise, with a
-// per-dependency breakdown.
+// readyHandler reports readiness by pinging PostgreSQL and Redis concurrently, each bounded by deps.ReadyTimeout. Returns 200 only if every configured dependency responds; 503 otherwise, with a per-dependency breakdown.
 func readyHandler(deps Deps) http.HandlerFunc {
 	timeout := deps.ReadyTimeout
 	if timeout <= 0 {
@@ -97,6 +93,7 @@ func readyHandler(deps Deps) http.HandlerFunc {
 	}
 }
 
+// writeJSON writes the body as JSON to the response writer
 func writeJSON(w http.ResponseWriter, status int, body any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)

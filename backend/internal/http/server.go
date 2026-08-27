@@ -6,14 +6,12 @@ import (
 	"time"
 )
 
-// Server wraps *http.Server with sensible defaults and graceful
-// shutdown support.
+// Server wraps it with sensible defaults and gracefull shutdown support
 type Server struct {
 	httpServer *http.Server
 }
 
-// NewServer builds a Server bound to addr (":8080" style) serving
-// handler, with conservative timeouts suitable for a REST API.
+// NewServer builds a Server bound to addr serving handler with conservative timeouts suitable for current REST API WORKLOAD
 func NewServer(addr string, handler http.Handler) *Server {
 	return &Server{
 		httpServer: &http.Server{
@@ -27,15 +25,12 @@ func NewServer(addr string, handler http.Handler) *Server {
 	}
 }
 
-// Start begins serving and blocks until the server stops or errors.
-// It returns http.ErrServerClosed on a clean Shutdown, which callers
-// should treat as a non-error termination.
+// Server starts serving and blocks until the server is listen and serve
 func (s *Server) Start() error {
 	return s.httpServer.ListenAndServe()
 }
 
-// Shutdown gracefully stops the server, waiting for in-flight
-// requests to complete within ctx's deadline.
+// Server shutdown if the context is error
 func (s *Server) Shutdown(ctx context.Context) error {
 	return s.httpServer.Shutdown(ctx)
 }

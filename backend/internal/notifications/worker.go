@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -22,10 +23,12 @@ type workerRepository interface {
 	ListPendingOlderThan(ctx context.Context, cutoff time.Time, limit int) ([]Notification, error)
 }
 
-// registrationGetter is the read-only slice of registrations the
-// worker needs to enrich a notification's template data.
 type registrationGetter interface {
 	GetByID(ctx context.Context, id uuid.UUID) (*registrations.Registration, error)
+}
+
+type paymentGetter interface {
+	GetPaymentForRegistration(ctx context.Context, registrationID uuid.UUID) (*registrations.Payment, error)
 }
 
 // eventGetter is the read-only slice of events the worker needs.
@@ -34,14 +37,19 @@ type eventGetter interface {
 	GetCategoryByID(ctx context.Context, id uuid.UUID) (*events.EventCategory, error)
 }
 
-// Worker drains the Redis queue and, as a durability backstop, sweeps
-// Postgres for any PENDING row the queue missed. Postgres remains
-// authoritative — the queue only helps the worker notice new work
-// quickly; a lost queue message never loses the email; it's just
-// picked up on the next sweep.
+type workerQueue interface {
+	pop(ctx context.Context, timeout time.Duration) (string, error)
+	heartbeat(ctx context.Context, ttl time.Duration) error
+}
+
+const (
+	workerHeartbeatInterval = 5 * time.Second
+	workerHeartbeatTTL      = 15 * time.Second
+)
+
 type Worker struct {
 	repo          workerRepository
-	queue         *Queue
+	queue         workerQueue
 	regs          registrationGetter
 	evts          eventGetter
 	sender        email.Sender
@@ -49,22 +57,29 @@ type Worker struct {
 	sweepInterval time.Duration
 	sweepAge      time.Duration
 	maxAttempts   int
+	publicAppURL  string
 }
 
 // NewWorker builds a Worker.
 func NewWorker(repo workerRepository, q *Queue, regs registrationGetter, evts eventGetter,
-	sender email.Sender, log *slog.Logger, sweepInterval time.Duration, maxAttempts int) *Worker {
+	sender email.Sender, log *slog.Logger, sweepInterval time.Duration, maxAttempts int,
+	publicAppURLs ...string) *Worker {
+	publicAppURL := "http://localhost:3000"
+	if len(publicAppURLs) > 0 && publicAppURLs[0] != "" {
+		publicAppURL = publicAppURLs[0]
+	}
 	return &Worker{
 		repo: repo, queue: q, regs: regs, evts: evts, sender: sender, log: log,
 		sweepInterval: sweepInterval, sweepAge: 5 * time.Second, maxAttempts: maxAttempts,
+		publicAppURL: publicAppURL,
 	}
 }
 
-// Run blocks, draining the queue and periodically sweeping, until ctx
-// is cancelled.
+// Run blocks, draining the queue and periodically sweeping, until ctx is cancelled.
 func (w *Worker) Run(ctx context.Context) {
 	sweepTicker := time.NewTicker(w.sweepInterval)
 	defer sweepTicker.Stop()
+	go w.runHeartbeat(ctx)
 
 	for {
 		select {
@@ -86,6 +101,26 @@ func (w *Worker) Run(ctx context.Context) {
 			}
 			w.process(ctx, id)
 		}
+	}
+}
+
+func (w *Worker) runHeartbeat(ctx context.Context) {
+	w.recordHeartbeat(ctx)
+	ticker := time.NewTicker(workerHeartbeatInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			w.recordHeartbeat(ctx)
+		}
+	}
+}
+
+func (w *Worker) recordHeartbeat(ctx context.Context) {
+	if err := w.queue.heartbeat(ctx, workerHeartbeatTTL); err != nil && ctx.Err() == nil {
+		w.log.Warn("notification_worker_heartbeat_failed", "error", err)
 	}
 }
 
@@ -144,7 +179,14 @@ func (w *Worker) send(ctx context.Context, n *Notification) error {
 		return fmt.Errorf("render: %w", err)
 	}
 
-	return w.sender.Send(ctx, email.Message{To: recipient, Subject: subject, HTML: html, Text: text})
+	attachments, err := email.AttachmentsFor(email.Type(n.Type), data)
+	if err != nil {
+		return fmt.Errorf("build attachments: %w", err)
+	}
+
+	return w.sender.Send(ctx, email.Message{
+		To: recipient, Subject: subject, HTML: html, Text: text, Attachments: attachments,
+	})
 }
 
 func (w *Worker) buildTemplateData(ctx context.Context, n *Notification) (email.TemplateData, string, error) {
@@ -169,7 +211,10 @@ func (w *Worker) buildTemplateData(ctx context.Context, n *Notification) (email.
 		CategoryName:       category.Name,
 		RegistrationNumber: reg.RegistrationNumber,
 		EventDate:          ev.EventDate.Format("Monday, January 2, 2006"),
+		StartTime:          ev.StartTime.Format("3:04 PM"),
 		Location:           ev.Location,
+		TshirtSize:         reg.TshirtSize,
+		DashboardURL:       strings.TrimRight(w.publicAppURL, "/") + "/dashboard",
 	}
 
 	if amountCents, ok := n.Payload["amount_cents"].(float64); ok {
@@ -179,7 +224,35 @@ func (w *Worker) buildTemplateData(ctx context.Context, n *Notification) (email.
 		data.ChangedFields = joinAny(changed)
 	}
 
+	if n.Type == TypePaymentConfirmation {
+		payments, ok := w.regs.(paymentGetter)
+		if !ok {
+			return email.TemplateData{}, "", errors.New("registration repository cannot load payment receipt")
+		}
+		payment, err := payments.GetPaymentForRegistration(ctx, reg.ID)
+		if err != nil {
+			return email.TemplateData{}, "", fmt.Errorf("load payment receipt: %w", err)
+		}
+		data.PaymentProvider = payment.Provider
+		data.PaymentReference = payment.ProviderReference
+		data.AmountFormatted = formatPaymentAmount(payment.AmountCents, payment.Currency)
+		if payment.VerifiedAt != nil {
+			data.PaymentVerifiedAt = payment.VerifiedAt.Format("02 Jan 2006, 15:04 MST")
+		}
+	}
+
 	return data, n.RecipientEmail, nil
+}
+
+func formatPaymentAmount(amountCents int, currency string) string {
+	switch strings.ToUpper(strings.TrimSpace(currency)) {
+	case "KHR":
+		return fmt.Sprintf("KHR %d", amountCents)
+	case "USD", "":
+		return fmt.Sprintf("$%.2f USD", float64(amountCents)/100)
+	default:
+		return fmt.Sprintf("%s %.2f", strings.ToUpper(currency), float64(amountCents)/100)
+	}
 }
 
 func joinAny(items []any) string {

@@ -2,6 +2,7 @@ package auth
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,11 @@ import (
 	"github.com/go-chi/chi/v5"
 	"golang.org/x/crypto/bcrypt"
 )
+
+type denyingLoginLimiter struct{}
+
+func (denyingLoginLimiter) Allow(context.Context, string) (bool, error) { return false, nil }
+func (denyingLoginLimiter) Reset(context.Context, string) error         { return nil }
 
 func newTestHandler() (*Handler, http.Handler) {
 	repo := newFakeAuthRepo()
@@ -151,6 +157,25 @@ func TestHandler_Login_WrongPassword(t *testing.T) {
 	}, nil)
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusUnauthorized, rec.Body.String())
+	}
+}
+
+func TestHandler_Login_RateLimited(t *testing.T) {
+	repo := newFakeAuthRepo()
+	tokens := NewTokenIssuer("test-secret", 15*time.Minute)
+	svc := NewService(repo, tokens, bcrypt.MinCost, 24*time.Hour)
+	h := NewHandler(svc, 24*time.Hour, false, denyingLoginLimiter{})
+	router := chi.NewRouter()
+	router.Post("/api/v1/auth/login", h.Login)
+
+	rec := doJSON(router, http.MethodPost, "/api/v1/auth/login", LoginRequest{
+		Email: "runner@unityrunclub.com", Password: "wrong-password",
+	}, nil)
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusTooManyRequests, rec.Body.String())
+	}
+	if got := rec.Header().Get("Retry-After"); got != "900" {
+		t.Errorf("Retry-After = %q, want 900", got)
 	}
 }
 

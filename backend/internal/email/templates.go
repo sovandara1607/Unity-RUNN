@@ -11,10 +11,7 @@ import (
 //go:embed templates/*.tmpl
 var templateFS embed.FS
 
-// Type identifies which notification template to render. Mirrors
-// internal/notifications.Type — kept as a separate string type here
-// so internal/email has no dependency on internal/notifications
-// (email is the lower-level, reusable package).
+// Type identifies which notification template to render. Mirrors internal/notifications.Type — kept as a separate string type here so internal/email has no dependency on internal/notifications (email is the lower-level, reusable package)
 type Type string
 
 const (
@@ -41,21 +38,25 @@ var filenames = map[Type]string{
 	TypeCancellation:             "cancellation",
 }
 
-// TemplateData is the placeholder set every template can draw from.
-// Not every field is used by every template.
+// TemplateData is the placeholder set every template can draw from. Not every field is used by every template
 type TemplateData struct {
 	FullName           string
 	EventName          string
 	CategoryName       string
 	RegistrationNumber string
 	EventDate          string
+	StartTime          string
 	Location           string
+	TshirtSize         string
 	AmountFormatted    string
+	PaymentProvider    string
+	PaymentReference   string
+	PaymentVerifiedAt  string
+	DashboardURL       string
 	ChangedFields      string
 }
 
-// Render produces the subject, HTML body, and plain-text body for
-// typ using data.
+// Render produces the subject, HTML body, and plain-text body for typ using data
 func Render(typ Type, data TemplateData) (subject, html, text string, err error) {
 	subjectTmpl, ok := subjects[typ]
 	if !ok {
@@ -84,6 +85,7 @@ func Render(typ Type, data TemplateData) (subject, html, text string, err error)
 	return subject, html, text, nil
 }
 
+// renderText renders the text template
 func renderText(tmplSrc string, data TemplateData) (string, error) {
 	tmpl, err := textTemplate.New("inline").Parse(tmplSrc)
 	if err != nil {
@@ -96,18 +98,20 @@ func renderText(tmplSrc string, data TemplateData) (string, error) {
 	return buf.String(), nil
 }
 
+// renderHTMLFile renders the HTML file
 func renderHTMLFile(name string, data TemplateData) (string, error) {
-	tmpl, err := template.ParseFS(templateFS, "templates/"+name)
+	tmpl, err := template.ParseFS(templateFS, "templates/base.html.tmpl", "templates/"+name)
 	if err != nil {
 		return "", err
 	}
 	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, data); err != nil {
+	if err := tmpl.ExecuteTemplate(&buf, "base", data); err != nil {
 		return "", err
 	}
 	return buf.String(), nil
 }
 
+// renderTextFile renders the text file
 func renderTextFile(name string, data TemplateData) (string, error) {
 	tmpl, err := textTemplate.ParseFS(templateFS, "templates/"+name)
 	if err != nil {

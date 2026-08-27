@@ -5,6 +5,7 @@ import (
 	"testing"
 )
 
+// allTypes returns all email types
 func allTypes() []Type {
 	return []Type{
 		TypeRegistrationConfirmation, TypePaymentConfirmation,
@@ -12,11 +13,14 @@ func allTypes() []Type {
 	}
 }
 
+// TestRender_AllTypesRenderWithoutError tests the Render method that renders all email types without error
 func TestRender_AllTypesRenderWithoutError(t *testing.T) {
 	data := TemplateData{
 		FullName: "Test Runner", EventName: "Founders Run", CategoryName: "5K",
 		RegistrationNumber: "URC-2026-000001", EventDate: "Saturday, January 10, 2026",
-		Location: "Diamond Island", AmountFormatted: "$50.00", ChangedFields: "event date, location",
+		StartTime: "6:00 AM", Location: "Diamond Island", AmountFormatted: "$50.00",
+		PaymentProvider: "Bakong", PaymentReference: "KHQR-001",
+		DashboardURL: "http://localhost:3000/dashboard", ChangedFields: "event date, location",
 	}
 
 	for _, typ := range allTypes() {
@@ -44,6 +48,7 @@ func TestRender_AllTypesRenderWithoutError(t *testing.T) {
 	}
 }
 
+// TestRender_UnknownType tests the Render method that returns an error for an unknown email type
 func TestRender_UnknownType(t *testing.T) {
 	_, _, _, err := Render(Type("BOGUS"), TemplateData{})
 	if err == nil {
