@@ -1,6 +1,4 @@
-// Command emailtest sends the current registration and payment confirmation
-// designs to one explicit address. It is intended for local SMTP verification
-// and refuses to run without EMAIL_TEST_TO.
+
 package main
 
 import (

@@ -10,13 +10,6 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// AvailabilityCache caches per-category availability snapshots in
-// Redis with a short TTL, invalidated on every registration
-// create/cancel. Postgres (via Repository.CountActive) remains the
-// source of truth — a cache miss or Redis outage just means falling
-// back to a live count, never stale-forever or incorrect capacity
-// enforcement (capacity itself is always checked fresh in Postgres at
-// registration time regardless of what this cache says).
 type AvailabilityCache struct {
 	rdb *redis.Client
 	ttl time.Duration
@@ -53,8 +46,6 @@ func (c *AvailabilityCache) Set(ctx context.Context, categoryID uuid.UUID, a Ava
 	return c.rdb.Set(ctx, availabilityKey(categoryID), raw, c.ttl).Err()
 }
 
-// Invalidate drops the cached snapshot for a category (called after
-// any registration create/cancel affecting it).
 func (c *AvailabilityCache) Invalidate(ctx context.Context, categoryID uuid.UUID) error {
 	return c.rdb.Del(ctx, availabilityKey(categoryID)).Err()
 }

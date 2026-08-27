@@ -17,12 +17,15 @@ import {
 } from "lucide-react";
 import { AdminLayout } from "../../../../components/admin/AdminLayout";
 import { EventPosterField } from "../../../../components/admin/EventPosterField";
+import { EventLocationField } from "../../../../components/admin/EventLocationField";
 import { Skeleton, SkeletonText } from "../../../../components/Skeleton";
 import { withMinSkeleton } from "../../../../lib/withMinSkeleton";
 import { EventStatusBadge } from "../../../../components/admin/EventStatusBadge";
 import { AlertBanner } from "../../../../components/alerts/AlertSystem";
 import { api } from "../../../../lib/api";
 import type { Event, EventDetail, EventStatus } from "../../../../types";
+import { formatMoney } from "../../../../lib/money";
+import { parseEventCoordinates } from "../../../../lib/eventLocation";
 
 const statusTransitions: Record<EventStatus, { next: EventStatus; label: string; icon: LucideIcon; color: string }[]> = {
   DRAFT: [
@@ -74,6 +77,8 @@ export default function AdminEditEventPage() {
     event_date: "",
     start_time: "06:00",
     location: "",
+    latitude: "",
+    longitude: "",
     registration_open_at: "",
     registration_close_at: "",
   });
@@ -93,6 +98,8 @@ export default function AdminEditEventPage() {
         event_date: found.event_date ? found.event_date.slice(0, 10) : "",
         start_time: found.start_time ? found.start_time.slice(11, 16) : "06:00",
         location: found.location || "",
+        latitude: found.latitude == null ? "" : String(found.latitude),
+        longitude: found.longitude == null ? "" : String(found.longitude),
         registration_open_at: found.registration_open_at ? found.registration_open_at.slice(0, 16) : "",
         registration_close_at: found.registration_close_at ? found.registration_close_at.slice(0, 16) : "",
       });
@@ -152,7 +159,8 @@ export default function AdminEditEventPage() {
         throw new Error(`Fix the event poster before saving: ${posterError}`);
       }
 
-      const payload: Partial<Event> = {
+      const coordinates = parseEventCoordinates(formData.latitude, formData.longitude);
+      const payload: Partial<Event> & { clear_coordinates?: boolean } = {
         name: formData.name,
         slug: formData.slug,
         description: formData.description,
@@ -160,6 +168,9 @@ export default function AdminEditEventPage() {
         event_date: formData.event_date,
         start_time: formData.start_time,
         location: formData.location,
+        latitude: coordinates?.latitude,
+        longitude: coordinates?.longitude,
+        clear_coordinates: !coordinates,
       };
 
       if (formData.registration_open_at) {
@@ -365,16 +376,13 @@ export default function AdminEditEventPage() {
               </div>
             </div>
 
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Location / Venue *
-              </label>
-              <input
-                type="text"
-                required
-                value={formData.location}
-                onChange={(e) => setFormData({ ...formData, location: e.target.value })}
-                className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500"
+            <div className="sm:col-span-2">
+              <EventLocationField
+                location={formData.location}
+                latitude={formData.latitude}
+                longitude={formData.longitude}
+                disabled={saving}
+                onChange={(location) => setFormData((current) => ({ ...current, ...location }))}
               />
             </div>
 
@@ -488,7 +496,7 @@ export default function AdminEditEventPage() {
                     </span>
                   </div>
                   <div className="mt-3 space-y-1 text-xs text-slate-600">
-                    <p>Price: <span className="font-semibold text-slate-900">${(cat.price_cents / 100).toFixed(2)}</span></p>
+                    <p>Price: <span className="font-semibold text-slate-900">{formatMoney(cat.price_cents, cat.currency)}</span></p>
                     <p>Capacity: <span className="font-semibold text-slate-900">{cat.capacity} runners</span></p>
                     <p>Status: <span className="capitalize">{cat.status}</span></p>
                   </div>

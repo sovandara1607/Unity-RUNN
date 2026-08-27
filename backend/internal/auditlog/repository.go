@@ -9,17 +9,17 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// Repository persists audit log entries in PostgreSQL.
+// Repository persists audit log entries in PostgreSQL
 type Repository struct {
 	pool *pgxpool.Pool
 }
 
-// NewRepository builds a Repository backed by pool.
+// NewRepository builds a Repository backed by pool
 func NewRepository(pool *pgxpool.Pool) *Repository {
 	return &Repository{pool: pool}
 }
 
-// Insert records e, populating e.ID/CreatedAt.
+// Insert records e, populating e.ID/CreatedAt
 func (r *Repository) Insert(ctx context.Context, e *Entry) error {
 	metadata := e.Metadata
 	if metadata == nil {
@@ -38,15 +38,14 @@ func (r *Repository) Insert(ctx context.Context, e *Entry) error {
 		Scan(&e.ID, &e.CreatedAt)
 }
 
-// ListFilter narrows a List query.
+// ListFilter narrows a List query
 type ListFilter struct {
 	EntityType string
 	Limit      int
 	Offset     int
 }
 
-// List returns audit log entries, most recent first, optionally
-// filtered by entity_type — for the admin audit trail view.
+// List returns audit log entries, most recent first, optionally filtered by entity_type
 func (r *Repository) List(ctx context.Context, filter ListFilter) ([]Entry, error) {
 	where := "WHERE 1=1"
 	args := []any{}
@@ -88,8 +87,7 @@ func (r *Repository) List(ctx context.Context, filter ListFilter) ([]Entry, erro
 	return out, rows.Err()
 }
 
-// ListByEntity returns audit log entries for one entity, most recent
-// first — for a future admin UI (e.g. a registration's history).
+// ListByEntity returns audit log entries for one entity, most recent first
 func (r *Repository) ListByEntity(ctx context.Context, entityType string, entityID uuid.UUID) ([]Entry, error) {
 	const query = `
 		SELECT id, actor_id, action, entity_type, entity_id, metadata, created_at

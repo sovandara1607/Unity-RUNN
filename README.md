@@ -16,6 +16,7 @@ The repository contains a public Next.js site, a role-aware operations panel, a 
 - Generates downloadable ticket cards with scannable QR codes and PDF payment receipts.
 - Sends branded registration and payment email, including ticket and receipt attachments.
 - Provides a camera-based check-in station, manual lookup fallback, duplicate protection, and a live arrival feed.
+- Gives new public visitors an essential/optional cookie choice that can be reopened from the site footer.
 - Exposes audit logs, user management, operational metrics, and a sanitized system-status console.
 
 ## Architecture
@@ -112,6 +113,8 @@ Open [http://localhost:3000](http://localhost:3000).
 | PostgreSQL | `localhost:5432` |
 | Redis | `localhost:6379` |
 
+The default Compose profile is intentionally small: PostgreSQL and the API are capped at 256 MB each, while Redis and Socket.IO are capped at 96 MB each. CPU, heap, and memory limits can be adjusted with the resource variables documented in [`.env.example`](./.env.example). Redis uses `noeviction`, so reaching its memory ceiling fails writes visibly instead of silently discarding queues or locks.
+
 ## Roles and access
 
 Roles form a fixed hierarchy. A higher role inherits the capabilities allowed to lower roles.
@@ -151,6 +154,7 @@ Frontend checks:
 cd frontend
 npm run lint
 npm run build
+npm run test:e2e       # desktop and mobile Chromium journeys
 ```
 
 Realtime syntax check:
@@ -170,6 +174,7 @@ Every pull request and every push to `main` runs the [CI workflow](.github/workf
 | Backend unit tests | `go test ./... -race` |
 | Backend integration tests | Migrations apply cleanly, then `go test -tags=integration -p 1 -race` against PostgreSQL 16 |
 | Frontend | `npm run lint` and `npm run build` |
+| Browser journeys | Public event, login/session, and poster-editor flows on desktop and mobile with Playwright |
 | Realtime | `node --check server.mjs` |
 | Docker Compose | `docker compose config --quiet` |
 
@@ -214,11 +219,11 @@ Unity-RUNN/
 
 ### Event publishing
 
-Admins create an event draft, upload or link its poster, add ticket categories, and publish it. Object uploads are independent of event creation: the returned media URL is stored with the event, while the binary remains in local storage or R2.
+Admins create an event draft, choose the poster artboard, upload or link its artwork, add ticket categories, and publish it. Uploads are normalized to JPEG and stored with smaller card and hero variants so public pages avoid transferring the full original unnecessarily. Existing and externally linked posters continue to use the original URL as a safe fallback.
 
 ### Registration and payment
 
-The API validates category availability and participant data, then creates a registration. Free registrations can be confirmed directly; paid registrations proceed through the configured payment provider. Local development defaults to a mock provider so no real money moves.
+The API validates category availability and participant data, then creates a registration. Free registrations can be confirmed directly; paid registrations proceed through the configured payment provider in the category's USD or KHR currency. Failed initialization releases the reserved place, and a PostgreSQL-leased background reconciler verifies settlement even if the runner closes the browser. Local development defaults to a mock provider so no real money moves.
 
 ### Ticket and check-in
 
@@ -228,12 +233,15 @@ Confirmed registrations receive a stable ticket. The downloadable card includes 
 
 Email is queued and retried asynchronously. Without SMTP settings, development uses a no-op sender and logs the message. With Gmail SMTP configured, confirmation and payment messages include the branded ticket and receipt documents.
 
+The delivery worker publishes an expiring Redis heartbeat so the system console can detect a stopped or stale worker even when no messages are waiting.
+
 ## Security model
 
 - Short-lived access tokens are paired with hashed, rotating refresh tokens in an HttpOnly cookie.
 - Passwords use bcrypt and are never returned by the API.
 - Sensitive admin routes use server-side role checks.
 - Authentication and registration endpoints are rate limited.
+- Public cookie consent is stored separately from authentication; optional browser tools must read that choice before activation.
 - Uploads are size/type checked and object-store credentials remain server-side.
 - Check-in is protected by staff authentication, event validation, and database uniqueness.
 - Audit logs record security-sensitive administrative actions.

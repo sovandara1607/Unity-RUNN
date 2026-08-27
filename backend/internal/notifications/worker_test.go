@@ -123,6 +123,27 @@ type fakeSender struct {
 	err  error
 }
 
+type fakeWorkerQueue struct {
+	heartbeats chan struct{}
+}
+
+func (f *fakeWorkerQueue) pop(ctx context.Context, timeout time.Duration) (string, error) {
+	select {
+	case <-ctx.Done():
+		return "", ctx.Err()
+	case <-time.After(time.Millisecond):
+		return "", nil
+	}
+}
+
+func (f *fakeWorkerQueue) heartbeat(context.Context, time.Duration) error {
+	select {
+	case f.heartbeats <- struct{}{}:
+	default:
+	}
+	return nil
+}
+
 func (f *fakeSender) Send(ctx context.Context, msg email.Message) error {
 	if f.err != nil {
 		return f.err
@@ -131,8 +152,6 @@ func (f *fakeSender) Send(ctx context.Context, msg email.Message) error {
 	return nil
 }
 
-// setup builds a Worker plus its fakes, with one seeded
-// registration/event/category ready to be referenced by a notification.
 func setup() (*Worker, *fakeWorkerRepo, *fakeSender, uuid.UUID) {
 	regID := uuid.New()
 	eventID := uuid.New()
@@ -181,6 +200,27 @@ func TestWorker_Process_SuccessMarksSent(t *testing.T) {
 	if notifRepo.byID[id].Status != StatusSent {
 		t.Errorf("Status = %q, want %q", notifRepo.byID[id].Status, StatusSent)
 	}
+}
+
+func TestWorker_RunPublishesHeartbeatImmediately(t *testing.T) {
+	w, _, _, _ := setup()
+	queue := &fakeWorkerQueue{heartbeats: make(chan struct{}, 1)}
+	w.queue = queue
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		w.Run(ctx)
+		close(done)
+	}()
+
+	select {
+	case <-queue.heartbeats:
+		cancel()
+	case <-time.After(250 * time.Millisecond):
+		cancel()
+		t.Fatal("worker did not publish its startup heartbeat")
+	}
+	<-done
 }
 
 func TestWorker_Process_PaymentConfirmationAttachesVerifiedReceipt(t *testing.T) {

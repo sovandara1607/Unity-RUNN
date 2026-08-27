@@ -14,9 +14,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// ErrInvalidCredentials is returned on login failure. It's
-// intentionally generic — callers must not reveal whether the email
-// or the password was wrong.
+// ErrInvalidCredentials is returned on login failure. It's intentionally generic — callers must not reveal whether the email or the password was wrong
 var ErrInvalidCredentials = errors.New("auth: invalid email or password")
 
 var ErrUnverifiedOAuthEmail = errors.New("auth: oauth email is not verified")
@@ -40,7 +38,7 @@ type authRepository interface {
 	UpdateUserRole(ctx context.Context, id uuid.UUID, role Role) (*User, error)
 }
 
-// Service implements auth business rules on top of a repository.
+// Service implements auth business rules on top of a repository
 type Service struct {
 	repo              authRepository
 	tokens            *TokenIssuer
@@ -50,8 +48,7 @@ type Service struct {
 	now               func() time.Time
 }
 
-// NewService builds a Service. bcryptCost should be bcrypt.DefaultCost
-// (10) or higher in production; tests may pass bcrypt.MinCost.
+// NewService builds a Service. bcryptCost should be bcrypt.DefaultCost (10) or higher in production; tests may pass bcrypt.MinCost
 func NewService(repo authRepository, tokens *TokenIssuer, bcryptCost int, refreshTokenTTL time.Duration) *Service {
 	dummyPasswordHash, _ := HashPassword("unity-invalid-login-placeholder", bcryptCost)
 	return &Service{
@@ -64,17 +61,14 @@ func NewService(repo authRepository, tokens *TokenIssuer, bcryptCost int, refres
 	}
 }
 
-// AuthResult bundles what callers need after register/login/refresh:
-// the issued access token and the raw refresh token to set as a
-// cookie (empty on operations that don't rotate it).
+// AuthResult bundles what callers need after register/login/refresh: the issued access token and the raw refresh token to set as a cookie (empty on operations that don't rotate it)
 type AuthResult struct {
 	User         *User
 	AccessToken  string
 	RefreshToken string
 }
 
-// Register creates a new user (role USER) with a profile, and issues
-// an initial token pair.
+// Register creates a new user (role USER) with a profile, and issues an initial token pair
 func (s *Service) Register(ctx context.Context, req RegisterRequest) (*AuthResult, error) {
 	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
 	hash, err := HashPassword(req.Password, s.bcryptCost)
@@ -92,13 +86,12 @@ func (s *Service) Register(ctx context.Context, req RegisterRequest) (*AuthResul
 	return s.issueTokenPair(ctx, u)
 }
 
-// Login verifies credentials and issues a new token pair.
+// Login verifies credentials and issues a new token pair
 func (s *Service) Login(ctx context.Context, req LoginRequest) (*AuthResult, error) {
 	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
 	u, err := s.repo.GetUserByEmail(ctx, req.Email)
 	if errors.Is(err, ErrNotFound) {
-		// Spend the same bcrypt work as a real account lookup so response timing
-		// does not disclose whether this email exists.
+		// Spend the same bcrypt work as a real account lookup so response timing does not disclose whether this email exists
 		_ = VerifyPassword(s.dummyPasswordHash, req.Password)
 		return nil, ErrInvalidCredentials
 	}
@@ -114,7 +107,7 @@ func (s *Service) Login(ctx context.Context, req LoginRequest) (*AuthResult, err
 }
 
 // LoginWithGoogle signs in an existing linked account, safely links a verified
-// Google email to an existing local account, or creates a runner account.
+// Google email to an existing local account, or creates a runner account
 func (s *Service) LoginWithGoogle(ctx context.Context, profile GoogleProfile) (*AuthResult, error) {
 	profile.Subject = strings.TrimSpace(profile.Subject)
 	profile.Email = strings.ToLower(strings.TrimSpace(profile.Email))
@@ -161,8 +154,7 @@ func (s *Service) LoginWithGoogle(ctx context.Context, profile GoogleProfile) (*
 	if err := s.repo.LinkIdentity(ctx, identity); err != nil {
 		return nil, err
 	}
-	// Re-read the canonical link. This also resolves a simultaneous first login
-	// without ever issuing a session for the wrong provider subject.
+	// Re-read the canonical link. This also resolves a simultaneous first login without ever issuing a session for the wrong provider subject
 	linked, err := s.repo.GetUserByIdentity(ctx, "google", profile.Subject)
 	if err != nil {
 		return nil, err
@@ -170,8 +162,7 @@ func (s *Service) LoginWithGoogle(ctx context.Context, profile GoogleProfile) (*
 	return s.issueTokenPair(ctx, linked)
 }
 
-// Refresh validates the presented raw refresh token, revokes it, and
-// issues a new token pair (rotation-on-use).
+// Refresh validates the presented raw refresh token, revokes it, and issues a new token pair (rotation-on-use)
 func (s *Service) Refresh(ctx context.Context, rawRefreshToken string) (*AuthResult, error) {
 	hash := hashToken(rawRefreshToken)
 
@@ -199,8 +190,7 @@ func (s *Service) Refresh(ctx context.Context, rawRefreshToken string) (*AuthRes
 	return s.issueTokenPair(ctx, u)
 }
 
-// Logout revokes the presented raw refresh token. Revoking an
-// already-invalid token is treated as success (idempotent logout).
+// Logout revokes the presented raw refresh token. Revoking an already-invalid token is treated as success (idempotent logout)
 func (s *Service) Logout(ctx context.Context, rawRefreshToken string) error {
 	hash := hashToken(rawRefreshToken)
 
@@ -219,17 +209,17 @@ func (s *Service) Logout(ctx context.Context, rawRefreshToken string) error {
 	return err
 }
 
-// GetProfile returns the profile for userID.
+// GetProfile returns the profile for userID
 func (s *Service) GetProfile(ctx context.Context, userID uuid.UUID) (*Profile, error) {
 	return s.repo.GetProfileByUserID(ctx, userID)
 }
 
-// GetUserByID returns the user by ID.
+// GetUserByID returns the user by ID
 func (s *Service) GetUserByID(ctx context.Context, userID uuid.UUID) (*User, error) {
 	return s.repo.GetUserByID(ctx, userID)
 }
 
-// ListUsers returns a paginated account directory for super-admin tooling.
+// ListUsers returns a paginated account directory for super-admin tooling
 func (s *Service) ListUsers(ctx context.Context, role *Role, limit, offset int) ([]User, int, error) {
 	if role != nil && !role.IsValid() {
 		return nil, 0, fmt.Errorf("auth: invalid role")
@@ -246,8 +236,7 @@ func (s *Service) ListUsers(ctx context.Context, role *Role, limit, offset int) 
 	return s.repo.ListUsers(ctx, role, limit, offset)
 }
 
-// UpdateUserRole changes an account role. A super admin cannot demote their
-// own active session, preventing an accidental administrative lockout.
+// UpdateUserRole changes an account role. A super admin cannot demote their own active session, preventing an accidental administrative lockout
 func (s *Service) UpdateUserRole(ctx context.Context, actorID, targetID uuid.UUID, role Role) (*User, error) {
 	if !role.IsValid() {
 		return nil, fmt.Errorf("auth: invalid role")
@@ -258,7 +247,7 @@ func (s *Service) UpdateUserRole(ctx context.Context, actorID, targetID uuid.UUI
 	return s.repo.UpdateUserRole(ctx, targetID, role)
 }
 
-// UpdateProfile applies a partial update to the profile for userID.
+// UpdateProfile applies a partial update to the profile for userID
 func (s *Service) UpdateProfile(ctx context.Context, userID uuid.UUID, req UpdateProfileRequest) (*Profile, error) {
 	p, err := s.repo.GetProfileByUserID(ctx, userID)
 	if err != nil {
@@ -300,8 +289,7 @@ func (s *Service) UpdateProfile(ctx context.Context, userID uuid.UUID, req Updat
 	return p, nil
 }
 
-// issueTokenPair generates an access token and a new raw refresh
-// token, persisting only the refresh token's hash.
+// issueTokenPair generates an access token and a new raw refresh token, persisting only the refresh token's hash
 func (s *Service) issueTokenPair(ctx context.Context, u *User) (*AuthResult, error) {
 	accessToken, err := s.tokens.GenerateAccessToken(u.ID, u.Role)
 	if err != nil {
@@ -325,7 +313,7 @@ func (s *Service) issueTokenPair(ctx context.Context, u *User) (*AuthResult, err
 	return &AuthResult{User: u, AccessToken: accessToken, RefreshToken: rawRefreshToken}, nil
 }
 
-// generateRawToken returns a cryptographically random, URL-safe token.
+// generateRawToken returns a cryptographically random, URL-safe token
 func generateRawToken() (string, error) {
 	buf := make([]byte, 32)
 	if _, err := rand.Read(buf); err != nil {
@@ -334,8 +322,7 @@ func generateRawToken() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(buf), nil
 }
 
-// hashToken returns a hex-encoded SHA-256 hash of a raw refresh
-// token, for storage/lookup (never store the raw token).
+// hashToken returns a hex-encoded SHA-256 hash of a raw refresh token, for storage/lookup (never store the raw token)
 func hashToken(raw string) string {
 	sum := sha256.Sum256([]byte(raw))
 	return hex.EncodeToString(sum[:])

@@ -1,6 +1,3 @@
-// Package objectstore provides the small storage contract used by upload
-// handlers. Production can use Cloudflare R2 while local development keeps a
-// filesystem implementation with the same object keys.
 package objectstore
 
 import (
@@ -21,14 +18,10 @@ import (
 
 var ErrNotFound = errors.New("objectstore: object not found")
 
-// Store persists an object and returns the URL that should be saved in the
-// application's database.
 type Store interface {
 	Put(ctx context.Context, key, contentType string, body io.Reader, size int64) (string, error)
 }
 
-// HealthChecker is implemented by storage backends that can verify their
-// configured destination without creating an object.
 type HealthChecker interface {
 	Ping(ctx context.Context) error
 }

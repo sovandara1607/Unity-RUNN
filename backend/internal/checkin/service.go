@@ -13,61 +13,49 @@ import (
 	"github.com/unity-run-club/api/internal/tokenhash"
 )
 
-// ErrInvalidToken is returned when the scanned token doesn't resolve
-// to any ticket.
 var ErrInvalidToken = errors.New("checkin: invalid or unknown ticket token")
 
-// ErrNotConfirmed is returned when the registration exists but isn't
-// CONFIRMED (e.g. still PENDING payment, or cancelled).
 var ErrNotConfirmed = errors.New("checkin: registration is not confirmed")
 
-// ErrWrongEvent prevents a valid ticket for one race from being
-// accidentally accepted while staff are operating another race's station.
 var ErrWrongEvent = errors.New("checkin: registration belongs to another event")
 
-// checkinRepository is the subset of Repository this service depends on.
+// checkinRepository is the subset of Repository this service depends on
 type checkinRepository interface {
 	Create(ctx context.Context, registrationID, staffUserID uuid.UUID) (*CheckIn, error)
 }
 
 // registrationsReader is the read-only slice of the registrations
-// domain this service needs. checkin depends on registrations, never
-// the other way — same one-directional pattern registrations uses
-// for events.
+// domain this service needs. checkin depends on registrations, never the other way — same one-directional pattern registrations uses for events
 type registrationsReader interface {
 	GetRegistrationIDByTicketTokenHash(ctx context.Context, tokenHash string) (uuid.UUID, error)
 	GetByRegistrationNumber(ctx context.Context, number string) (*registrations.Registration, error)
 	GetByID(ctx context.Context, id uuid.UUID) (*registrations.Registration, error)
 }
 
-// Service implements check-in business rules.
+// Service implements check-in business rules
 type Service struct {
 	repo     checkinRepository
 	regsRepo registrationsReader
 	audit    *auditlog.Service
 }
 
-// NewService builds a Service.
+// NewService builds a Service
 func NewService(repo checkinRepository, regsRepo registrationsReader, audit *auditlog.Service) *Service {
 	return &Service{repo: repo, regsRepo: regsRepo, audit: audit}
 }
 
-// Result bundles a successful check-in with the registration it belongs to.
+// Result bundles a successful check-in with the registration it belongs to
 type Result struct {
 	Registration registrations.Registration
 	CheckIn      CheckIn
 }
 
-// CheckIn validates a scanned raw QR token (or a typed registration
-// number like URC-2026-000042) and records a check-in, attributed to
-// staffUserID. Every outcome (success or the reason for failure) is
-// written to the audit log.
+// CheckIn validates a scanned raw QR token (or a typed registration number like URC-2026-000042) and records a check-in, attributed to staffUserID. Every outcome (success or the reason for failure) is written to the audit log
 func (s *Service) CheckIn(ctx context.Context, staffUserID uuid.UUID, eventID *uuid.UUID, rawToken string) (*Result, error) {
 	code := normalizeTicketCode(rawToken)
 	registrationID, err := s.regsRepo.GetRegistrationIDByTicketTokenHash(ctx, tokenhash.Hash(code))
 	if errors.Is(err, registrations.ErrNotFound) {
-		// Fallback: treat the input as a URC-YYYY-NNNNNN registration
-		// number so manual entry works when no scanner is available.
+		// Fallback: treat the input as a URC-YYYY-NNNNNN registration number so manual entry works when no scanner is available
 		reg, regErr := s.regsRepo.GetByRegistrationNumber(ctx, strings.ToUpper(code))
 		if regErr != nil {
 			s.logAttempt(ctx, staffUserID, nil, "check_in_failed", map[string]any{"reason": "invalid_token"})
@@ -111,10 +99,7 @@ func (s *Service) CheckIn(ctx context.Context, staffUserID uuid.UUID, eventID *u
 	return &Result{Registration: *reg, CheckIn: *checkIn}, nil
 }
 
-// normalizeTicketCode accepts the plain registration number used by the web
-// wallet, legacy opaque ticket tokens, and URL/URC wrappers produced by other
-// wallet apps. Keeping this tolerant makes camera and USB scanners easier to
-// use without weakening authorization: the check-in endpoint remains STAFF+.
+// normalizeTicketCode accepts the plain registration number used by the web wallet, legacy opaque ticket tokens, and URL/URC wrappers produced by other wallet apps. Keeping this tolerant makes camera and USB scanners easier to use without weakening authorization: the check-in endpoint remains STAFF+
 func normalizeTicketCode(raw string) string {
 	code := strings.TrimSpace(raw)
 	if parsed, err := url.Parse(code); err == nil {

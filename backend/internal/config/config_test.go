@@ -6,8 +6,7 @@ import (
 	"time"
 )
 
-// withEnv sets env vars for the duration of the test and restores the
-// previous environment afterwards.
+// withEnv sets env vars for the duration of the test and restores the previous environment afterwards
 func withEnv(t *testing.T, kv map[string]string) {
 	t.Helper()
 	for k, v := range kv {
@@ -15,6 +14,7 @@ func withEnv(t *testing.T, kv map[string]string) {
 	}
 }
 
+// clearAll clears all env vars
 func clearAll(t *testing.T) {
 	t.Helper()
 	for _, k := range []string{
@@ -31,6 +31,7 @@ func clearAll(t *testing.T) {
 	}
 }
 
+// TestLoad_GoogleOAuthAndSMTP tests the Load method that loads Google OAuth and SMTP config
 func TestLoad_GoogleOAuthAndSMTP(t *testing.T) {
 	clearAll(t)
 	withEnv(t, map[string]string{
@@ -50,6 +51,7 @@ func TestLoad_GoogleOAuthAndSMTP(t *testing.T) {
 	}
 }
 
+// TestLoad_RejectsPartialGoogleAndSMTPConfig tests the Load method that rejects partial Google and SMTP config
 func TestLoad_RejectsPartialGoogleAndSMTPConfig(t *testing.T) {
 	for name, values := range map[string]map[string]string{
 		"google": {"GOOGLE_OAUTH_CLIENT_ID": "client-id"},
@@ -67,6 +69,7 @@ func TestLoad_RejectsPartialGoogleAndSMTPConfig(t *testing.T) {
 	}
 }
 
+// TestLoad_R2Storage tests the Load method that loads R2 storage config
 func TestLoad_R2Storage(t *testing.T) {
 	clearAll(t)
 	withEnv(t, map[string]string{
@@ -88,6 +91,7 @@ func TestLoad_R2Storage(t *testing.T) {
 	}
 }
 
+// TestLoad_R2StorageRequiresCredentials tests the Load method that rejects incomplete R2 storage config
 func TestLoad_R2StorageRequiresCredentials(t *testing.T) {
 	clearAll(t)
 	withEnv(t, map[string]string{
@@ -102,6 +106,7 @@ func TestLoad_R2StorageRequiresCredentials(t *testing.T) {
 	}
 }
 
+// TestLoad_R2StorageDefaultsToPrivateBucketProxy tests the Load method that defaults to private bucket proxy
 func TestLoad_R2StorageDefaultsToPrivateBucketProxy(t *testing.T) {
 	clearAll(t)
 	withEnv(t, map[string]string{
@@ -122,6 +127,7 @@ func TestLoad_R2StorageDefaultsToPrivateBucketProxy(t *testing.T) {
 	}
 }
 
+// TestLoad_ValidEnv tests the Load method that loads valid environment config
 func TestLoad_ValidEnv(t *testing.T) {
 	clearAll(t)
 	withEnv(t, map[string]string{
@@ -184,6 +190,7 @@ func TestLoad_ValidEnv(t *testing.T) {
 	}
 }
 
+// TestLoad_MissingDatabaseURL tests the Load method that rejects missing DATABASE_URL
 func TestLoad_MissingDatabaseURL(t *testing.T) {
 	clearAll(t)
 	// DATABASE_URL intentionally left unset.
@@ -195,6 +202,7 @@ func TestLoad_MissingDatabaseURL(t *testing.T) {
 	}
 }
 
+// TestLoad_MissingJWTSecret tests the Load method that rejects missing JWT_SECRET
 func TestLoad_MissingJWTSecret(t *testing.T) {
 	clearAll(t)
 	withEnv(t, map[string]string{"DATABASE_URL": "postgres://user:pass@localhost:5432/unity"})
@@ -206,6 +214,7 @@ func TestLoad_MissingJWTSecret(t *testing.T) {
 	}
 }
 
+// TestLoad_Defaults tests the Load method that loads default config
 func TestLoad_Defaults(t *testing.T) {
 	clearAll(t)
 	withEnv(t, map[string]string{
@@ -247,6 +256,7 @@ func TestLoad_Defaults(t *testing.T) {
 	}
 }
 
+// TestLoad_InvalidIntVars tests the Load method that rejects invalid DATABASE_MAX_CONN
 func TestLoad_InvalidIntVars(t *testing.T) {
 	clearAll(t)
 	withEnv(t, map[string]string{
@@ -260,6 +270,7 @@ func TestLoad_InvalidIntVars(t *testing.T) {
 	}
 }
 
+// TestLoad_InvalidDurationVars tests the Load method that rejects invalid ACCESS_TOKEN_TTL
 func TestLoad_InvalidDurationVars(t *testing.T) {
 	clearAll(t)
 	withEnv(t, map[string]string{
@@ -273,6 +284,7 @@ func TestLoad_InvalidDurationVars(t *testing.T) {
 	}
 }
 
+// TestLoad_RejectsWeakProductionJWTSecret tests the Load method that rejects a weak production JWT secret
 func TestLoad_RejectsWeakProductionJWTSecret(t *testing.T) {
 	clearAll(t)
 	withEnv(t, map[string]string{
@@ -286,6 +298,7 @@ func TestLoad_RejectsWeakProductionJWTSecret(t *testing.T) {
 	}
 }
 
+// TestLoad_RejectsDefaultJWTSecretInDevelopment tests the Load method that rejects the default JWT secret in development
 func TestLoad_RejectsDefaultJWTSecretInDevelopment(t *testing.T) {
 	clearAll(t)
 	withEnv(t, map[string]string{
@@ -297,6 +310,7 @@ func TestLoad_RejectsDefaultJWTSecretInDevelopment(t *testing.T) {
 	}
 }
 
+// TestLoad_RejectsWeakStagingJWTSecret tests the Load method that rejects a weak staging JWT secret
 func TestLoad_RejectsWeakStagingJWTSecret(t *testing.T) {
 	clearAll(t)
 	withEnv(t, map[string]string{
@@ -310,6 +324,7 @@ func TestLoad_RejectsWeakStagingJWTSecret(t *testing.T) {
 	}
 }
 
+// TestLoad_RejectsWeakProductionBcryptCost tests the Load method that rejects a weak production bcrypt cost
 func TestLoad_RejectsWeakProductionBcryptCost(t *testing.T) {
 	clearAll(t)
 	withEnv(t, map[string]string{
@@ -324,6 +339,7 @@ func TestLoad_RejectsWeakProductionBcryptCost(t *testing.T) {
 	}
 }
 
+// TestLoad_RejectsWildcardCORSWithCredentials tests the Load method that rejects a wildcard CORS origin
 func TestLoad_RejectsWildcardCORSWithCredentials(t *testing.T) {
 	clearAll(t)
 	withEnv(t, map[string]string{

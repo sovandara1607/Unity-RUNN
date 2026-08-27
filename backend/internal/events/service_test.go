@@ -9,7 +9,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// fakeRepo is an in-memory eventRepository for service unit tests.
+// fakeRepo is an in-memory eventRepository for service unit tests
 type fakeRepo struct {
 	events     map[uuid.UUID]*Event
 	categories map[uuid.UUID]*EventCategory
@@ -17,6 +17,7 @@ type fakeRepo struct {
 	lastFilter ListFilter
 }
 
+// newFakeRepo creates a new fake repository
 func newFakeRepo() *fakeRepo {
 	return &fakeRepo{
 		events:     map[uuid.UUID]*Event{},
@@ -25,6 +26,7 @@ func newFakeRepo() *fakeRepo {
 	}
 }
 
+// List returns the events matching the filter
 func (f *fakeRepo) List(ctx context.Context, filter ListFilter) ([]Event, int, error) {
 	f.lastFilter = filter
 	var out []Event
@@ -34,6 +36,7 @@ func (f *fakeRepo) List(ctx context.Context, filter ListFilter) ([]Event, int, e
 	return out, len(out), nil
 }
 
+// GetByID returns the event with the given ID
 func (f *fakeRepo) GetByID(ctx context.Context, id uuid.UUID) (*Event, error) {
 	e, ok := f.events[id]
 	if !ok {
@@ -43,6 +46,7 @@ func (f *fakeRepo) GetByID(ctx context.Context, id uuid.UUID) (*Event, error) {
 	return &cp, nil
 }
 
+// GetDetailBySlug returns the event detail with the given slug
 func (f *fakeRepo) GetDetailBySlug(ctx context.Context, slug string) (*EventDetail, error) {
 	for _, e := range f.events {
 		if e.Slug == slug {
@@ -52,6 +56,7 @@ func (f *fakeRepo) GetDetailBySlug(ctx context.Context, slug string) (*EventDeta
 	return nil, ErrNotFound
 }
 
+// SlugExists returns true if the slug is already used by another event
 func (f *fakeRepo) SlugExists(ctx context.Context, slug string, excludeID *uuid.UUID) (bool, error) {
 	for _, e := range f.events {
 		if e.Slug == slug && (excludeID == nil || e.ID != *excludeID) {
@@ -61,6 +66,7 @@ func (f *fakeRepo) SlugExists(ctx context.Context, slug string, excludeID *uuid.
 	return false, nil
 }
 
+// Create inserts a new event
 func (f *fakeRepo) Create(ctx context.Context, e *Event) error {
 	e.ID = uuid.New()
 	e.CreatedAt = time.Now()
@@ -69,6 +75,7 @@ func (f *fakeRepo) Create(ctx context.Context, e *Event) error {
 	return nil
 }
 
+// Update updates an event
 func (f *fakeRepo) Update(ctx context.Context, e *Event) error {
 	if _, ok := f.events[e.ID]; !ok {
 		return ErrNotFound
@@ -78,6 +85,7 @@ func (f *fakeRepo) Update(ctx context.Context, e *Event) error {
 	return nil
 }
 
+// Delete removes an event
 func (f *fakeRepo) Delete(ctx context.Context, id uuid.UUID) error {
 	if _, ok := f.events[id]; !ok {
 		return ErrNotFound
@@ -86,6 +94,7 @@ func (f *fakeRepo) Delete(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
+// GetCategoryByID returns the category with the given ID
 func (f *fakeRepo) GetCategoryByID(ctx context.Context, id uuid.UUID) (*EventCategory, error) {
 	c, ok := f.categories[id]
 	if !ok {
@@ -95,6 +104,7 @@ func (f *fakeRepo) GetCategoryByID(ctx context.Context, id uuid.UUID) (*EventCat
 	return &cp, nil
 }
 
+// listCategories fetches all categories for an event
 func (f *fakeRepo) listCategories(ctx context.Context, eventID uuid.UUID) ([]EventCategory, error) {
 	var out []EventCategory
 	for _, c := range f.categories {
@@ -105,10 +115,12 @@ func (f *fakeRepo) listCategories(ctx context.Context, eventID uuid.UUID) ([]Eve
 	return out, nil
 }
 
+// listSchedule fetches all schedule items for an event
 func (f *fakeRepo) listSchedule(ctx context.Context, eventID uuid.UUID) ([]EventSchedule, error) {
 	return nil, nil
 }
 
+// CreateCategory inserts a new category for an event
 func (f *fakeRepo) CreateCategory(ctx context.Context, c *EventCategory) error {
 	if _, ok := f.events[c.EventID]; !ok {
 		return ErrNotFound
@@ -119,6 +131,7 @@ func (f *fakeRepo) CreateCategory(ctx context.Context, c *EventCategory) error {
 	return nil
 }
 
+// UpdateCategory updates a category
 func (f *fakeRepo) UpdateCategory(ctx context.Context, id uuid.UUID, p *UpdateCategoryRequest) (*EventCategory, error) {
 	c, ok := f.categories[id]
 	if !ok {
@@ -146,6 +159,7 @@ func (f *fakeRepo) UpdateCategory(ctx context.Context, id uuid.UUID, p *UpdateCa
 	return &cp, nil
 }
 
+// DeleteCategory removes a category
 func (f *fakeRepo) DeleteCategory(ctx context.Context, id uuid.UUID) error {
 	if _, ok := f.categories[id]; !ok {
 		return ErrNotFound
@@ -154,12 +168,14 @@ func (f *fakeRepo) DeleteCategory(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
+// CreateScheduleItem inserts a new schedule item
 func (f *fakeRepo) CreateScheduleItem(ctx context.Context, s *EventSchedule) error {
 	s.ID = uuid.New()
 	f.schedule[s.ID] = s
 	return nil
 }
 
+// UpdateScheduleItem updates a schedule item
 func (f *fakeRepo) UpdateScheduleItem(ctx context.Context, id uuid.UUID, p *UpdateScheduleRequest) (*EventSchedule, error) {
 	s, ok := f.schedule[id]
 	if !ok {
@@ -178,6 +194,7 @@ func (f *fakeRepo) UpdateScheduleItem(ctx context.Context, id uuid.UUID, p *Upda
 	return &cp, nil
 }
 
+// DeleteScheduleItem removes a schedule item
 func (f *fakeRepo) DeleteScheduleItem(ctx context.Context, id uuid.UUID) error {
 	if _, ok := f.schedule[id]; !ok {
 		return ErrNotFound
@@ -186,6 +203,7 @@ func (f *fakeRepo) DeleteScheduleItem(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
+// validCreateReq creates a valid create event request
 func validCreateReq(name string) CreateEventRequest {
 	return CreateEventRequest{
 		Name:      name,
@@ -194,6 +212,7 @@ func validCreateReq(name string) CreateEventRequest {
 	}
 }
 
+// TestService_Create_GeneratesSlugFromName tests the Create method that generates a slug from the name
 func TestService_Create_GeneratesSlugFromName(t *testing.T) {
 	svc := NewService(newFakeRepo(), nil)
 
@@ -209,6 +228,7 @@ func TestService_Create_GeneratesSlugFromName(t *testing.T) {
 	}
 }
 
+// TestService_Create_DuplicateSlugRejected tests the Create method that rejects a duplicate slug
 func TestService_Create_DuplicateSlugRejected(t *testing.T) {
 	svc := NewService(newFakeRepo(), nil)
 	ctx := context.Background()
@@ -225,6 +245,40 @@ func TestService_Create_DuplicateSlugRejected(t *testing.T) {
 	}
 }
 
+// TestService_Create_RequiresCompleteMapPin tests the Create method that requires a complete map pin
+func TestService_Create_RequiresCompleteMapPin(t *testing.T) {
+	svc := NewService(newFakeRepo(), nil)
+	req := validCreateReq("Incomplete map pin")
+	latitude := 11.5564
+	req.Latitude = &latitude
+
+	if _, err := svc.Create(context.Background(), req); !errors.Is(err, ErrInvalidCoordinates) {
+		t.Fatalf("Create() error = %v, want ErrInvalidCoordinates", err)
+	}
+}
+
+// TestService_Update_CanRemoveMapPin tests the Update method that can remove a map pin
+func TestService_Update_CanRemoveMapPin(t *testing.T) {
+	repo := newFakeRepo()
+	svc := NewService(repo, nil)
+	latitude, longitude := 11.5564, 104.9282
+	req := validCreateReq("Mapped run")
+	req.Latitude, req.Longitude = &latitude, &longitude
+	e, err := svc.Create(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	updated, err := svc.Update(context.Background(), e.ID, UpdateEventRequest{ClearCoordinates: true})
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	if updated.Latitude != nil || updated.Longitude != nil {
+		t.Fatalf("coordinates = %v,%v, want both nil", updated.Latitude, updated.Longitude)
+	}
+}
+
+// TestService_Update_StatusTransition tests the Update method that can transition the status
 func TestService_Update_StatusTransition(t *testing.T) {
 	repo := newFakeRepo()
 	svc := NewService(repo, nil)
@@ -245,6 +299,7 @@ func TestService_Update_StatusTransition(t *testing.T) {
 	}
 }
 
+// TestService_Update_InvalidStatusTransitionRejected tests the Update method that rejects an invalid status transition
 func TestService_Update_InvalidStatusTransitionRejected(t *testing.T) {
 	repo := newFakeRepo()
 	svc := NewService(repo, nil)
@@ -263,6 +318,7 @@ func TestService_Update_InvalidStatusTransitionRejected(t *testing.T) {
 	}
 }
 
+// TestService_Delete_OnlyAllowedWhileDraft tests the Delete method that only allows deletion while the event is draft
 func TestService_Delete_OnlyAllowedWhileDraft(t *testing.T) {
 	repo := newFakeRepo()
 	svc := NewService(repo, nil)
@@ -283,6 +339,7 @@ func TestService_Delete_OnlyAllowedWhileDraft(t *testing.T) {
 	}
 }
 
+// TestService_Delete_AllowedWhileDraft tests the Delete method that allows deletion while the event is draft
 func TestService_Delete_AllowedWhileDraft(t *testing.T) {
 	repo := newFakeRepo()
 	svc := NewService(repo, nil)
@@ -302,6 +359,7 @@ func TestService_Delete_AllowedWhileDraft(t *testing.T) {
 	}
 }
 
+// TestService_GetDetailBySlug_HidesNonPublicStatusFromPublic tests the GetDetailBySlug method that hides non-public status from public
 func TestService_GetDetailBySlug_HidesNonPublicStatusFromPublic(t *testing.T) {
 	repo := newFakeRepo()
 	svc := NewService(repo, nil)
@@ -321,6 +379,7 @@ func TestService_GetDetailBySlug_HidesNonPublicStatusFromPublic(t *testing.T) {
 	}
 }
 
+// TestService_List_PublicFilterCannotIncludeDraft tests the List method that cannot include draft in the public filter
 func TestService_List_PublicFilterCannotIncludeDraft(t *testing.T) {
 	repo := newFakeRepo()
 	svc := NewService(repo, nil)
@@ -334,6 +393,7 @@ func TestService_List_PublicFilterCannotIncludeDraft(t *testing.T) {
 	}
 }
 
+// TestService_CreateCategory_PersistsRegistrationDeadline tests the CreateCategory method that persists the registration deadline
 func TestService_CreateCategory_PersistsRegistrationDeadline(t *testing.T) {
 	repo := newFakeRepo()
 	event := &Event{ID: uuid.New()}
@@ -352,6 +412,7 @@ func TestService_CreateCategory_PersistsRegistrationDeadline(t *testing.T) {
 	}
 }
 
+// TestSlugify tests the slugify function
 func TestSlugify(t *testing.T) {
 	cases := map[string]string{
 		"Unity Founders Run 2025": "unity-founders-run-2025",
@@ -365,22 +426,25 @@ func TestSlugify(t *testing.T) {
 	}
 }
 
-// fakeEventNotifier records which notify calls fired.
+// fakeEventNotifier records which notify calls fired
 type fakeEventNotifier struct {
 	updated       []Event
 	updatedFields [][]string
 	cancelled     []Event
 }
 
+// NotifyEventUpdated records the updated event and changed fields
 func (f *fakeEventNotifier) NotifyEventUpdated(ctx context.Context, ev Event, changedFields []string) {
 	f.updated = append(f.updated, ev)
 	f.updatedFields = append(f.updatedFields, changedFields)
 }
 
+// NotifyEventCancelled records the cancelled event
 func (f *fakeEventNotifier) NotifyEventCancelled(ctx context.Context, ev Event) {
 	f.cancelled = append(f.cancelled, ev)
 }
 
+// TestService_Update_NotifiesOnDateChange tests the Update method that notifies on date change
 func TestService_Update_NotifiesOnDateChange(t *testing.T) {
 	repo := newFakeRepo()
 	notifier := &fakeEventNotifier{}
@@ -408,6 +472,7 @@ func TestService_Update_NotifiesOnDateChange(t *testing.T) {
 	}
 }
 
+// TestService_Update_NoNotificationForUnrelatedFieldChange tests the Update method that does not notify for unrelated field change
 func TestService_Update_NoNotificationForUnrelatedFieldChange(t *testing.T) {
 	repo := newFakeRepo()
 	notifier := &fakeEventNotifier{}
@@ -429,6 +494,7 @@ func TestService_Update_NoNotificationForUnrelatedFieldChange(t *testing.T) {
 	}
 }
 
+// TestService_Update_NotifiesCancellationNotUpdate tests the Update method that notifies cancellation instead of update
 func TestService_Update_NotifiesCancellationNotUpdate(t *testing.T) {
 	repo := newFakeRepo()
 	notifier := &fakeEventNotifier{}

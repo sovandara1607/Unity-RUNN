@@ -1,7 +1,3 @@
-// Package notifications is the async email pipeline: every email is
-// first persisted as a Notification row (Postgres-authoritative),
-// then queued in Redis for a worker to pick up and send. See
-// internal/email for rendering/transport.
 package notifications
 
 import (
@@ -30,13 +26,7 @@ const (
 	StatusFailed  Status = "FAILED"
 )
 
-// Notification is one queued/sent email. Every notification points
-// at the registration it concerns (entity_type is always
-// "registration" in practice — even event-level broadcasts resolve
-// to one row per affected registration at enqueue time, see
-// Service.NotifyEventUpdated/NotifyEventCancelled) — this is what
-// lets a single (type, entity_type, entity_id) unique constraint
-// dedup every notification type, including fan-out ones.
+// Notification is one queued/sent email. 
 type Notification struct {
 	ID             uuid.UUID
 	UserID         *uuid.UUID

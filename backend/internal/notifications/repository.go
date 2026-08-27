@@ -16,8 +16,7 @@ import (
 var ErrNotFound = errors.New("notifications: not found")
 
 // ErrAlreadyExists is returned when a (type, entity_type, entity_id)
-// notification was already created — the unique index is what
-// actually enforces this; this error surfaces that violation.
+
 var ErrAlreadyExists = errors.New("notifications: already enqueued for this entity")
 
 // Repository persists notifications in PostgreSQL.
@@ -110,9 +109,6 @@ func (r *Repository) RecordFailure(ctx context.Context, id uuid.UUID, errMsg str
 	return nil
 }
 
-// ListPendingOlderThan returns PENDING notifications created before
-// cutoff — the sweep's catch-up query for anything the Redis push
-// missed (e.g. a crash between DB commit and LPUSH).
 func (r *Repository) ListPendingOlderThan(ctx context.Context, cutoff time.Time, limit int) ([]Notification, error) {
 	const query = `
 		SELECT id, user_id, recipient_email, type, entity_type, entity_id, payload,
@@ -139,10 +135,6 @@ func (r *Repository) ListPendingOlderThan(ctx context.Context, cutoff time.Time,
 	return out, rows.Err()
 }
 
-// ExistsForEntity reports whether a (type, entity_type, entity_id)
-// notification already exists — used by the reminder scheduler to
-// skip registrations it's already reminded, cheaper than relying on
-// Create's unique-violation path for a read-mostly check.
 func (r *Repository) ExistsForEntity(ctx context.Context, typ Type, entityType string, entityID uuid.UUID) (bool, error) {
 	var exists bool
 	err := r.pool.QueryRow(ctx,

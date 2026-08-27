@@ -11,24 +11,13 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// ErrNotFound is returned when a registration, payment, or ticket
-// doesn't exist.
 var ErrNotFound = errors.New("registrations: not found")
 
-// ErrDuplicateRegistration is returned when a user already has an
-// active registration for the event (enforced by both the partial
-// unique index and this check, belt-and-suspenders).
 var ErrDuplicateRegistration = errors.New("registrations: user already has an active registration for this event")
 
-// ErrCapacityFull is returned when a category has no remaining spots.
+
 var ErrCapacityFull = errors.New("registrations: category is at capacity")
 
-// Repository persists registrations, payments, and tickets in
-// PostgreSQL. It also owns the one query that reads (and locks) the
-// event_categories table directly — the FOR UPDATE capacity check
-// must run inside the same transaction as the registration insert and
-// counter increment, which isn't possible through the events
-// package's own repository (it doesn't expose transactions).
 type Repository struct {
 	pool *pgxpool.Pool
 }
@@ -38,8 +27,7 @@ func NewRepository(pool *pgxpool.Pool) *Repository {
 	return &Repository{pool: pool}
 }
 
-// HasActiveRegistration reports whether userID already has a
-// non-cancelled registration for eventID.
+// HasActiveRegistration reports whether userID already has a non-cancelled registration for eventID.
 func (r *Repository) HasActiveRegistration(ctx context.Context, userID, eventID uuid.UUID) (bool, error) {
 	var exists bool
 	err := r.pool.QueryRow(ctx, `
@@ -66,23 +54,12 @@ type CreateParams struct {
 	EventCategoryID uuid.UUID
 	Capacity        int // the category's capacity, for the in-transaction check
 	Participant     ParticipantInfo
-	// Confirm, when true, marks the registration CONFIRMED and issues a
-	// ticket immediately (free category, or payment already succeeded
-	// synchronously via the mock provider). When false the registration
-	// is created PENDING and no ticket is issued yet.
 	Confirm bool
 	// TicketTokenHash, when Confirm is true, is the SHA-256 hash of the
 	// raw QR token to persist (the raw token itself is never stored).
 	TicketTokenHash string
 }
 
-// Create runs the whole registration transaction: locks the category
-// row (FOR UPDATE), counts active registrations against capacity,
-// allocates the next registration number for the current year, and
-// inserts the registration (and, if Confirm, a ticket). Capacity is
-// enforced here — this is the authoritative check; any Redis-side
-// lock is purely a fast-fail optimization applied before this is
-// ever called.
 func (r *Repository) Create(ctx context.Context, p CreateParams) (*CreateResult, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -90,9 +67,6 @@ func (r *Repository) Create(ctx context.Context, p CreateParams) (*CreateResult,
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
-	// Lock the category row so concurrent registrations for the same
-	// category serialize here — this is what makes the capacity check
-	// below race-free.
 	var lockedCapacity int
 	err = tx.QueryRow(ctx, `SELECT capacity FROM event_categories WHERE id = $1 FOR UPDATE`,
 		p.EventCategoryID).Scan(&lockedCapacity)
@@ -174,10 +148,6 @@ func (r *Repository) Create(ctx context.Context, p CreateParams) (*CreateResult,
 	return result, nil
 }
 
-// nextRegistrationNumber atomically allocates and formats the next
-// URC-YYYY-000001-style number for the current year, inside tx — a
-// rollback (e.g. capacity full) rolls this back too, so numbers never
-// leak gaps from failed attempts.
 func nextRegistrationNumber(ctx context.Context, tx pgx.Tx) (string, error) {
 	year := time.Now().UTC().Year()
 
@@ -217,11 +187,6 @@ func (r *Repository) GetByID(ctx context.Context, id uuid.UUID) (*Registration, 
 	return &reg, nil
 }
 
-// GetRegistrationIDByTicketTokenHash finds the registration a ticket
-// belongs to, by the SHA-256 hash of its raw QR token (see
-// internal/tokenhash — never the raw token). Used by
-// internal/checkin to resolve a scanned token to a registration
-// without checkin needing to know about the tickets table's schema.
 func (r *Repository) GetRegistrationIDByTicketTokenHash(ctx context.Context, tokenHash string) (uuid.UUID, error) {
 	var registrationID uuid.UUID
 	err := r.pool.QueryRow(ctx,
@@ -235,9 +200,6 @@ func (r *Repository) GetRegistrationIDByTicketTokenHash(ctx context.Context, tok
 	return registrationID, nil
 }
 
-// GetByRegistrationNumber fetches a registration by its
-// URC-YYYY-NNNNNN number. Used by check-in as a fallback when a scan
-// or manual entry doesn't resolve to a ticket token.
 func (r *Repository) GetByRegistrationNumber(ctx context.Context, number string) (*Registration, error) {
 	const query = `
 		SELECT id, registration_number, user_id, event_id, event_category_id, status,
@@ -260,10 +222,6 @@ func (r *Repository) GetByRegistrationNumber(ctx context.Context, number string)
 	return &reg, nil
 }
 
-// RotateTicketToken replaces the stored token hash for a
-// registration's ticket. Raw tokens are never persisted, so issuing
-// a token to display again always rotates the hash — previous QRs
-// stop scanning.
 func (r *Repository) RotateTicketToken(ctx context.Context, registrationID uuid.UUID, tokenHash string) error {
 	ct, err := r.pool.Exec(ctx,
 		`UPDATE tickets SET token_hash = $2, updated_at = now() WHERE registration_id = $1`,
@@ -294,9 +252,6 @@ type AdminListFilter struct {
 	Offset  int
 }
 
-// ListAll returns registrations across all users (STAFF+ only,
-// enforced by the caller), optionally filtered by event/status, most
-// recent first, plus the total matching count for pagination.
 func (r *Repository) ListAll(ctx context.Context, filter AdminListFilter) ([]Registration, int, error) {
 	where := "WHERE 1=1"
 	args := []any{}
@@ -382,10 +337,6 @@ func (r *Repository) ListForUser(ctx context.Context, userID uuid.UUID) ([]Regis
 	return out, rows.Err()
 }
 
-// Cancel marks a registration CANCELLED, freeing its capacity slot.
-// Returns ErrNotFound if the registration doesn't exist, or a
-// wrapped error if it's already cancelled/refunded (checked by the
-// caller via GetByID first — this just performs the update).
 func (r *Repository) Cancel(ctx context.Context, id uuid.UUID) error {
 	tag, err := r.pool.Exec(ctx,
 		`UPDATE registrations SET status = 'CANCELLED', updated_at = now() WHERE id = $1`, id)
@@ -398,8 +349,6 @@ func (r *Repository) Cancel(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
-// CountActive returns how many PENDING/CONFIRMED registrations exist
-// for a category — the raw number behind the availability endpoint.
 func (r *Repository) CountActive(ctx context.Context, categoryID uuid.UUID) (int, error) {
 	var count int
 	err := r.pool.QueryRow(ctx, `
@@ -439,8 +388,82 @@ func (r *Repository) GetPaymentForRegistration(ctx context.Context, registration
 	return &p, nil
 }
 
-// ExpirePendingPayments releases capacity held by abandoned KHQR checkouts.
-// Payment and registration rows transition in one transaction.
+func (r *Repository) ClaimPendingPayments(ctx context.Context, workerID string, now time.Time, lease time.Duration, limit int) ([]Payment, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 25
+	}
+	rows, err := r.pool.Query(ctx, `
+		WITH candidates AS (
+			SELECT id FROM payments
+			WHERE status='PENDING' AND reconcile_after <= $1
+			  AND (reconcile_lease_until IS NULL OR reconcile_lease_until < $1)
+			ORDER BY reconcile_after, created_at
+			FOR UPDATE SKIP LOCKED
+			LIMIT $2
+		)
+		UPDATE payments p SET reconcile_worker_id=$3, reconcile_lease_until=$1 + ($4 * interval '1 second')
+		FROM candidates c WHERE p.id=c.id
+		RETURNING p.id, p.registration_id, p.provider, p.provider_reference, p.amount_cents, p.currency,
+		          p.status, p.checkout_payload, p.expires_at, p.verified_at, p.reconcile_after,
+		          p.reconcile_lease_until, p.reconcile_worker_id, p.last_checked_at,
+		          p.reconcile_attempts, p.reconcile_error, p.created_at, p.updated_at`,
+		now, limit, workerID, int64(lease.Seconds()))
+	if err != nil {
+		return nil, fmt.Errorf("registrations: claim pending payments: %w", err)
+	}
+	defer rows.Close()
+	var out []Payment
+	for rows.Next() {
+		var p Payment
+		if err := scanPayment(rows, &p); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+func (r *Repository) SchedulePaymentReconciliation(ctx context.Context, paymentID uuid.UUID, workerID string, next time.Time, message string) error {
+	_, err := r.pool.Exec(ctx, `
+		UPDATE payments SET reconcile_after=$1, reconcile_lease_until=NULL, reconcile_worker_id='',
+		       last_checked_at=now(), reconcile_attempts=reconcile_attempts+1, reconcile_error=$2, updated_at=now()
+		WHERE id=$3 AND status='PENDING' AND reconcile_worker_id=$4`, next, message, paymentID, workerID)
+	return err
+}
+
+func (r *Repository) ExpireClaimedPayment(ctx context.Context, registrationID, paymentID uuid.UUID, workerID string) (uuid.UUID, bool, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return uuid.Nil, false, err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	var categoryID uuid.UUID
+	var status Status
+	if err := tx.QueryRow(ctx, `SELECT event_category_id, status FROM registrations WHERE id=$1 FOR UPDATE`, registrationID).Scan(&categoryID, &status); err != nil {
+		return uuid.Nil, false, err
+	}
+	tag, err := tx.Exec(ctx, `UPDATE payments SET status='FAILED', reconcile_lease_until=NULL, reconcile_worker_id='', last_checked_at=now(), updated_at=now() WHERE id=$1 AND registration_id=$2 AND status='PENDING' AND reconcile_worker_id=$3`, paymentID, registrationID, workerID)
+	if err != nil || tag.RowsAffected() == 0 {
+		return categoryID, false, err
+	}
+	if status == StatusPending {
+		if _, err := tx.Exec(ctx, `UPDATE registrations SET status='CANCELLED', updated_at=now() WHERE id=$1`, registrationID); err != nil {
+			return categoryID, false, err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return categoryID, false, err
+	}
+	return categoryID, status == StatusPending, nil
+}
+
+func scanPayment(row interface{ Scan(...any) error }, p *Payment) error {
+	return row.Scan(&p.ID, &p.RegistrationID, &p.Provider, &p.ProviderReference, &p.AmountCents, &p.Currency,
+		&p.Status, &p.CheckoutPayload, &p.ExpiresAt, &p.VerifiedAt, &p.ReconcileAfter,
+		&p.ReconcileLeaseUntil, &p.ReconcileWorkerID, &p.LastCheckedAt, &p.ReconcileAttempts,
+		&p.ReconcileError, &p.CreatedAt, &p.UpdatedAt)
+}
+
 func (r *Repository) ExpirePendingPayments(ctx context.Context, now time.Time) ([]uuid.UUID, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -479,9 +502,6 @@ func (r *Repository) ExpirePendingPayments(ctx context.Context, now time.Time) (
 	return categoryIDs, nil
 }
 
-// ConfirmStoredPayment is idempotent: concurrent verification polls can only
-// transition one pending row and the ticket insert is protected by its unique
-// registration relationship.
 func (r *Repository) ConfirmStoredPayment(ctx context.Context, registrationID, paymentID uuid.UUID, ticketTokenHash string) (*Registration, bool, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -525,14 +545,6 @@ func (r *Repository) ConfirmStoredPayment(ctx context.Context, registrationID, p
 	return &reg, newlyConfirmed, nil
 }
 
-// ConfirmWithPayment records a succeeded payment, flips a PENDING
-// registration to CONFIRMED, and issues its ticket — all in one
-// transaction. Used for the paid-registration path: the registration
-// row is reserved as PENDING at Create time (occupying its capacity
-// slot immediately), then confirmed here once payment succeeds. A
-// real (async/webhook-driven) payment provider would call this same
-// method from its webhook handler — the registration logic doesn't
-// change based on whether confirmation is synchronous or async.
 func (r *Repository) ConfirmWithPayment(ctx context.Context, registrationID uuid.UUID, payment *Payment, ticketTokenHash string) (*CreateResult, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {

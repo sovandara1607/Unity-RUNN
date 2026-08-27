@@ -6,10 +6,7 @@ import (
 	"github.com/unity-run-club/api/internal/registrations"
 )
 
-// RegistrationNotifier adapts Service to registrations.RegistrationNotifier
-// (defined in internal/registrations/service.go — the interface lives
-// in the consumer package, this is its implementation, wired in from
-// main.go).
+// RegistrationNotifier adapts Service to registrations
 type RegistrationNotifier struct {
 	svc *Service
 }

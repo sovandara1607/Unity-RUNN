@@ -1,6 +1,6 @@
 # Unity Run Club — Progress & Continuation Notes
 
-Last updated: 2026-08-24 (Phase 7 stabilization in progress)
+Last updated: 2026-08-26 (Phase 7 stabilization in progress)
 
 ## Where things stand
 
@@ -23,10 +23,12 @@ committing so the in-progress changes are preserved.
 
 - **Foundation**: Chi router, structured JSON logging, pgx/Redis connections, graceful shutdown, `/health` + `/ready`.
 - **Events**: full CRUD, status lifecycle (`DRAFT → PUBLISHED → REGISTRATION_OPEN → REGISTRATION_CLOSED → COMPLETED`, plus `CANCELLED`/`ARCHIVED`), categories/schedule/FAQs/rules.
+- **Poster pipeline**: configurable artboard selection and positioning, server-normalized JPEG originals, and automatically generated `@card`/`@hero` delivery variants with legacy URL fallback.
 - **Auth**: register/login/refresh/logout, JWT access token + rotating refresh-token cookie, `USER < STAFF < ADMIN < SUPER_ADMIN` RBAC.
-- **Registrations**: `SELECT ... FOR UPDATE`-based capacity safety (proven under real concurrency), one-active-registration-per-user-per-event, Redis lock/availability-cache/rate-limit, Bakong KHQR checkout with server-side settlement verification, and QR ticket tokens.
+- **Registrations**: `SELECT ... FOR UPDATE`-based capacity safety (proven under real concurrency), one-active-registration-per-user-per-event, Redis lock/availability-cache/rate-limit, USD/KHR Bakong KHQR checkout with server-side settlement verification, failed-initialization compensation, leased background reconciliation, and QR ticket tokens.
 - **Check-in**: QR token verification, one-check-in-per-registration (DB-enforced), admin registration listing, audit log.
 - **Notifications**: all 5 email types (registration confirmation, payment confirmation, cancellation, event update, event reminder), async via a Redis-queued/Postgres-swept worker, SMTP optional (logs instead of sending when unconfigured).
+- **Worker health**: the notification worker publishes an expiring Redis heartbeat; the Super Admin system console reports live, stale, or unavailable state instead of assuming an empty queue means the worker is healthy.
 - **Frontend**: public event discovery/details, authenticated registration,
   participant race wallet, stable downloadable QR codes, and a role-guarded
   race-control panel.
@@ -44,6 +46,7 @@ committing so the in-progress changes are preserved.
   reconnecting browsers fetch the authoritative current version so missed
   Pub/Sub messages cannot leave the UI stale. The gateway is outbound-only,
   origin-restricted, and runs on port `8081` in Compose.
+- **Lean local containers**: Compose applies configurable CPU, memory and PID ceilings; PostgreSQL and Redis use low-memory settings, Go/Node heaps are bounded, health checks are less frequent, logs rotate, and the API build context excludes development-only files.
 - **Admin operations**: exact database-backed metrics, registration roster/CSV,
   event/category/schedule management, audit trail, real super-admin user-role
   management, and camera/USB/manual race check-in.
@@ -53,8 +56,8 @@ Full per-phase detail, design rationale, and what was explicitly deferred is in 
 ## What's NOT built yet
 
 - **Bakong production credentials** — the KHQR/Open API integration is built, but a real merchant account ID, acquiring-bank values, API base URL, and bearer token still need to be supplied and certified in Bakong's test environment before production.
-- **CI/CD** (GitHub Actions) — not set up.
 - **Production deployment** — no Dockerfile hardening pass, no Vercel/container-platform config yet.
+- **Backups and monitoring** — automated PostgreSQL/R2 backups, restore drills, and external error alerts are not configured.
 - Known gap flagged during Phase 5: `check_ins.staff_user_id` has no `ON DELETE` behavior, so a staff account that's ever performed a check-in can't be hard-deleted. Worth a soft-delete approach whenever user management gets built out.
 
 ## Phase 7: Next.js Frontend & Admin Panel (stabilization in progress)
@@ -84,7 +87,7 @@ Frontend built with Next.js, TypeScript, and Tailwind CSS. Key pages implemented
 cd /Users/dara/development/Unity-RUNN
 cp .env.example .env
 docker compose up -d --build   # postgres, redis, api, Socket.IO gateway
-make migrate                    # applies all 22 migrations
+make migrate                    # applies pending migrations (00026 is currently latest)
 make seed                       # one example event, always registration-open (dates relative to now)
 
 cd frontend
@@ -98,6 +101,7 @@ npm run dev                     # Next.js at http://localhost:3000
 - `make test` — unit tests only, no DB needed
 - `make test-integration` — needs the compose stack up (`-p 1`, packages run serially — several integration tests truncate shared tables)
 - `make lint` — `go vet` + `gofmt -l`
+- `cd frontend && npm run test:e2e` — desktop/mobile public event, session persistence, and poster-editor browser journeys
 
 ### DBeaver (or any Postgres client) connection
 
@@ -116,14 +120,10 @@ Redis (if you want to inspect the `notifications:queue` list or registration loc
 ## Picking this back up
 
 1. Read this file, inspect `git status`, and skim `git log --oneline -10`.
-2. Finish Phase 7 stabilization: run migrations 18–22 and exercise login refresh,
-   registration, stable QR display/download, correct-event check-in, duplicate
-   check-in, cancellation-after-check-in rejection, metrics, and role changes
-   against a live Docker stack.
-3. Clear the remaining frontend lint warnings incrementally; lint and the
-   production build currently complete successfully.
+2. Review the active stabilization diff as a coherent release candidate; automated desktop/mobile journeys now cover public poster rendering, login refresh persistence, and the poster artboard editor.
+3. Keep backend race tests/vet, frontend lint/build/Playwright, realtime syntax, and Compose validation clean as the stabilization set is reviewed.
 4. Configure the `BAKONG_*` values, switch `PAYMENT_PROVIDER=bakong`, and run
    an end-to-end payment in Bakong's test environment before production.
-5. The remaining major roadmap choices are CI/CD, a production R2 custom media domain, and
-   production deployment.
+5. The remaining major roadmap choices are automated backups, a production R2 custom media domain,
+   external monitoring, and production deployment.
 6. Keep commits short and plain; never add a `Co-Authored-By: Claude` trailer.

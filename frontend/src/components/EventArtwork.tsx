@@ -1,20 +1,40 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ImageOff } from "lucide-react";
-import { resolveApiAssetUrl } from "../lib/api";
+import { eventPosterVariantUrl, resolveApiAssetUrl } from "../lib/api";
 
 interface EventArtworkProps {
   coverImage?: string;
   eventName: string;
   imageClassName?: string;
   accentColor?: string;
+  fit?: "cover" | "contain";
+  variant?: "original" | "card" | "hero";
 }
 
-export function EventArtwork({ coverImage, eventName, imageClassName = "", accentColor = "#d9ff00" }: EventArtworkProps) {
+export function EventArtwork({ coverImage, eventName, imageClassName = "", accentColor = "#d9ff00", fit = "contain", variant = "hero" }: EventArtworkProps) {
   const [failed, setFailed] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const posterRef = useRef<HTMLImageElement>(null);
   const hasCover = Boolean(coverImage?.trim());
+  const originalSource = resolveApiAssetUrl(coverImage);
+  const preferredSource = variant === "original" ? originalSource : eventPosterVariantUrl(coverImage, variant);
+  const [source, setSource] = useState(preferredSource);
 
-  useEffect(() => { setFailed(false); setLoaded(false); }, [coverImage]);
+  useEffect(() => {
+    setFailed(false);
+    setSource(preferredSource);
+    const poster = posterRef.current;
+    setLoaded(Boolean(poster?.complete && poster.naturalWidth > 0));
+  }, [preferredSource]);
+
+  const handleImageError = () => {
+    if (source !== originalSource) {
+      setLoaded(false);
+      setSource(originalSource);
+      return;
+    }
+    setFailed(true);
+  };
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-[#202020]">
@@ -35,8 +55,14 @@ export function EventArtwork({ coverImage, eventName, imageClassName = "", accen
         </div>
       </div>}
       {/* Event artwork can be uploaded to the API server or hosted externally. */}
+      {hasCover && !failed && fit === "contain" && <>
+        {/* The ambient layer fills wide website surfaces without cropping the actual poster. */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={source} alt="" aria-hidden="true" style={{ opacity: loaded ? 0.35 : 0 }} className="absolute inset-0 h-full w-full scale-110 object-cover blur-2xl transition-opacity duration-500" />
+        <div className="absolute inset-0 bg-black/30" />
+      </>}
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      {hasCover && !failed && <img src={resolveApiAssetUrl(coverImage)} alt={`${eventName} event poster`} onLoad={() => setLoaded(true)} onError={() => setFailed(true)} className={`absolute inset-0 transition-opacity duration-300 ${loaded ? "opacity-100" : "opacity-0"} ${imageClassName}`} />}
+      {hasCover && !failed && <img ref={posterRef} src={source} alt={`${eventName} event poster`} onLoad={() => setLoaded(true)} onError={handleImageError} style={{ opacity: loaded ? 1 : 0 }} className={`absolute inset-0 h-full w-full transition duration-500 ${fit === "contain" ? "object-contain" : "object-cover"} ${imageClassName}`} />}
     </div>
   );
 }

@@ -1,6 +1,3 @@
-// Package systemstatus builds a sanitized operational snapshot for the Super
-// Admin console. It never returns credentials, tokens, passwords, DSNs, or
-// secret-bearing URLs.
 package systemstatus
 
 import (
@@ -22,6 +19,8 @@ import (
 )
 
 const probeTimeout = 2 * time.Second
+
+const notificationWorkerHeartbeatKey = "notifications:worker:heartbeat"
 
 type HealthChecker interface {
 	Ping(ctx context.Context) error
@@ -156,13 +155,17 @@ type Security struct {
 }
 
 type Workers struct {
-	NotificationQueueDepth  int64  `json:"notification_queue_depth"`
-	NotificationsPending    int64  `json:"notifications_pending"`
-	NotificationsFailed     int64  `json:"notifications_failed"`
-	NotificationSweep       string `json:"notification_sweep"`
-	NotificationMaxAttempts int    `json:"notification_max_attempts"`
-	ReminderPoll            string `json:"reminder_poll"`
-	ReminderWindow          string `json:"reminder_window"`
+	NotificationStatus       string `json:"notification_status"`
+	NotificationDetail       string `json:"notification_detail"`
+	NotificationLastSeen     string `json:"notification_last_seen"`
+	NotificationHeartbeatAge int64  `json:"notification_heartbeat_age_seconds"`
+	NotificationQueueDepth   int64  `json:"notification_queue_depth"`
+	NotificationsPending     int64  `json:"notifications_pending"`
+	NotificationsFailed      int64  `json:"notifications_failed"`
+	NotificationSweep        string `json:"notification_sweep"`
+	NotificationMaxAttempts  int    `json:"notification_max_attempts"`
+	ReminderPoll             string `json:"reminder_poll"`
+	ReminderWindow           string `json:"reminder_window"`
 }
 
 type Resilience struct {
@@ -189,6 +192,7 @@ func (s *Service) Snapshot(ctx context.Context) Snapshot {
 	wg.Wait()
 
 	app := buildApplication(s.cfg, s.startedAt)
+	workerRuntime := s.notificationWorkerStatus(ctx, redisStatus)
 	emailStatus := buildEmailStatus(s.cfg)
 	oauthStatus := buildOAuthStatus(s.cfg)
 	paymentStatus := buildPaymentStatus(s.cfg)
@@ -198,6 +202,7 @@ func (s *Service) Snapshot(ctx context.Context) Snapshot {
 		{Name: "Redis", Role: "Queue, cache and locks", Status: redisStatus.Status, Detail: redisStatus.Detail, LatencyMS: redisStatus.LatencyMS},
 		{Name: strings.ToUpper(s.cfg.ObjectStorageProvider), Role: "Media storage", Status: storage.Status, Detail: storage.Detail, LatencyMS: storage.LatencyMS},
 		{Name: "Socket.IO", Role: "Live public updates", Status: realtime.Status, Detail: realtime.Detail, LatencyMS: realtime.LatencyMS},
+		{Name: "Email worker", Role: "Notification delivery", Status: workerRuntime.NotificationStatus, Detail: workerRuntime.NotificationDetail},
 		{Name: "Email", Role: "Runner messages", Status: emailStatus.Status, Detail: emailStatus.Detail},
 		{Name: "Payments", Role: "Ticket settlement", Status: paymentStatus.Status, Detail: paymentStatus.Detail},
 	}
@@ -219,6 +224,8 @@ func (s *Service) Snapshot(ctx context.Context) Snapshot {
 			SMTPSecretConfigured: s.cfg.SMTPPassword != "", PaymentSecretConfigured: s.cfg.BakongToken != "",
 		},
 		Workers: Workers{
+			NotificationStatus: workerRuntime.NotificationStatus, NotificationDetail: workerRuntime.NotificationDetail,
+			NotificationLastSeen: workerRuntime.NotificationLastSeen, NotificationHeartbeatAge: workerRuntime.NotificationHeartbeatAge,
 			NotificationQueueDepth: redisStatus.QueueDepth, NotificationsPending: postgresPending(postgres, s.db, ctx, "PENDING"),
 			NotificationsFailed: postgresPending(postgres, s.db, ctx, "FAILED"), NotificationSweep: s.cfg.NotificationSweepInterval.String(),
 			NotificationMaxAttempts: s.cfg.NotificationMaxAttempts, ReminderPoll: s.cfg.ReminderPollInterval.String(), ReminderWindow: s.cfg.ReminderWindow.String(),
@@ -228,6 +235,45 @@ func (s *Service) Snapshot(ctx context.Context) Snapshot {
 			MediaRole: mediaRole(s.cfg), BackupStatus: "not_configured", BackupDetail: "No automated database or media backup policy is configured in this repository.", Migration: postgres.Migration,
 		},
 	}
+}
+
+func (s *Service) notificationWorkerStatus(ctx context.Context, redisStatus RedisStatus) Workers {
+	status := Workers{NotificationStatus: "unavailable", NotificationDetail: "No recent notification worker heartbeat"}
+	if s.redis == nil || redisStatus.Status == "unavailable" {
+		status.NotificationDetail = "Worker health cannot be determined while Redis is unavailable"
+		return status
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, probeTimeout)
+	defer cancel()
+	raw, err := s.redis.Get(probeCtx, notificationWorkerHeartbeatKey).Result()
+	if err == redis.Nil {
+		return status
+	}
+	if err != nil {
+		status.NotificationDetail = "Worker heartbeat could not be read"
+		return status
+	}
+	return classifyWorkerHeartbeat(raw, time.Now().UTC())
+}
+
+func classifyWorkerHeartbeat(raw string, now time.Time) Workers {
+	seenAt, err := time.Parse(time.RFC3339Nano, raw)
+	if err != nil {
+		return Workers{NotificationStatus: "attention", NotificationDetail: "Worker heartbeat has an invalid timestamp"}
+	}
+	age := now.Sub(seenAt)
+	if age < 0 {
+		age = 0
+	}
+	status := Workers{
+		NotificationStatus: "operational", NotificationDetail: "Notification worker is reporting normally",
+		NotificationLastSeen: seenAt.UTC().Format(time.RFC3339Nano), NotificationHeartbeatAge: int64(age.Seconds()),
+	}
+	if age > 15*time.Second {
+		status.NotificationStatus = "attention"
+		status.NotificationDetail = "Notification worker heartbeat is stale"
+	}
+	return status
 }
 
 func (s *Service) postgresStatus(ctx context.Context) PostgresStatus {

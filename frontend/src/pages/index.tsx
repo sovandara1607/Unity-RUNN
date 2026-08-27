@@ -239,7 +239,7 @@ export default function HomePage() {
                 </div>
 
                 <article key={selectedEvent.id} className="relative min-h-[560px] overflow-hidden lg:min-h-full" aria-live="polite">
-                  <div className="absolute inset-0"><EventArtwork coverImage={selectedEvent.cover_image} eventName={selectedEvent.name} accentColor={acid} imageClassName="h-full w-full object-cover transition duration-700 motion-reduce:transition-none" /></div>
+                  <div className="absolute inset-0"><EventArtwork coverImage={selectedEvent.cover_image} eventName={selectedEvent.name} accentColor={acid} variant="hero" imageClassName="motion-reduce:transition-none" /></div>
                   <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,rgba(8,8,8,.08)_0%,rgba(8,8,8,.42)_42%,rgba(8,8,8,.94)_100%)]" />
                   <div className="absolute inset-0 flex flex-col justify-between p-5 sm:p-8 lg:p-10">
                     <div className="flex items-start justify-between gap-4">

@@ -14,24 +14,19 @@ type ctxKey string
 
 const userCtxKey ctxKey = "authenticated_user"
 
-// AuthenticatedUser is what request-scoped context carries about the
-// caller once a valid access token has been presented.
+// AuthenticatedUser is what request-scoped context carries about the caller once a valid access token has been presented
 type AuthenticatedUser struct {
 	ID   uuid.UUID
 	Role Role
 }
 
-// UserFromContext extracts the AuthenticatedUser set by RequireAuth
-// or OptionalAuth, if any.
+// UserFromContext extracts the AuthenticatedUser set by RequireAuth or OptionalAuth, if any
 func UserFromContext(ctx context.Context) (*AuthenticatedUser, bool) {
 	u, ok := ctx.Value(userCtxKey).(*AuthenticatedUser)
 	return u, ok
 }
 
-// RequireAuth rejects requests (401) unless a valid
-// "Authorization: Bearer <token>" header is present, and (403) unless
-// the caller's role is at least minRole. On success it attaches the
-// AuthenticatedUser to context.
+// RequireAuth rejects requests (401) unless a valid "Authorization: Bearer <token>" header is present, and (403) unless the caller's role is at least minRole. On success it attaches the AuthenticatedUser to context
 func RequireAuth(tokens *TokenIssuer, minRole Role) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -52,10 +47,7 @@ func RequireAuth(tokens *TokenIssuer, minRole Role) func(http.Handler) http.Hand
 	}
 }
 
-// OptionalAuth attaches an AuthenticatedUser to context when a valid
-// bearer token is present, but never rejects the request — lets
-// public GET routes relax visibility for STAFF+ callers without
-// requiring auth on every read.
+// OptionalAuth attaches an AuthenticatedUser to context when a valid bearer token is present, but never rejects the request — lets public GET routes relax visibility for STAFF+ callers without requiring auth on every read
 func OptionalAuth(tokens *TokenIssuer) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

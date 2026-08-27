@@ -1,5 +1,3 @@
-//go:build integration
-
 package checkin
 
 import (
@@ -14,9 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// testPool opens a pool against DATABASE_URL and truncates the
-// relevant tables before each test, mirroring the testPool pattern
-// used in events/auth/registrations' integration tests.
+// testPool opens a pool against DATABASE_URL and truncates the relevant tables before each test, mirroring the testPool pattern used in events/auth/registrations' integration tests
 func testPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 
@@ -47,8 +43,7 @@ func testPool(t *testing.T) *pgxpool.Pool {
 	return pool
 }
 
-// seedConfirmedRegistration creates a minimal event/category/user and
-// a CONFIRMED registration directly via SQL, returning its ID.
+// seedConfirmedRegistration creates a minimal event/category/user and a CONFIRMED registration directly via SQL, returning its ID
 func seedConfirmedRegistration(t *testing.T, pool *pgxpool.Pool) uuid.UUID {
 	t.Helper()
 	ctx := context.Background()
@@ -90,6 +85,7 @@ func seedConfirmedRegistration(t *testing.T, pool *pgxpool.Pool) uuid.UUID {
 	return registrationID
 }
 
+// TestRepository_Create_Succeeds tests the Create method that succeeds
 func TestRepository_Create_Succeeds(t *testing.T) {
 	pool := testPool(t)
 	repo := NewRepository(pool)
@@ -105,6 +101,7 @@ func TestRepository_Create_Succeeds(t *testing.T) {
 	}
 }
 
+// TestRepository_Create_DuplicateRejected tests the Create method that rejects a duplicate
 func TestRepository_Create_DuplicateRejected(t *testing.T) {
 	pool := testPool(t)
 	repo := NewRepository(pool)
@@ -134,10 +131,7 @@ func seedStaffUser(t *testing.T, pool *pgxpool.Pool) uuid.UUID {
 	return staffID
 }
 
-// TestRepository_ConcurrentCheckIn_ExactlyOneSucceeds proves the
-// unique constraint on check_ins.registration_id is what actually
-// prevents double check-in under real concurrency — same style as
-// the Phase 4 capacity stress test.
+// TestRepository_ConcurrentCheckIn_ExactlyOneSucceeds proves the unique constraint on check_ins.registration_id is what actually prevents double check-in under real concurrency — same style as the Phase 4 capacity stress test
 func TestRepository_ConcurrentCheckIn_ExactlyOneSucceeds(t *testing.T) {
 	pool := testPool(t)
 	repo := NewRepository(pool)

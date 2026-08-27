@@ -20,6 +20,8 @@ import { useSiteConfig } from "../../../components/site/SiteConfigProvider";
 import { api } from "../../../lib/api";
 import { withMinSkeleton } from "../../../lib/withMinSkeleton";
 import type { EventCategory, EventDetail, MeResponse, PaymentCheckout } from "../../../types";
+import { formatMoney } from "../../../lib/money";
+import { eventMapURL } from "../../../lib/eventLocation";
 
 const fieldClass = "mt-2 w-full rounded-xl border border-black/15 bg-white px-4 py-3.5 text-[15px] font-medium text-[#111] outline-none transition placeholder:text-black/30 hover:border-black/30 focus:border-black focus:ring-4 focus:ring-black/5";
 
@@ -33,11 +35,6 @@ function formatDate(value?: string | null) {
 function formatTime(value?: string | null) {
   if (!value) return "Time to be confirmed";
   return value.includes("T") ? value.slice(11, 16) : value.slice(0, 5);
-}
-
-function formatPrice(cents?: number) {
-  if (!cents) return "Free";
-  return `$${(cents / 100).toFixed(2)}`;
 }
 
 export default function EventRegisterPage() {
@@ -216,7 +213,7 @@ export default function EventRegisterPage() {
             <div className="mt-10 grid gap-4 border-t border-white/10 pt-6 text-sm sm:grid-cols-3">
               <EventFact icon={<CalendarDays />} label="Race day" value={formatDate(event.event_date)} />
               <EventFact icon={<Clock3 />} label="Start" value={formatTime(event.start_time)} />
-              <EventFact icon={<MapPin />} label="Meet" value={event.location || "Location to be confirmed"} />
+              <EventFact icon={<MapPin />} label="Meet" value={event.location || "Location to be confirmed"} href={event.location ? eventMapURL(event) : undefined} />
             </div>
           </div>
         </section>
@@ -241,7 +238,7 @@ export default function EventRegisterPage() {
                       </div>
                       <div className="mt-7 flex items-end justify-between gap-4 border-t border-black/15 pt-4">
                         <p className="font-bold">{item.name}</p>
-                        <p className="font-mono text-sm font-bold">{formatPrice(item.price_cents)}</p>
+                        <p className="font-mono text-sm font-bold">{formatMoney(item.price_cents, item.currency)}</p>
                       </div>
                     </button>
                   );
@@ -286,8 +283,8 @@ export default function EventRegisterPage() {
   );
 }
 
-function EventFact({ icon, label, value }: { icon: React.ReactElement<{ className?: string }>; label: string; value: string }) {
-  return <div className="flex items-start gap-3"><span className="mt-0.5 text-white/40">{React.cloneElement(icon, { className: "h-4 w-4" })}</span><div><p className="text-[10px] font-bold uppercase tracking-[0.16em] text-white/35">{label}</p><p className="mt-1 text-xs font-semibold leading-5 text-white/75">{value}</p></div></div>;
+function EventFact({ icon, label, value, href }: { icon: React.ReactElement<{ className?: string }>; label: string; value: string; href?: string }) {
+  return <div className="flex items-start gap-3"><span className="mt-0.5 text-white/40">{React.cloneElement(icon, { className: "h-4 w-4" })}</span><div><p className="text-[10px] font-bold uppercase tracking-[0.16em] text-white/35">{label}</p>{href ? <a href={href} target="_blank" rel="noreferrer" className="mt-1 inline-flex items-center gap-1 text-xs font-semibold leading-5 text-white/75 underline decoration-white/25 underline-offset-4 hover:text-white">{value}<span aria-hidden>↗</span></a> : <p className="mt-1 text-xs font-semibold leading-5 text-white/75">{value}</p>}</div></div>;
 }
 
 function StepHeading({ number, icon, title, description }: { number: string; icon: React.ReactNode; title: string; description: string }) {
@@ -309,7 +306,7 @@ function EntrySummary({ event, category, runnerName, shirtSize, registering, pri
         </div>
         <span aria-hidden className="absolute -left-3 top-[43%] h-6 w-6 rounded-full bg-[#efefe9]" /><span aria-hidden className="absolute -right-3 top-[43%] h-6 w-6 rounded-full bg-[#efefe9]" />
         <div className="border-t-2 border-dashed border-black/20 p-6" style={{ backgroundColor: primary }}>
-          {category ? <><p className="text-[10px] font-bold uppercase tracking-[0.17em] text-black/45">Selected entry</p><div className="mt-2 flex items-end justify-between gap-4"><div><p className="sport-display text-5xl uppercase leading-none tracking-[-0.03em]">{category.distance}</p><p className="mt-1 text-sm font-bold">{category.name}</p></div><p className="font-mono text-lg font-bold">{formatPrice(category.price_cents)}</p></div></> : <div className="py-4"><p className="font-bold">Choose a category</p><p className="mt-1 text-xs text-black/55">Your distance and entry fee will appear here.</p></div>}
+          {category ? <><p className="text-[10px] font-bold uppercase tracking-[0.17em] text-black/45">Selected entry</p><div className="mt-2 flex items-end justify-between gap-4"><div><p className="sport-display text-5xl uppercase leading-none tracking-[-0.03em]">{category.distance}</p><p className="mt-1 text-sm font-bold">{category.name}</p></div><p className="font-mono text-lg font-bold">{formatMoney(category.price_cents, category.currency)}</p></div></> : <div className="py-4"><p className="font-bold">Choose a category</p><p className="mt-1 text-xs text-black/55">Your distance and entry fee will appear here.</p></div>}
           <dl className="mt-6 grid grid-cols-2 gap-4 border-t border-black/15 pt-5 text-xs"><div><dt className="font-bold uppercase tracking-[0.13em] text-black/40">Runner</dt><dd className="mt-1 truncate font-semibold">{runnerName || "Your name"}</dd></div><div><dt className="font-bold uppercase tracking-[0.13em] text-black/40">Shirt</dt><dd className="mt-1 font-semibold">{shirtSize}</dd></div></dl>
         </div>
         <div className="p-5">

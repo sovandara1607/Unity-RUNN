@@ -9,9 +9,6 @@ interface QRCodeScannerProps {
 }
 
 function showCameraPreviewNormally(regionId: string) {
-  // html5-qrcode can mirror the preview for selfie cameras. The scanner can
-  // still decode that feed, but mirrored text makes the station feel inverted.
-  // Force the operator's preview to match the real-world orientation.
   const video = document.querySelector<HTMLVideoElement>(`#${regionId} video`);
   if (!video) return;
   video.style.setProperty("transform", "none", "important");
@@ -60,16 +57,11 @@ export function QRCodeScanner({ onScan, onError, paused = false }: QRCodeScanner
         };
 
         await html5QrCode.start(
-          // Request the rear camera in the same single operation that starts
-          // scanning. Enumerating devices first can make Safari release and
-          // immediately reacquire the camera, which intermittently fails.
           { facingMode: "environment" },
           config,
           (decodedText: string) => {
             if (pausedRef.current) return;
             const now = Date.now();
-            // Give staff time to move the ticket away before accepting the
-            // same code again. Different runners still scan immediately.
             if (
               decodedText !== lastScannedRef.current ||
               now - lastScannedTimeRef.current > 5000
@@ -80,7 +72,6 @@ export function QRCodeScanner({ onScan, onError, paused = false }: QRCodeScanner
             }
           },
           () => {
-            // Ignored individual frame errors during continuous video feed
           }
         );
 

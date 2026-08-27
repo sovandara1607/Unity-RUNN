@@ -1,6 +1,3 @@
-// Package realtime publishes committed domain changes to the Socket.IO
-// gateway through Redis Pub/Sub. Redis is an internal transport only; browser
-// clients never receive credentials or publish access.
 package realtime
 
 import (

@@ -1,6 +1,3 @@
-// Package database manages the PostgreSQL connection pool used by the
-// rest of the application. It exposes only connection lifecycle and
-// health-check concerns — no business queries live here.
 package database
 
 import (
@@ -11,15 +8,13 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// DB wraps a pgx connection pool.
+// DB wraps a pgx connection pool
 type DB struct {
 	Pool *pgxpool.Pool
 }
 
 // Connect establishes a PostgreSQL connection pool for the given DSN
-// and max connection count. It does not block waiting for the
-// database to be reachable beyond pgx's own connect handling; callers
-// should use Ping to verify readiness.
+// and max connection count. It does not block waiting for the database to be reachable beyond pgx's own connect handling; callers should use Ping to verify readiness
 func Connect(ctx context.Context, databaseURL string, maxConns int32) (*DB, error) {
 	poolCfg, err := pgxpool.ParseConfig(databaseURL)
 	if err != nil {
@@ -41,7 +36,7 @@ func Connect(ctx context.Context, databaseURL string, maxConns int32) (*DB, erro
 }
 
 // Ping verifies the database is reachable within the given context
-// (callers should attach a short timeout).
+// (callers should attach a short timeout)
 func (d *DB) Ping(ctx context.Context) error {
 	if d == nil || d.Pool == nil {
 		return fmt.Errorf("database: pool not initialized")
@@ -49,7 +44,7 @@ func (d *DB) Ping(ctx context.Context) error {
 	return d.Pool.Ping(ctx)
 }
 
-// Close releases all pooled connections.
+// Close releases all pooled connections
 func (d *DB) Close() {
 	if d != nil && d.Pool != nil {
 		d.Pool.Close()

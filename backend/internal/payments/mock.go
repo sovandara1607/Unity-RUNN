@@ -7,11 +7,6 @@ import (
 	"github.com/google/uuid"
 )
 
-// MockProvider is a synchronous, always-succeeding payment provider.
-// It exists to exercise the full registration -> payment ->
-// confirmation code path in development and tests before a real
-// Cambodian payment gateway is integrated. It must never be used in
-// production.
 type MockProvider struct{}
 
 // NewMockProvider builds a MockProvider.

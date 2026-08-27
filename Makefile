@@ -1,7 +1,5 @@
 .PHONY: dev dev-down dev-logs test test-integration lint fmt vet migrate migrate-down seed build run
 
-# Load .env (if present) so `make run/migrate/seed` see DATABASE_URL,
-# ADMIN_API_KEY, etc. without requiring the caller to export them.
 ifneq (,$(wildcard .env))
 include .env
 export
@@ -25,12 +23,6 @@ dev-logs:
 test:
 	cd backend && go test ./... -race -count=1
 
-# Run tests that need a real PostgreSQL (repository integration
-# tests). Requires `make dev-infra` (or `make dev`) running first.
-# -p 1 forces packages to run sequentially: several packages'
-# integration tests truncate shared tables (events, users) against
-# the same database, so running packages concurrently causes them to
-# race each other and fail spuriously.
 test-integration:
 	cd backend && go test -tags=integration ./... -race -count=1 -p 1
 

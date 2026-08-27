@@ -12,20 +12,17 @@ import (
 const refreshCookieName = "refresh_token"
 const refreshCookiePath = "/api/v1/auth"
 
-// Handler wires HTTP requests to the auth Service. Handlers stay
-// thin: decode -> validate -> service -> respond.
+// Handler wires HTTP requests to the auth Service. Handlers stay thin: decode -> validate -> service -> respond
 type Handler struct {
 	svc             *Service
 	refreshTokenTTL time.Duration
 	loginLimiter    AttemptLimiter
 	google          *googleOAuthFlow
-	// isProduction controls cookie SameSite/Secure flags: Lax+non-Secure
-	// in development (so plain-HTTP localhost testing works), None+Secure
-	// otherwise (required for a cross-site Vercel <-> API deployment).
+	// isProduction controls cookie SameSite/Secure flags: Lax+non-Secure in development (so plain-HTTP localhost testing works), None+Secure otherwise (required for a cross-site Vercel <-> API deployment)
 	isProduction bool
 }
 
-// NewHandler builds a Handler backed by svc.
+// NewHandler builds a Handler backed by svc
 func NewHandler(svc *Service, refreshTokenTTL time.Duration, isProduction bool, loginLimiters ...AttemptLimiter) *Handler {
 	h := &Handler{svc: svc, refreshTokenTTL: refreshTokenTTL, isProduction: isProduction}
 	if len(loginLimiters) > 0 {
@@ -49,7 +46,7 @@ type authResponse struct {
 	User        userResponse `json:"user"`
 }
 
-// Register handles POST /api/v1/auth/register.
+// Register handles POST /api/v1/auth/register
 func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	var req RegisterRequest
@@ -77,7 +74,7 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// Login handles POST /api/v1/auth/login.
+// Login handles POST /api/v1/auth/login
 func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	var req LoginRequest
@@ -116,7 +113,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// Refresh handles POST /api/v1/auth/refresh.
+// Refresh handles POST /api/v1/auth/refresh
 func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	cookie, err := r.Cookie(refreshCookieName)
@@ -141,7 +138,7 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// Logout handles POST /api/v1/auth/logout.
+// Logout handles POST /api/v1/auth/logout
 func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	if cookie, err := r.Cookie(refreshCookieName); err == nil && cookie.Value != "" {
@@ -151,7 +148,7 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// Me handles GET /api/v1/me (requires auth).
+// Me handles GET /api/v1/me (requires auth)
 func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 	authUser, ok := UserFromContext(r.Context())
 	if !ok {
@@ -181,7 +178,7 @@ func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// UpdateMe handles PATCH /api/v1/me (requires auth).
+// UpdateMe handles PATCH /api/v1/me (requires auth)
 func (h *Handler) UpdateMe(w http.ResponseWriter, r *http.Request) {
 	authUser, ok := UserFromContext(r.Context())
 	if !ok {

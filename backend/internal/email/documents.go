@@ -11,10 +11,6 @@ import (
 	qrcode "github.com/skip2/go-qrcode"
 )
 
-// Noto Sans keeps the race documents portable and makes the generated PDF
-// independent from fonts installed on the API host.
-//
-//go:embed assets/NotoSans-Regular.ttf assets/NotoSans-Bold.ttf
 var documentFonts embed.FS
 
 const (
@@ -22,9 +18,6 @@ const (
 	docBold    = "NotoSansBold"
 )
 
-// AttachmentsFor returns the official document appropriate for a notification.
-// Registration confirmations carry the scannable ticket; payment confirmations
-// carry the receipt. Other operational emails intentionally stay lightweight.
 func AttachmentsFor(typ Type, data TemplateData) ([]Attachment, error) {
 	var (
 		contents []byte
@@ -48,9 +41,7 @@ func AttachmentsFor(typ Type, data TemplateData) ([]Attachment, error) {
 	return []Attachment{{Filename: name, ContentType: "application/pdf", Data: contents}}, nil
 }
 
-// RenderTicketPDF creates the same practical ticket users see in their race
-// wallet: runner details plus a high-contrast QR that encodes the stable
-// registration number accepted by the check-in station.
+// RenderTicketPDF creates the same practical ticket users see in their race wallet: runner details plus a high-contrast QR that encodes the stable registration number accepted by the check-in station
 func RenderTicketPDF(data TemplateData) ([]byte, error) {
 	pdf, err := newDocument()
 	if err != nil {
@@ -98,8 +89,7 @@ func RenderTicketPDF(data TemplateData) ([]byte, error) {
 	return pdf.GetBytesPdfReturnErr()
 }
 
-// RenderPaymentReceiptPDF creates a durable receipt from the verified payment
-// record. It intentionally excludes sensitive checkout payloads and credentials.
+// RenderPaymentReceiptPDF creates a durable receipt from the verified payment record. It intentionally excludes sensitive checkout payloads and credentials
 func RenderPaymentReceiptPDF(data TemplateData) ([]byte, error) {
 	pdf, err := newDocument()
 	if err != nil {
@@ -134,6 +124,7 @@ func RenderPaymentReceiptPDF(data TemplateData) ([]byte, error) {
 	return pdf.GetBytesPdfReturnErr()
 }
 
+// newDocument creates a new document
 func newDocument() (*gopdf.GoPdf, error) {
 	regular, err := documentFonts.ReadFile("assets/NotoSans-Regular.ttf")
 	if err != nil {
@@ -154,16 +145,19 @@ func newDocument() (*gopdf.GoPdf, error) {
 	return pdf, nil
 }
 
+// fill fills the background color of the document
 func fill(pdf *gopdf.GoPdf, x, y, width, height float64, r, g, b uint8) {
 	pdf.SetFillColor(r, g, b)
 	pdf.RectFromUpperLeftWithStyle(x, y, width, height, "F")
 }
 
+// line draws a line on the document
 func line(pdf *gopdf.GoPdf, x1, y1, x2, y2 float64, r, g, b uint8) {
 	pdf.SetStrokeColor(r, g, b)
 	pdf.Line(x1, y1, x2, y2)
 }
 
+// text draws text on the document
 func text(pdf *gopdf.GoPdf, font string, size, x, y float64, r, g, b uint8, value string) {
 	_ = pdf.SetFont(font, "", size)
 	pdf.SetTextColor(r, g, b)
@@ -171,23 +165,27 @@ func text(pdf *gopdf.GoPdf, font string, size, x, y float64, r, g, b uint8, valu
 	_ = pdf.Cell(nil, value)
 }
 
+// textRight draws text on the document
 func textRight(pdf *gopdf.GoPdf, font string, size, right, y float64, r, g, b uint8, value string) {
 	_ = pdf.SetFont(font, "", size)
 	width, _ := pdf.MeasureTextWidth(value)
 	text(pdf, font, size, right-width, y, r, g, b, value)
 }
 
+// labelValue draws a label and value on the document
 func labelValue(pdf *gopdf.GoPdf, x, y float64, label, value string) {
 	text(pdf, docBold, 9, x, y, 145, 145, 140, label)
 	textFit(pdf, docBold, 12, 8, 220, x, y+25, 17, 17, 17, fallback(value, "—"))
 }
 
+// receiptRow draws a receipt row on the document
 func receiptRow(pdf *gopdf.GoPdf, x, y float64, label, value string) {
 	text(pdf, docBold, 9, x, y, 145, 145, 140, label)
 	textFit(pdf, docBold, 11, 8, 319, x+160, y, 17, 17, 17, fallback(value, "—"))
 	line(pdf, x, y+26, 537, y+26, 224, 224, 218)
 }
 
+// textFit draws text on the document
 func textFit(pdf *gopdf.GoPdf, font string, size, minSize, maxWidth, x, y float64, r, g, b uint8, value string) {
 	fontSize := size
 	for fontSize > minSize {
@@ -201,6 +199,7 @@ func textFit(pdf *gopdf.GoPdf, font string, size, minSize, maxWidth, x, y float6
 	text(pdf, font, fontSize, x, y, r, g, b, value)
 }
 
+// fallback returns the value if it is not empty, otherwise returns the fallback value
 func fallback(value, fallbackValue string) string {
 	if strings.TrimSpace(value) == "" {
 		return fallbackValue
@@ -208,6 +207,7 @@ func fallback(value, fallbackValue string) string {
 	return value
 }
 
+// safeFilename returns a safe filename for the document
 func safeFilename(value string) string {
 	value = strings.ToLower(strings.TrimSpace(value))
 	value = strings.NewReplacer("/", "-", "\\", "-", " ", "-").Replace(value)

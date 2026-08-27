@@ -9,8 +9,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// ErrInvalidToken covers every way an access token can fail to
-// validate: bad signature, malformed, expired, or unknown claims.
+// ErrInvalidToken covers every way an access token can fail to validate: bad signature, malformed, expired, or unknown claims
 var ErrInvalidToken = errors.New("auth: invalid access token")
 
 const (
@@ -18,26 +17,25 @@ const (
 	accessTokenAudience = "unity-run-club-web"
 )
 
-// Claims is the JWT payload for access tokens.
+// Claims is the JWT payload for access tokens
 type Claims struct {
 	UserID uuid.UUID `json:"sub_uuid"`
 	Role   Role      `json:"role"`
 	jwt.RegisteredClaims
 }
 
-// TokenIssuer generates and parses access tokens with a fixed HS256
-// secret and TTL.
+// TokenIssuer generates and parses access tokens with a fixed HS256 secret and TTL
 type TokenIssuer struct {
 	secret []byte
 	ttl    time.Duration
 }
 
-// NewTokenIssuer builds a TokenIssuer. secret must be non-empty.
+// NewTokenIssuer builds a TokenIssuer. secret must be non-empty
 func NewTokenIssuer(secret string, ttl time.Duration) *TokenIssuer {
 	return &TokenIssuer{secret: []byte(secret), ttl: ttl}
 }
 
-// GenerateAccessToken issues a signed JWT for the given user/role.
+// GenerateAccessToken issues a signed JWT for the given user/role
 func (i *TokenIssuer) GenerateAccessToken(userID uuid.UUID, role Role) (string, error) {
 	now := time.Now()
 	claims := Claims{
@@ -61,8 +59,7 @@ func (i *TokenIssuer) GenerateAccessToken(userID uuid.UUID, role Role) (string, 
 	return signed, nil
 }
 
-// ParseAccessToken validates the signature and expiry of raw and
-// returns its claims.
+// ParseAccessToken validates the signature and expiry of raw and returns its claims
 func (i *TokenIssuer) ParseAccessToken(raw string) (*Claims, error) {
 	var claims Claims
 	token, err := jwt.ParseWithClaims(raw, &claims, func(_ *jwt.Token) (any, error) {

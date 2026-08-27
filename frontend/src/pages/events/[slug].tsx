@@ -9,13 +9,11 @@ import { EventArtwork } from "../../components/EventArtwork";
 import { Skeleton, SkeletonText } from "../../components/Skeleton";
 import { useSiteConfig } from "../../components/site/SiteConfigProvider";
 import type { EventCategory, EventDetail } from "../../types";
+import { formatMoney } from "../../lib/money";
+import { eventMapURL } from "../../lib/eventLocation";
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat(undefined, { weekday: "long", day: "numeric", month: "long", year: "numeric" }).format(new Date(value));
-}
-
-function formatPrice(cents: number) {
-  return cents === 0 ? "Free" : `$${(cents / 100).toFixed(2)}`;
 }
 
 const statusMeta: Record<string, { label: string; tone: string }> = {
@@ -50,28 +48,22 @@ export default function EventDetailPage() {
     return (
       <div className="min-h-screen text-white" style={{ backgroundColor: config.background_color }}>
         <SportHeader active="events" />
-        {/* Hero placeholder */}
-        <div className="relative border-b border-white/10">
-          <div className="topo-surface h-[280px] w-full opacity-40 sm:h-[380px]" />
-          <div className="mx-auto max-w-6xl px-5 sm:px-8">
-            <div className="relative -mt-24 pb-8 sm:-mt-28">
+        <div className="border-b border-white/10">
+          <div className="mx-auto grid max-w-[1440px] lg:min-h-[680px] lg:grid-cols-[minmax(360px,0.88fr)_minmax(0,1.12fr)]">
+            <Skeleton className="min-h-[440px] rounded-none lg:min-h-full" />
+            <div className="flex flex-col justify-center px-5 py-10 sm:px-10 lg:px-14">
               <Skeleton className="h-3 w-24" />
-              <Skeleton className="mt-4 h-6 w-32 rounded-md" />
-              <Skeleton className="mt-3 h-14 w-full max-w-2xl rounded-xl" />
+              <Skeleton className="mt-7 h-6 w-40 rounded-none" />
+              <Skeleton className="mt-5 h-32 w-full max-w-3xl rounded-none" />
+              <SkeletonText className="mt-7 max-w-xl" lines={3} />
+              <div className="mt-10 grid gap-px bg-white/10 sm:grid-cols-3">
+                {[0, 1, 2].map((i) => <Skeleton key={i} className="h-24 rounded-none" />)}
+              </div>
             </div>
           </div>
         </div>
         <main className="mx-auto max-w-6xl px-5 py-10 sm:px-8 sm:py-14">
-          {/* Facts placeholders */}
-          <div className="grid gap-4 border-b border-white/10 pb-10 sm:grid-cols-3">
-            {[0, 1, 2].map((i) => (
-              <div key={i} className="rounded-lg border border-white/10 p-4">
-                <Skeleton className="h-3 w-12" />
-                <Skeleton className="mt-3 h-5 w-36" />
-              </div>
-            ))}
-          </div>
-          <div className="mt-10 grid gap-10 lg:grid-cols-[minmax(0,1.5fr)_minmax(300px,0.7fr)] lg:items-start">
+          <div className="grid gap-10 lg:grid-cols-[minmax(0,1.5fr)_minmax(300px,0.7fr)] lg:items-start">
             <div className="space-y-10">
               <SkeletonText lines={4} />
               <div className="space-y-3">
@@ -101,34 +93,47 @@ export default function EventDetailPage() {
     <div className="min-h-screen text-white" style={{ backgroundColor: config.background_color }}>
       <SportHeader active="events" />
 
-      {/* Hero */}
-      <div className="relative border-b border-white/10">
-        <div className="relative h-[280px] w-full overflow-hidden sm:h-[380px]">
-          <EventArtwork coverImage={event.cover_image} eventName={event.name} imageClassName="h-full w-full object-cover opacity-75" />
-          <div className="absolute inset-0" style={{ background: `linear-gradient(to top, ${config.background_color}, ${config.background_color}66 42%, transparent)` }} />
-        </div>
-        <div className="mx-auto max-w-6xl px-5 sm:px-8">
-          <div className="relative -mt-24 pb-8 sm:-mt-28">
-            <Link href="/events" className="inline-flex items-center gap-1 text-xs font-bold uppercase tracking-[0.1em] text-white/60 transition hover:text-white">← All events</Link>
-            <span className={`mt-4 inline-flex w-fit rounded px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.1em] ${status.tone}`}>{status.label}</span>
-            <h1 className="sport-display mt-3 max-w-3xl text-5xl uppercase leading-[0.88] tracking-[-0.045em] sm:text-7xl">{event.name}</h1>
+      <section className="overflow-hidden border-b border-white/10 bg-[#101010]">
+        <div className="mx-auto grid max-w-[1440px] lg:min-h-[680px] lg:grid-cols-[minmax(360px,0.88fr)_minmax(0,1.12fr)]">
+          <div className="relative min-h-[460px] overflow-hidden border-b border-white/10 bg-[#17202c] lg:min-h-full lg:border-b-0 lg:border-r">
+            <EventArtwork coverImage={event.cover_image} eventName={event.name} variant="hero" />
+            <div className="pointer-events-none absolute inset-0 ring-1 ring-inset ring-white/10" />
+            <span className="pointer-events-none absolute left-5 top-5 h-12 w-12 border-l-2 border-t-2" style={{ borderColor: acid }} />
+            <span className="pointer-events-none absolute bottom-5 right-5 h-12 w-12 border-b-2 border-r-2" style={{ borderColor: acid }} />
+            <span className="absolute bottom-5 left-5 bg-black/80 px-3 py-2 font-mono text-[8px] font-black uppercase tracking-[0.18em] text-white/70 backdrop-blur">Official event artwork</span>
+          </div>
+
+          <div className="relative flex flex-col overflow-hidden px-5 py-9 sm:px-10 sm:py-12 lg:px-14 lg:py-14">
+            <div className="pointer-events-none absolute -right-16 -top-16 h-64 w-64 rounded-full border border-white/[0.045]" />
+            <div className="pointer-events-none absolute -right-4 top-24 h-36 w-36 rounded-full border border-white/[0.045]" />
+            <div className="relative">
+              <Link href="/events" className="inline-flex items-center gap-2 border-b border-white/25 pb-1 font-mono text-[9px] font-black uppercase tracking-[0.14em] text-white/50 transition hover:border-white hover:text-white">← Race calendar</Link>
+              <div className="mt-8 flex flex-wrap items-center gap-3">
+                <span className={`inline-flex border border-current px-3 py-2 font-mono text-[9px] font-black uppercase tracking-[0.14em] ${status.tone}`}>{status.label}</span>
+                <span className="font-mono text-[9px] font-black uppercase tracking-[0.16em] text-white/30">Unity Runn Club · Official entry</span>
+              </div>
+              <h1 className="sport-display mt-6 max-w-4xl text-[clamp(3.5rem,7vw,7.5rem)] uppercase leading-[0.78] tracking-[-0.045em] text-white">{event.name}</h1>
+              {event.description && <p className="mt-7 max-w-2xl text-base font-medium leading-7 text-white/62 sm:text-lg sm:leading-8">{event.description}</p>}
+
+              {canRegister && categories.length > 0 && (
+                <Link href={`/events/${event.slug}/register?category=${categories[0].id}`} className="mt-8 inline-flex items-center gap-3 px-5 py-3.5 text-[11px] font-black uppercase tracking-[0.12em] text-black transition hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-white" style={{ backgroundColor: acid }}>
+                  <Ticket className="h-4 w-4" />Choose your entry<ArrowUpRight className="h-4 w-4" />
+                </Link>
+              )}
+            </div>
+
+            <div className="relative mt-10 grid gap-px border border-white/10 bg-white/10 sm:grid-cols-3 lg:mt-auto">
+              <Fact icon={<CalendarDays className="h-4 w-4" />} label="Race day" value={formatDate(event.event_date)} />
+              <Fact icon={<Clock3 className="h-4 w-4" />} label="Start" value={event.start_time ? event.start_time.slice(11, 16) : "To be confirmed"} />
+              <Fact icon={<MapPin className="h-4 w-4" />} label="Meet" value={event.location || "Location to be confirmed"} href={event.location ? eventMapURL(event) : undefined} />
+            </div>
           </div>
         </div>
-      </div>
+      </section>
 
       <main className="mx-auto max-w-6xl px-5 py-10 sm:px-8 sm:py-14">
-        {/* Facts */}
-        <div className="grid gap-4 border-b border-white/10 pb-10 sm:grid-cols-3">
-          <Fact icon={<CalendarDays className="h-4 w-4" />} label="Date" value={formatDate(event.event_date)} />
-          <Fact icon={<Clock3 className="h-4 w-4" />} label="Start" value={event.start_time ? event.start_time.slice(11, 16) : "To be confirmed"} />
-          <Fact icon={<MapPin className="h-4 w-4" />} label="Meet" value={event.location || "Location to be confirmed"} />
-        </div>
-
-        <div className="mt-10 grid gap-10 lg:grid-cols-[minmax(0,1.5fr)_minmax(300px,0.7fr)] lg:items-start">
+        <div className="grid gap-10 lg:grid-cols-[minmax(0,1.5fr)_minmax(300px,0.7fr)] lg:items-start">
           <div className="space-y-14">
-            {event.description && (
-              <p className="max-w-2xl text-lg leading-8 text-white/75">{event.description}</p>
-            )}
             {event.schedule?.length ? <Schedule event={event} /> : null}
             {event.faqs?.length ? <FAQ event={event} /> : null}
             {event.rules?.length ? <Rules event={event} primary={acid} /> : null}
@@ -156,13 +161,13 @@ export default function EventDetailPage() {
   );
 }
 
-function Fact({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
+function Fact({ icon, label, value, href }: { icon: React.ReactNode; label: string; value: string; href?: string }) {
   return (
-    <div className="flex items-start gap-3">
-      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/15 text-white/60">{icon}</span>
+    <div className="flex min-h-24 items-start gap-3 bg-[#151515] p-4">
+      <span className="flex h-8 w-8 shrink-0 items-center justify-center border border-white/15 text-white/60">{icon}</span>
       <div>
-        <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-white/45">{label}</p>
-        <p className="mt-1 text-sm font-medium text-white">{value}</p>
+        <p className="font-mono text-[8px] font-black uppercase tracking-[0.16em] text-white/40">{label}</p>
+        {href ? <a href={href} target="_blank" rel="noreferrer" className="mt-1.5 inline-flex items-center gap-1.5 text-[13px] font-bold leading-5 text-white underline decoration-white/25 underline-offset-4 transition hover:decoration-[#d9ff00]"><span>{value}</span><ArrowUpRight className="h-3.5 w-3.5 shrink-0" /></a> : <p className="mt-1.5 text-[13px] font-bold leading-5 text-white">{value}</p>}
       </div>
     </div>
   );
@@ -176,7 +181,7 @@ function Category({ category, slug, primary }: { category: EventCategory; slug: 
     >
       <div className="flex items-baseline justify-between gap-3">
         <p className="font-semibold text-white">{category.name}</p>
-        <p className="text-sm font-semibold" style={{ color: primary }}>{formatPrice(category.price_cents)}</p>
+        <p className="text-sm font-semibold" style={{ color: primary }}>{formatMoney(category.price_cents, category.currency)}</p>
       </div>
       <div className="mt-1.5 flex items-center gap-3 text-xs text-white/50">
         <span>{category.distance}</span>

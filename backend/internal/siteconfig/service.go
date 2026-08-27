@@ -20,10 +20,6 @@ type repository interface {
 	ListVersions(ctx context.Context, limit int) ([]Version, error)
 	GetVersion(ctx context.Context, id int64) (*Settings, error)
 }
-
-// ChangePublisher broadcasts a committed public-site update. It deliberately
-// has no error return: persistence is authoritative and a temporary realtime
-// outage must never turn a successful admin publish into a failed request.
 type ChangePublisher interface {
 	PublishSiteConfig(ctx context.Context, settings Settings)
 }

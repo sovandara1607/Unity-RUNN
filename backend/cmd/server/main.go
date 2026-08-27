@@ -1,6 +1,3 @@
-// Command server is the Unity Run Club API entrypoint. It wires up
-// configuration, logging, PostgreSQL/Redis connections, every
-// business domain, and the HTTP server.
 package main
 
 import (
@@ -34,9 +31,7 @@ import (
 	"github.com/unity-run-club/api/internal/systemstatus"
 )
 
-// Redis-backed registration tuning. Not exposed as env vars yet — the
-// values are conservative defaults; promote to config if a later
-// phase needs them tunable per-environment.
+// Redis-backed registration tuning.
 const (
 	registrationLockTTL    = 5 * time.Second
 	availabilityCacheTTL   = 5 * time.Second
@@ -53,7 +48,6 @@ func main() {
 func run() error {
 	cfg, err := config.Load()
 	if err != nil {
-		// Config isn't loaded yet, so fall back to a minimal logger.
 		logger.New("info").Error("startup_failed", "error", err)
 		return err
 	}
@@ -87,10 +81,6 @@ func run() error {
 		RedirectURL: cfg.GoogleOAuthRedirectURL, PublicAppURL: cfg.PublicAppURL,
 	})
 
-	// notifications wiring comes before events/registrations: both of
-	// those define their own notifier interfaces (no import of
-	// notifications), and notifications.Service implements them —
-	// interface-in-consumer, implementation-in-producer, wired here.
 	notifRepo := notifications.NewRepository(db.Pool)
 	notifQueue := notifications.NewQueue(redisClient.Raw())
 	notifSvc := notifications.NewService(notifRepo, notifQueue, log)
@@ -155,11 +145,13 @@ func run() error {
 		cfg.NotificationSweepInterval, cfg.NotificationMaxAttempts, cfg.PublicAppURL)
 	reminderScheduler := notifications.NewReminderScheduler(notifSvc, eventsRepo, regRepo, log,
 		cfg.ReminderPollInterval, cfg.ReminderWindow)
+	paymentReconciler := registrations.NewPaymentReconciler(regSvc, log, 15*time.Second)
 
 	backgroundCtx, stopBackground := context.WithCancel(context.Background())
 	defer stopBackground()
 	go notifWorker.Run(backgroundCtx)
 	go reminderScheduler.Run(backgroundCtx)
+	go paymentReconciler.Run(backgroundCtx)
 
 	router := apphttp.NewRouter(apphttp.Deps{
 		Logger:               log,
@@ -231,11 +223,6 @@ func buildPaymentProvider(cfg *config.Config) (payments.Provider, error) {
 	})
 }
 
-// buildEmailSender returns a real SMTPSender when SMTP is configured,
-// or a NoopSender (logs instead of sending) otherwise — same
-// dev-safe-default precedent as payments.MockProvider. Production
-// without SMTP configured is allowed to start (emails just won't
-// send) but logs a warning, same pattern as the mock payment provider.
 func buildEmailSender(cfg *config.Config, log *slog.Logger) email.Sender {
 	if cfg.SMTPHost == "" {
 		if cfg.AppEnv == "production" {

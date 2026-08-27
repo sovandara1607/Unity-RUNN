@@ -9,10 +9,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 )
-
-// MediaHandler exposes intentionally public uploaded assets from a private R2
-// bucket. A custom R2 domain can bypass this proxy by setting
-// R2_PUBLIC_BASE_URL, while old proxy URLs continue to work.
 type MediaHandler struct{ store Reader }
 
 func NewMediaHandler(store Reader) *MediaHandler { return &MediaHandler{store: store} }

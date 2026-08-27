@@ -2,6 +2,24 @@ services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
+    init: true
+    mem_limit: ${POSTGRES_MEMORY_LIMIT:-256m}
+    cpus: ${POSTGRES_CPU_LIMIT:-0.75}
+    pids_limit: 100
+    command:
+      - postgres
+      - -c
+      - max_connections=30
+      - -c
+      - shared_buffers=64MB
+      - -c
+      - effective_cache_size=192MB
+      - -c
+      - work_mem=2MB
+      - -c
+      - maintenance_work_mem=32MB
+      - -c
+      - huge_pages=off
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-unity}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-unity}
@@ -12,28 +30,56 @@ services:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-unity} -d ${POSTGRES_DB:-unity_run_club}"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    init: true
+    mem_limit: ${REDIS_MEMORY_LIMIT:-96m}
+    cpus: ${REDIS_CPU_LIMIT:-0.25}
+    pids_limit: 50
+    command:
+      - redis-server
+      - --maxmemory
+      - ${REDIS_MAXMEMORY:-64mb}
+      - --maxmemory-policy
+      - noeviction
+      - --save
+      - "300"
+      - "10"
     ports:
       - "6379:6379"
     volumes:
       - redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   api:
     build:
       context: ./backend
       dockerfile: Dockerfile
     restart: unless-stopped
+    init: true
+    mem_limit: ${API_MEMORY_LIMIT:-256m}
+    cpus: ${API_CPU_LIMIT:-1.0}
+    pids_limit: 100
     env_file:
       - path: .env
         required: false
@@ -42,6 +88,8 @@ services:
       REDIS_ADDR: redis:6379
       REALTIME_INTERNAL_URL: http://realtime:8081
       UPLOAD_DIR: /app/uploads
+      GOMEMLIMIT: ${API_GO_MEMORY_LIMIT:-192MiB}
+      GOMAXPROCS: ${API_GO_MAX_PROCS:-1}
     ports:
       - "${PORT:-8080}:8080"
     depends_on:
@@ -51,12 +99,27 @@ services:
         condition: service_healthy
     volumes:
       - event_uploads:/app/uploads
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8080/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   realtime:
     build:
       context: ./realtime
       dockerfile: Dockerfile
     restart: unless-stopped
+    init: true
+    mem_limit: ${REALTIME_MEMORY_LIMIT:-96m}
+    cpus: ${REALTIME_CPU_LIMIT:-0.25}
+    pids_limit: 50
     environment:
       PORT: 8081
       REDIS_HOST: redis
@@ -64,6 +127,7 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       REDIS_DB: ${REDIS_DB:-0}
       ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000}
+      NODE_OPTIONS: --max-old-space-size=${REALTIME_NODE_HEAP_MB:-64}
     ports:
       - "${REALTIME_PORT:-8081}:8081"
     depends_on:
@@ -71,9 +135,15 @@ services:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8081/health"]
-      interval: 10s
+      interval: 30s
       timeout: 3s
-      retries: 5
+      retries: 3
+      start_period: 5s
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   postgres_data:

@@ -11,27 +11,23 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// ErrNotFound is returned when a user, profile, or refresh token
-// doesn't exist.
+// ErrNotFound is returned when a user, profile, or refresh token doesn't exist
 var ErrNotFound = errors.New("auth: not found")
 
-// ErrEmailTaken is returned when creating a user whose email already
-// exists.
+// ErrEmailTaken is returned when creating a user whose email already exists
 var ErrEmailTaken = errors.New("auth: email already registered")
 
-// Repository persists users, profiles, and refresh tokens in
-// PostgreSQL. No business rules live here — only SQL.
+// Repository persists users, profiles, and refresh tokens in PostgreSQL. No business rules live here — only SQL
 type Repository struct {
 	pool *pgxpool.Pool
 }
 
-// NewRepository builds a Repository backed by pool.
+// NewRepository builds a Repository backed by pool
 func NewRepository(pool *pgxpool.Pool) *Repository {
 	return &Repository{pool: pool}
 }
 
-// CreateUserWithProfile inserts a user and its profile in a single
-// transaction, populating both structs' generated fields.
+// CreateUserWithProfile inserts a user and its profile in a single transaction, populating both structs' generated fields
 func (r *Repository) CreateUserWithProfile(ctx context.Context, u *User, p *Profile) error {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -72,21 +68,21 @@ func (r *Repository) CreateUserWithProfile(ctx context.Context, u *User, p *Prof
 	return nil
 }
 
-// GetUserByEmail fetches a user by email.
+// GetUserByEmail fetches a user by email
 func (r *Repository) GetUserByEmail(ctx context.Context, email string) (*User, error) {
 	const query = `SELECT id, email, password_hash, role, created_at, updated_at
 		FROM users WHERE lower(email) = lower($1)`
 	return scanUserRow(r.pool.QueryRow(ctx, query, email))
 }
 
-// GetUserByID fetches a user by ID.
+// GetUserByID fetches a user by ID
 func (r *Repository) GetUserByID(ctx context.Context, id uuid.UUID) (*User, error) {
 	const query = `SELECT id, email, password_hash, role, created_at, updated_at
 		FROM users WHERE id = $1`
 	return scanUserRow(r.pool.QueryRow(ctx, query, id))
 }
 
-// GetUserByIdentity resolves the local account for a stable provider subject.
+// GetUserByIdentity resolves the local account for a stable provider subject
 func (r *Repository) GetUserByIdentity(ctx context.Context, provider, subject string) (*User, error) {
 	const query = `
 		SELECT u.id, u.email, u.password_hash, u.role, u.created_at, u.updated_at
@@ -96,8 +92,7 @@ func (r *Repository) GetUserByIdentity(ctx context.Context, provider, subject st
 	return scanUserRow(r.pool.QueryRow(ctx, query, provider, subject))
 }
 
-// LinkIdentity associates a verified provider subject with a user. Conflicts
-// are left untouched and resolved by the service's canonical re-read.
+// LinkIdentity associates a verified provider subject with a user. Conflicts are left untouched and resolved by the service's canonical re-read
 func (r *Repository) LinkIdentity(ctx context.Context, identity *OAuthIdentity) error {
 	const query = `
 		INSERT INTO auth_identities (user_id, provider, subject, email)
@@ -161,7 +156,7 @@ func scanUserRow(row pgx.Row) (*User, error) {
 	return &u, nil
 }
 
-// GetProfileByUserID fetches a profile by owning user ID.
+// GetProfileByUserID fetches a profile by owning user ID
 func (r *Repository) GetProfileByUserID(ctx context.Context, userID uuid.UUID) (*Profile, error) {
 	const query = `
 		SELECT id, user_id, full_name, phone, date_of_birth, gender,
@@ -184,8 +179,7 @@ func (r *Repository) GetProfileByUserID(ctx context.Context, userID uuid.UUID) (
 	return &p, nil
 }
 
-// UpdateProfile overwrites all mutable columns of the profile
-// identified by p.ID, refreshing UpdatedAt.
+// UpdateProfile overwrites all mutable columns of the profile identified by p.ID, refreshing UpdatedAt
 func (r *Repository) UpdateProfile(ctx context.Context, p *Profile) error {
 	const query = `
 		UPDATE profiles SET
@@ -208,7 +202,7 @@ func (r *Repository) UpdateProfile(ctx context.Context, p *Profile) error {
 	return nil
 }
 
-// CreateRefreshToken inserts a new refresh token record.
+// CreateRefreshToken inserts a new refresh token record
 func (r *Repository) CreateRefreshToken(ctx context.Context, t *RefreshToken) error {
 	const query = `
 		INSERT INTO refresh_tokens (user_id, token_hash, expires_at)
@@ -251,9 +245,7 @@ func (r *Repository) RevokeRefreshToken(ctx context.Context, id uuid.UUID, now t
 	return nil
 }
 
-// isUniqueViolation reports whether err is a Postgres unique
-// constraint violation (SQLSTATE 23505), without importing pgconn
-// directly into every caller.
+// isUniqueViolation reports whether err is a Postgres unique constraint violation (SQLSTATE 23505), without importing pgconn directly into every caller
 func isUniqueViolation(err error) bool {
 	if err == nil {
 		return false

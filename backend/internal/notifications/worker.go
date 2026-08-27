@@ -23,15 +23,10 @@ type workerRepository interface {
 	ListPendingOlderThan(ctx context.Context, cutoff time.Time, limit int) ([]Notification, error)
 }
 
-// registrationGetter is the read-only slice of registrations the
-// worker needs to enrich a notification's template data.
 type registrationGetter interface {
 	GetByID(ctx context.Context, id uuid.UUID) (*registrations.Registration, error)
 }
 
-// paymentGetter is optional so worker test doubles and alternative read models
-// do not need payment support. The production registration repository provides
-// it and payment confirmations require it for the official receipt.
 type paymentGetter interface {
 	GetPaymentForRegistration(ctx context.Context, registrationID uuid.UUID) (*registrations.Payment, error)
 }
@@ -42,14 +37,19 @@ type eventGetter interface {
 	GetCategoryByID(ctx context.Context, id uuid.UUID) (*events.EventCategory, error)
 }
 
-// Worker drains the Redis queue and, as a durability backstop, sweeps
-// Postgres for any PENDING row the queue missed. Postgres remains
-// authoritative — the queue only helps the worker notice new work
-// quickly; a lost queue message never loses the email; it's just
-// picked up on the next sweep.
+type workerQueue interface {
+	pop(ctx context.Context, timeout time.Duration) (string, error)
+	heartbeat(ctx context.Context, ttl time.Duration) error
+}
+
+const (
+	workerHeartbeatInterval = 5 * time.Second
+	workerHeartbeatTTL      = 15 * time.Second
+)
+
 type Worker struct {
 	repo          workerRepository
-	queue         *Queue
+	queue         workerQueue
 	regs          registrationGetter
 	evts          eventGetter
 	sender        email.Sender
@@ -75,11 +75,11 @@ func NewWorker(repo workerRepository, q *Queue, regs registrationGetter, evts ev
 	}
 }
 
-// Run blocks, draining the queue and periodically sweeping, until ctx
-// is cancelled.
+// Run blocks, draining the queue and periodically sweeping, until ctx is cancelled.
 func (w *Worker) Run(ctx context.Context) {
 	sweepTicker := time.NewTicker(w.sweepInterval)
 	defer sweepTicker.Stop()
+	go w.runHeartbeat(ctx)
 
 	for {
 		select {
@@ -101,6 +101,26 @@ func (w *Worker) Run(ctx context.Context) {
 			}
 			w.process(ctx, id)
 		}
+	}
+}
+
+func (w *Worker) runHeartbeat(ctx context.Context) {
+	w.recordHeartbeat(ctx)
+	ticker := time.NewTicker(workerHeartbeatInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			w.recordHeartbeat(ctx)
+		}
+	}
+}
+
+func (w *Worker) recordHeartbeat(ctx context.Context) {
+	if err := w.queue.heartbeat(ctx, workerHeartbeatTTL); err != nil && ctx.Err() == nil {
+		w.log.Warn("notification_worker_heartbeat_failed", "error", err)
 	}
 }
 

@@ -1,7 +1,3 @@
-// Package config loads and validates application configuration from
-// environment variables. It intentionally avoids third-party config
-// frameworks — the surface area here is small enough that a typed
-// struct plus explicit parsing stays easy to read and test.
 package config
 
 import (
@@ -13,7 +9,7 @@ import (
 	"time"
 )
 
-// Config holds all runtime configuration for the API process.
+// Config holds all runtime configuration for the API process
 type Config struct {
 	AppEnv   string // "development", "staging", "production"
 	Port     string
@@ -41,9 +37,7 @@ type Config struct {
 	RefreshTokenTTL time.Duration
 	BcryptCost      int
 
-	// SMTP is optional: empty SMTPHost means emails are logged, not
-	// sent (see internal/email.NoopSender) — for local development
-	// without real Gmail credentials. Required in production.
+	// SMTP is optional: empty SMTPHost means emails are logged, not sent (see internal/email.NoopSender) — for local development without real Gmail credentials. Required in production
 	SMTPHost     string
 	SMTPPort     int
 	SMTPUser     string
@@ -76,9 +70,7 @@ type Config struct {
 	ShutdownTimeout time.Duration
 }
 
-// Load reads configuration from environment variables, applying
-// defaults where sensible and returning an error if a required
-// variable is missing or malformed.
+// Load reads configuration from environment variables, applying defaults where sensible and returning an error if a required variable is missing or malformed
 func Load() (*Config, error) {
 	cfg := &Config{
 		AppEnv:                    getEnv("APP_ENV", "development"),
@@ -255,6 +247,7 @@ func Load() (*Config, error) {
 	return cfg, nil
 }
 
+// validateRuntimeSecurity validates the runtime security of the configuration
 func validateRuntimeSecurity(cfg *Config) error {
 	if cfg.AppEnv != "development" && cfg.AppEnv != "staging" && cfg.AppEnv != "production" {
 		return fmt.Errorf("config: APP_ENV must be development, staging, or production")
@@ -384,6 +377,7 @@ func validateRuntimeSecurity(cfg *Config) error {
 	return nil
 }
 
+// getEnv gets the environment variable with the given key, or the fallback if the variable is not set
 func getEnv(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
@@ -391,6 +385,7 @@ func getEnv(key, fallback string) string {
 	return fallback
 }
 
+// requireEnv gets the environment variable with the given key, or returns an error if the variable is not set
 func requireEnv(key string) (string, error) {
 	v := os.Getenv(key)
 	if v == "" {
@@ -399,6 +394,7 @@ func requireEnv(key string) (string, error) {
 	return v, nil
 }
 
+// splitAndTrim splits the string by commas and trims the whitespace
 func splitAndTrim(s string) []string {
 	parts := strings.Split(s, ",")
 	out := make([]string, 0, len(parts))

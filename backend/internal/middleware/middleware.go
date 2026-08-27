@@ -1,6 +1,3 @@
-// Package middleware provides HTTP middleware shared across the API:
-// request ID propagation, panic recovery, CORS, and structured
-// per-request access logging.
 package middleware
 
 import (
@@ -16,8 +13,7 @@ import (
 	applogger "github.com/unity-run-club/api/internal/logger"
 )
 
-// SecurityHeaders applies conservative response headers to every API and
-// upload response. The API is never intended to render executable HTML.
+// SecurityHeaders applies conservative response headers to every API 
 func SecurityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'; base-uri 'none'")
@@ -29,8 +25,7 @@ func SecurityHeaders(next http.Handler) http.Handler {
 	})
 }
 
-// LimitJSONBody caps JSON request bodies before handlers decode them. Uploads
-// have their own stricter multipart limit in the events handler.
+// LimitJSONBody caps JSON request bodies before handlers decode them
 func LimitJSONBody(maxBytes int64) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -48,9 +43,7 @@ func LimitJSONBody(maxBytes int64) func(http.Handler) http.Handler {
 	}
 }
 
-// RequireAllowedOrigin blocks browser cross-site requests that can carry the
-// refresh-token cookie. Requests without Origin remain available to trusted
-// non-browser clients and local operational tooling.
+// RequireAllowedOrigin blocks browser cross-site requests 
 func RequireAllowedOrigin(allowedOrigins []string) func(http.Handler) http.Handler {
 	allowed := make(map[string]struct{}, len(allowedOrigins))
 	for _, origin := range allowedOrigins {
@@ -76,15 +69,12 @@ func RequireAllowedOrigin(allowedOrigins []string) func(http.Handler) http.Handl
 	}
 }
 
-// RequestID assigns/propagates an X-Request-ID header and makes it
-// available via chi's request ID context (which our logger helpers
-// read through logger.FromContext after RequestLogger stores it).
+// RequestID assigns/propagates an X-Request-ID header 
 func RequestID(next http.Handler) http.Handler {
 	return chimiddleware.RequestID(next)
 }
 
-// RequestLogger logs one structured line per request: method, path,
-// status, duration, and request ID.
+// RequestLogger logs one structured line per request
 func RequestLogger(log *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -109,9 +99,7 @@ func RequestLogger(log *slog.Logger) func(http.Handler) http.Handler {
 	}
 }
 
-// Recoverer recovers from panics in downstream handlers, logs the
-// panic with a stack trace, and returns a 500 JSON error instead of
-// crashing the process.
+// Recoverer recovers from panics in downstream handlers
 func Recoverer(log *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

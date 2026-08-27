@@ -10,22 +10,20 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// ErrNotFound is returned when an event (or its detail) doesn't exist.
+// ErrNotFound is returned when an event (or its detail) doesn't exist
 var ErrNotFound = errors.New("events: not found")
 
-// Repository persists events and their child collections in
-// PostgreSQL. No business rules live here — only SQL.
+// Repository persists events and their child collections in PostgreSQL. No business rules live here — only SQL
 type Repository struct {
 	pool *pgxpool.Pool
 }
 
-// NewRepository builds a Repository backed by pool.
+// NewRepository builds a Repository backed by pool
 func NewRepository(pool *pgxpool.Pool) *Repository {
 	return &Repository{pool: pool}
 }
 
-// List returns events matching filter, ordered by event_date ascending,
-// plus the total matching count (ignoring limit/offset) for pagination.
+// List returns events matching filter, ordered by event_date ascending, plus the total matching count (ignoring limit/offset) for pagination
 func (r *Repository) List(ctx context.Context, filter ListFilter) ([]Event, int, error) {
 	statuses := filter.Statuses
 	if len(statuses) == 0 {
@@ -75,7 +73,7 @@ func (r *Repository) List(ctx context.Context, filter ListFilter) ([]Event, int,
 	return out, total, nil
 }
 
-// GetByID fetches a single event by ID.
+// GetByID fetches a single event by ID
 func (r *Repository) GetByID(ctx context.Context, id uuid.UUID) (*Event, error) {
 	const query = `
 		SELECT id, name, slug, description, cover_image, event_date, start_time,
@@ -94,7 +92,7 @@ func (r *Repository) GetByID(ctx context.Context, id uuid.UUID) (*Event, error) 
 	return &e, nil
 }
 
-// GetDetailBySlug fetches an event and its full child collections by slug.
+// GetDetailBySlug fetches an event and its full child collections by slug
 func (r *Repository) GetDetailBySlug(ctx context.Context, slug string) (*EventDetail, error) {
 	const query = `
 		SELECT id, name, slug, description, cover_image, event_date, start_time,
@@ -130,7 +128,7 @@ func (r *Repository) GetDetailBySlug(ctx context.Context, slug string) (*EventDe
 }
 
 // SlugExists reports whether slug is already used by another event
-// (excluding excludeID, if non-nil — used when updating an event).
+// (excluding excludeID, if non-nil — used when updating an event)
 func (r *Repository) SlugExists(ctx context.Context, slug string, excludeID *uuid.UUID) (bool, error) {
 	var exists bool
 	var err error
@@ -148,7 +146,7 @@ func (r *Repository) SlugExists(ctx context.Context, slug string, excludeID *uui
 	return exists, nil
 }
 
-// Create inserts a new event, populating e.ID/CreatedAt/UpdatedAt.
+// Create inserts a new event, populating e.ID/CreatedAt/UpdatedAt
 func (r *Repository) Create(ctx context.Context, e *Event) error {
 	const query = `
 		INSERT INTO events (name, slug, description, cover_image, event_date, start_time,
@@ -165,8 +163,7 @@ func (r *Repository) Create(ctx context.Context, e *Event) error {
 }
 
 // Update overwrites all mutable columns of the event identified by
-// e.ID, refreshing UpdatedAt. Callers (the service layer) are
-// responsible for fetch-modify-save semantics.
+// e.ID, refreshing UpdatedAt. Callers (the service layer) are responsible for fetch-modify-save semantics
 func (r *Repository) Update(ctx context.Context, e *Event) error {
 	const query = `
 		UPDATE events SET
@@ -191,7 +188,7 @@ func (r *Repository) Update(ctx context.Context, e *Event) error {
 	return nil
 }
 
-// Delete removes an event by ID. Child rows cascade via FK.
+// Delete removes an event by ID. Child rows cascade via FK
 func (r *Repository) Delete(ctx context.Context, id uuid.UUID) error {
 	tag, err := r.pool.Exec(ctx, `DELETE FROM events WHERE id = $1`, id)
 	if err != nil {
@@ -217,18 +214,16 @@ func scanEvent(row rowScanner) (Event, error) {
 	return e, err
 }
 
-// GetCategoryByID fetches a single event category by ID, for callers
-// (e.g. internal/registrations) that need to validate a category
-// without loading the full event detail.
+// GetCategoryByID fetches a single event category by ID, for callers (e.g. internal/registrations) that need to validate a category without loading the full event detail
 func (r *Repository) GetCategoryByID(ctx context.Context, id uuid.UUID) (*EventCategory, error) {
 	const query = `
-		SELECT id, event_id, name, distance, price_cents, capacity,
+		SELECT id, event_id, name, distance, price_cents, currency, capacity,
 		       registration_deadline, status, created_at, updated_at
 		FROM event_categories WHERE id = $1`
 
 	var c EventCategory
 	err := r.pool.QueryRow(ctx, query, id).Scan(&c.ID, &c.EventID, &c.Name, &c.Distance,
-		&c.PriceCents, &c.Capacity, &c.RegistrationDeadline, &c.Status, &c.CreatedAt, &c.UpdatedAt)
+		&c.PriceCents, &c.Currency, &c.Capacity, &c.RegistrationDeadline, &c.Status, &c.CreatedAt, &c.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -238,9 +233,10 @@ func (r *Repository) GetCategoryByID(ctx context.Context, id uuid.UUID) (*EventC
 	return &c, nil
 }
 
+// listCategories fetches all categories for an event
 func (r *Repository) listCategories(ctx context.Context, eventID uuid.UUID) ([]EventCategory, error) {
 	const query = `
-		SELECT id, event_id, name, distance, price_cents, capacity,
+		SELECT id, event_id, name, distance, price_cents, currency, capacity,
 		       registration_deadline, status, created_at, updated_at
 		FROM event_categories WHERE event_id = $1 ORDER BY created_at ASC`
 
@@ -253,7 +249,7 @@ func (r *Repository) listCategories(ctx context.Context, eventID uuid.UUID) ([]E
 	var out []EventCategory
 	for rows.Next() {
 		var c EventCategory
-		if err := rows.Scan(&c.ID, &c.EventID, &c.Name, &c.Distance, &c.PriceCents,
+		if err := rows.Scan(&c.ID, &c.EventID, &c.Name, &c.Distance, &c.PriceCents, &c.Currency,
 			&c.Capacity, &c.RegistrationDeadline, &c.Status, &c.CreatedAt, &c.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("events: scan category: %w", err)
 		}
@@ -262,35 +258,36 @@ func (r *Repository) listCategories(ctx context.Context, eventID uuid.UUID) ([]E
 	return out, rows.Err()
 }
 
-// CreateCategory inserts a new category for an event.
+// CreateCategory inserts a new category for an event
 func (r *Repository) CreateCategory(ctx context.Context, c *EventCategory) error {
 	const query = `
-		INSERT INTO event_categories (event_id, name, distance, price_cents, capacity, registration_deadline, status)
-		VALUES ($1,$2,$3,$4,$5,$6,$7)
+		INSERT INTO event_categories (event_id, name, distance, price_cents, currency, capacity, registration_deadline, status)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
 		RETURNING id, status, created_at, updated_at`
-	return r.pool.QueryRow(ctx, query, c.EventID, c.Name, c.Distance, c.PriceCents,
+	return r.pool.QueryRow(ctx, query, c.EventID, c.Name, c.Distance, c.PriceCents, c.Currency,
 		c.Capacity, c.RegistrationDeadline, c.Status).
 		Scan(&c.ID, &c.Status, &c.CreatedAt, &c.UpdatedAt)
 }
 
-// UpdateCategory applies non-nil fields of p to a category.
+// UpdateCategory applies non-nil fields of p to a category
 func (r *Repository) UpdateCategory(ctx context.Context, id uuid.UUID, p *UpdateCategoryRequest) (*EventCategory, error) {
 	const query = `
 		UPDATE event_categories SET
 			name = COALESCE($2, name),
 			distance = COALESCE($3, distance),
 			price_cents = COALESCE($4, price_cents),
-			capacity = COALESCE($5, capacity),
-			status = COALESCE($6, status),
-			registration_deadline = COALESCE($7, registration_deadline),
+			currency = COALESCE($5, currency),
+			capacity = COALESCE($6, capacity),
+			status = COALESCE($7, status),
+			registration_deadline = COALESCE($8, registration_deadline),
 			updated_at = now()
 		WHERE id = $1
-		RETURNING id, event_id, name, distance, price_cents, capacity,
+		RETURNING id, event_id, name, distance, price_cents, currency, capacity,
 		          registration_deadline, status, created_at, updated_at`
 
 	var c EventCategory
-	err := r.pool.QueryRow(ctx, query, id, p.Name, p.Distance, p.PriceCents, p.Capacity, p.Status, p.RegistrationDeadline).
-		Scan(&c.ID, &c.EventID, &c.Name, &c.Distance, &c.PriceCents, &c.Capacity,
+	err := r.pool.QueryRow(ctx, query, id, p.Name, p.Distance, p.PriceCents, p.Currency, p.Capacity, p.Status, p.RegistrationDeadline).
+		Scan(&c.ID, &c.EventID, &c.Name, &c.Distance, &c.PriceCents, &c.Currency, &c.Capacity,
 			&c.RegistrationDeadline, &c.Status, &c.CreatedAt, &c.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
@@ -301,7 +298,7 @@ func (r *Repository) UpdateCategory(ctx context.Context, id uuid.UUID, p *Update
 	return &c, nil
 }
 
-// DeleteCategory removes a category.
+// DeleteCategory removes a category
 func (r *Repository) DeleteCategory(ctx context.Context, id uuid.UUID) error {
 	ct, err := r.pool.Exec(ctx, `DELETE FROM event_categories WHERE id = $1`, id)
 	if sqlState(err) == "23503" {
@@ -328,7 +325,7 @@ func sqlState(err error) string {
 	return ""
 }
 
-// CreateScheduleItem inserts one schedule line for an event.
+// CreateScheduleItem inserts one schedule line for an event
 func (r *Repository) CreateScheduleItem(ctx context.Context, s *EventSchedule) error {
 	const query = `
 		INSERT INTO event_schedules (event_id, time, title, description, sort_order)
@@ -338,7 +335,7 @@ func (r *Repository) CreateScheduleItem(ctx context.Context, s *EventSchedule) e
 		Scan(&s.ID, &s.CreatedAt, &s.UpdatedAt)
 }
 
-// UpdateScheduleItem applies non-nil fields of p to a schedule item.
+// UpdateScheduleItem applies non-nil fields of p to a schedule item
 func (r *Repository) UpdateScheduleItem(ctx context.Context, id uuid.UUID, p *UpdateScheduleRequest) (*EventSchedule, error) {
 	const query = `
 		UPDATE event_schedules SET
@@ -362,7 +359,7 @@ func (r *Repository) UpdateScheduleItem(ctx context.Context, id uuid.UUID, p *Up
 	return &s, nil
 }
 
-// DeleteScheduleItem removes one schedule line.
+// DeleteScheduleItem removes one schedule line
 func (r *Repository) DeleteScheduleItem(ctx context.Context, id uuid.UUID) error {
 	ct, err := r.pool.Exec(ctx, `DELETE FROM event_schedules WHERE id = $1`, id)
 	if err != nil {
@@ -374,6 +371,7 @@ func (r *Repository) DeleteScheduleItem(ctx context.Context, id uuid.UUID) error
 	return nil
 }
 
+// listSchedule fetches all schedule items for an event
 func (r *Repository) listSchedule(ctx context.Context, eventID uuid.UUID) ([]EventSchedule, error) {
 	const query = `
 		SELECT id, event_id, time, title, description, sort_order, created_at, updated_at
@@ -397,6 +395,7 @@ func (r *Repository) listSchedule(ctx context.Context, eventID uuid.UUID) ([]Eve
 	return out, rows.Err()
 }
 
+// listFAQs fetches all FAQs for an event
 func (r *Repository) listFAQs(ctx context.Context, eventID uuid.UUID) ([]EventFAQ, error) {
 	const query = `
 		SELECT id, event_id, question, answer, sort_order, created_at, updated_at
@@ -420,6 +419,7 @@ func (r *Repository) listFAQs(ctx context.Context, eventID uuid.UUID) ([]EventFA
 	return out, rows.Err()
 }
 
+// listRules fetches all rules for an event
 func (r *Repository) listRules(ctx context.Context, eventID uuid.UUID) ([]EventRule, error) {
 	const query = `
 		SELECT id, event_id, rule, sort_order, created_at, updated_at

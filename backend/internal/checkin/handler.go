@@ -11,18 +11,17 @@ import (
 	"github.com/unity-run-club/api/internal/httpresponse"
 )
 
-// Handler wires HTTP requests to the checkin Service.
+// Handler wires HTTP requests to the checkin Service
 type Handler struct {
 	svc *Service
 }
 
-// NewHandler builds a Handler backed by svc.
+// NewHandler builds a Handler backed by svc
 func NewHandler(svc *Service) *Handler {
 	return &Handler{svc: svc}
 }
 
-// CheckIn handles POST /api/v1/check-in (STAFF+ only, guarded at the
-// route level).
+// CheckIn handles POST /api/v1/check-in (STAFF+ only, guarded at the route level)
 func (h *Handler) CheckIn(w http.ResponseWriter, r *http.Request) {
 	staff, ok := auth.UserFromContext(r.Context())
 	if !ok {

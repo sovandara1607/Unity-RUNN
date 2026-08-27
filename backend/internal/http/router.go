@@ -1,6 +1,3 @@
-// Package http wires together the HTTP server: middleware, routes,
-// and the health/readiness endpoints. Business domain routes are
-// registered here; this package owns wiring only, no business logic.
 package http
 
 import (
@@ -24,14 +21,12 @@ import (
 	"github.com/unity-run-club/api/internal/systemstatus"
 )
 
-// Pinger is implemented by any dependency whose health can be checked
-// with a context-bound ping (satisfied by *database.DB and
-// *redisclient.Client). Using an interface here keeps the router
-// testable without a real Postgres/Redis connection.
+// Pinger is implemented by any dependency whose health can be checked with a context-bound ping (satisfied by *database.DB and *redisclient.Client). Using an interface here keeps the router testable without a real Postgres/Redis connection
 type Pinger interface {
 	Ping(ctx context.Context) error
 }
 
+// filesOnlyFS is a http.FileSystem that only serves files from the root directory
 type filesOnlyFS struct{ root http.FileSystem }
 
 func (f filesOnlyFS) Open(name string) (http.File, error) {
@@ -51,7 +46,7 @@ func (f filesOnlyFS) Open(name string) (http.File, error) {
 	return file, nil
 }
 
-// Deps holds the dependencies the router needs to build routes.
+// Deps holds the dependencies the router needs to build routes
 type Deps struct {
 	Logger *slog.Logger
 	DB     Pinger
@@ -71,12 +66,11 @@ type Deps struct {
 	SystemStatusHandler  *systemstatus.Handler
 	MediaHandler         *objectstore.MediaHandler
 
-	// ReadyTimeout bounds how long each dependency ping may take
-	// when handling /ready. Defaults to 2s if zero.
+	// ReadyTimeout bounds how long each dependency ping may take when handling /ready. Defaults to 2 seconds if zero
 	ReadyTimeout time.Duration
 }
 
-// NewRouter builds the chi router with global middleware and routes.
+// NewRouter builds the chi router with global middleware and routes
 func NewRouter(deps Deps) http.Handler {
 	r := chi.NewRouter()
 
@@ -120,28 +114,17 @@ func NewRouter(deps Deps) http.Handler {
 
 		api.Route("/events", func(ev chi.Router) {
 			ev.With(auth.RequireAuth(deps.Tokens, auth.RoleAdmin)).Post("/posters", deps.EventsHandler.UploadPoster)
-			// All wildcard segments in this subtree use the same name
-			// ({id}) — chi's routing trie requires consistent param
-			// names per position; mixing {slug}/{eventId}/{id} here
-			// silently 404s deeper static branches.
-			// Public reads: OptionalAuth doesn't reject — it only
-			// attaches the caller's role when a valid bearer token is
-			// present, so STAFF+ can preview non-public events (e.g.
-			// DRAFT) via the same endpoints.
+			// Public reads: OptionalAuth doesn't reject, it only attaches the caller's role when a valid bearer token is present, so STAFF+ can preview non-public events 
 			ev.With(auth.OptionalAuth(deps.Tokens)).Get("/", deps.EventsHandler.List)
 			ev.With(auth.OptionalAuth(deps.Tokens)).Get("/{id}", deps.EventsHandler.GetBySlug)
 			ev.With(auth.RequireAuth(deps.Tokens, auth.RoleAdmin)).Get("/by-id/{id}", deps.EventsHandler.GetByID)
 
-			// Admin writes: ADMIN role or higher required.
+			// Admin writes: Admin role or higher required
 			ev.With(auth.RequireAuth(deps.Tokens, auth.RoleAdmin)).Post("/", deps.EventsHandler.Create)
 			ev.With(auth.RequireAuth(deps.Tokens, auth.RoleAdmin)).Patch("/{id}", deps.EventsHandler.Update)
 			ev.With(auth.RequireAuth(deps.Tokens, auth.RoleAdmin)).Delete("/{id}", deps.EventsHandler.Delete)
 
-			// Registration & admin sub-resources. Everything under
-			// /{id}/categories and /{id}/schedules must live in ONE
-			// Route() mount each — registering a deeper path separately
-			// (e.g. availability) makes chi unable to route an endpoint
-			// mounted directly at /{id}/categories.
+			// Registration & admin sub-resources, everything under /{id}/categories and /{id}/schedules must live in ONE Route() mount each — registering a deeper path separately (e.g. availability) makes chi unable to route an endpoint mounted directly at /{id}/cate
 			ev.Route("/{id}/categories", func(cat chi.Router) {
 				cat.Get("/{categoryId}/availability", deps.RegistrationsHandler.Availability)
 				cat.With(auth.RequireAuth(deps.Tokens, auth.RoleAdmin)).Post("/", deps.EventsHandler.CreateCategory)
@@ -156,6 +139,7 @@ func NewRouter(deps Deps) http.Handler {
 			ev.With(auth.RequireAuth(deps.Tokens, auth.RoleUser)).
 				Post("/{id}/registrations", deps.RegistrationsHandler.Register)
 		})
+		// Registrations & admin sub-resources, everything under /registrations must live in ONE Route() mount each — registering a deeper path separately (e.g. availability) makes chi unable to route an endpoint mounted directly at /registrations	
 
 		api.Route("/registrations", func(reg chi.Router) {
 			reg.Use(auth.RequireAuth(deps.Tokens, auth.RoleUser))
@@ -167,7 +151,7 @@ func NewRouter(deps Deps) http.Handler {
 		})
 
 		api.With(auth.RequireAuth(deps.Tokens, auth.RoleStaff)).Post("/check-in", deps.CheckinHandler.CheckIn)
-
+		// Check-in & admin sub-resources, everything under /admin must live in ONE Route() mount each 
 		api.Route("/admin", func(a chi.Router) {
 			a.Use(auth.RequireAuth(deps.Tokens, auth.RoleStaff))
 			a.Get("/stats", deps.StatsHandler.AdminSummary)

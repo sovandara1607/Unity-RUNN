@@ -38,3 +38,23 @@ func TestMaskIdentifier(t *testing.T) {
 		t.Fatalf("maskIdentifier() = %q", got)
 	}
 }
+
+func TestClassifyWorkerHeartbeat(t *testing.T) {
+	now := time.Date(2026, 8, 26, 10, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{name: "recent", raw: now.Add(-4 * time.Second).Format(time.RFC3339Nano), want: "operational"},
+		{name: "stale", raw: now.Add(-20 * time.Second).Format(time.RFC3339Nano), want: "attention"},
+		{name: "malformed", raw: "not-a-time", want: "attention"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := classifyWorkerHeartbeat(tt.raw, now).NotificationStatus; got != tt.want {
+				t.Fatalf("status = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

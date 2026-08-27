@@ -13,8 +13,6 @@ import (
 	"github.com/unity-run-club/api/internal/httpresponse"
 )
 
-// Handler wires HTTP requests to the registrations Service. Handlers
-// stay thin: decode -> validate -> service -> respond.
 type Handler struct {
 	svc *Service
 }
@@ -88,6 +86,8 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		httpresponse.WriteError(w, http.StatusTooManyRequests, "busy", "this category is receiving a lot of registrations right now, try again in a moment")
 	case errors.Is(err, ErrRateLimited):
 		httpresponse.WriteError(w, http.StatusTooManyRequests, "rate_limited", "too many registration attempts, try again later")
+	case errors.Is(err, ErrPaymentUnavailable):
+		httpresponse.WriteError(w, http.StatusBadGateway, "payment_unavailable", "payment could not be started; your place was released")
 	case err != nil:
 		httpresponse.WriteError(w, http.StatusInternalServerError, "internal_error", "failed to register")
 	default:
@@ -99,8 +99,6 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// Payment handles GET /api/v1/registrations/:id/payment and supports
-// resuming a pending KHQR checkout after a refresh or another device visit.
 func (h *Handler) Payment(w http.ResponseWriter, r *http.Request) {
 	caller, ok := auth.UserFromContext(r.Context())
 	if !ok {
@@ -116,8 +114,6 @@ func (h *Handler) Payment(w http.ResponseWriter, r *http.Request) {
 	writePaymentResult(w, payment, err)
 }
 
-// VerifyPayment handles POST /api/v1/registrations/:id/payment/verify. It
-// checks Bakong directly and may atomically confirm the registration.
 func (h *Handler) VerifyPayment(w http.ResponseWriter, r *http.Request) {
 	caller, ok := auth.UserFromContext(r.Context())
 	if !ok {
@@ -200,8 +196,7 @@ func (h *Handler) ListMine(w http.ResponseWriter, r *http.Request) {
 	httpresponse.WriteData(w, http.StatusOK, map[string]any{"registrations": regs})
 }
 
-// Ticket handles POST /api/v1/registrations/:id/ticket and returns the stable
-// check-in code for a confirmed registration the caller owns.
+
 func (h *Handler) Ticket(w http.ResponseWriter, r *http.Request) {
 	caller, ok := auth.UserFromContext(r.Context())
 	if !ok {

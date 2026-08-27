@@ -24,12 +24,22 @@ import type {
 
 const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:8080";
 
-/** Resolve API-owned upload paths for browser previews without storing an
- * environment-specific absolute URL in the database. */
+/** Resolve API-owned upload paths without redirecting frontend public assets
+ * such as /images/... to the API origin. */
 export const resolveApiAssetUrl = (value?: string | null): string => {
   const url = value?.trim() || "";
   if (!url || !url.startsWith("/")) return url;
-  return `${BASE_URL.replace(/\/$/, "")}${url}`;
+  if (url.startsWith("/api/") || url.startsWith("/uploads/")) {
+    return `${BASE_URL.replace(/\/$/, "")}${url}`;
+  }
+  return url;
+};
+
+export const eventPosterVariantUrl = (value: string | null | undefined, variant: "card" | "hero"): string => {
+  const original = value?.trim() || "";
+  if (!original || !original.includes("/events/") || !/\.jpe?g(?:$|\?)/i.test(original)) return resolveApiAssetUrl(original);
+  const variantURL = original.replace(/\.jpe?g(?=$|\?)/i, `@${variant}.jpg`);
+  return resolveApiAssetUrl(variantURL);
 };
 
 // Keep the short-lived access token in memory. Persisting bearer tokens in
@@ -324,10 +334,14 @@ export const api = {
     return request<Event>("/api/v1/events/", { method: "POST", body: data });
   },
 
-  async uploadEventPoster(file: File): Promise<{ url: string }> {
+  async uploadEventPoster(file: File, artboard?: { width: number; height: number }): Promise<{ url: string; card_url: string; hero_url: string; width: number; height: number; format: "jpeg" }> {
     const body = new FormData();
     body.append("poster", file);
-    return upload<{ url: string }>("/api/v1/events/posters", body);
+    if (artboard) {
+      body.append("width", String(artboard.width));
+      body.append("height", String(artboard.height));
+    }
+    return upload<{ url: string; card_url: string; hero_url: string; width: number; height: number; format: "jpeg" }>("/api/v1/events/posters", body);
   },
 
   async updateEvent(id: string, data: Partial<Event>): Promise<Event> {
@@ -443,10 +457,10 @@ export const api = {
   },
 
   // --- Event categories & schedules (admin) ---
-  async createCategory(eventId: string, data: { name: string; distance: string; price_cents: number; capacity: number }): Promise<EventCategory> {
+  async createCategory(eventId: string, data: { name: string; distance: string; price_cents: number; currency: "USD" | "KHR"; capacity: number }): Promise<EventCategory> {
     return request<EventCategory>(`/api/v1/events/${eventId}/categories/`, { method: "POST", body: data });
   },
-  async updateCategory(eventId: string, categoryId: string, data: Partial<{ name: string; distance: string; price_cents: number; capacity: number; status: string }>): Promise<EventCategory> {
+  async updateCategory(eventId: string, categoryId: string, data: Partial<{ name: string; distance: string; price_cents: number; currency: "USD" | "KHR"; capacity: number; status: string }>): Promise<EventCategory> {
     return request<EventCategory>(`/api/v1/events/${eventId}/categories/${categoryId}`, { method: "PATCH", body: data });
   },
   async deleteCategory(eventId: string, categoryId: string): Promise<void> {

@@ -1,5 +1,3 @@
-//go:build integration
-
 package auth
 
 import (
@@ -12,9 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// testPool opens a pool against DATABASE_URL (the docker-compose
-// Postgres) and truncates the auth tables before each test, mirroring
-// internal/events/repository_integration_test.go's pattern.
+// testPool opens a pool against DATABASE_URL and truncates the auth tables before each test
 func testPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 
@@ -39,11 +35,13 @@ func testPool(t *testing.T) *pgxpool.Pool {
 	return pool
 }
 
+// testUserAndProfile creates a user and profile for the given email
 func testUserAndProfile(email string) (*User, *Profile) {
 	return &User{Email: email, PasswordHash: "hashed", Role: RoleUser},
 		&Profile{FullName: "Test Runner"}
 }
 
+// TestRepository_CreateUserWithProfile tests the CreateUserWithProfile method
 func TestRepository_CreateUserWithProfile(t *testing.T) {
 	pool := testPool(t)
 	repo := NewRepository(pool)
@@ -61,6 +59,7 @@ func TestRepository_CreateUserWithProfile(t *testing.T) {
 	}
 }
 
+// TestRepository_CreateUserWithProfile_DuplicateEmail tests the CreateUserWithProfile method with a duplicate email
 func TestRepository_CreateUserWithProfile_DuplicateEmail(t *testing.T) {
 	pool := testPool(t)
 	repo := NewRepository(pool)
@@ -78,6 +77,7 @@ func TestRepository_CreateUserWithProfile_DuplicateEmail(t *testing.T) {
 	}
 }
 
+// TestRepository_GetUserByEmail_NotFound tests the GetUserByEmail method with a not found email
 func TestRepository_GetUserByEmail_NotFound(t *testing.T) {
 	pool := testPool(t)
 	repo := NewRepository(pool)
@@ -88,6 +88,7 @@ func TestRepository_GetUserByEmail_NotFound(t *testing.T) {
 	}
 }
 
+// TestRepository_RefreshTokenLifecycle tests the RefreshToken lifecycle
 func TestRepository_RefreshTokenLifecycle(t *testing.T) {
 	pool := testPool(t)
 	repo := NewRepository(pool)
@@ -124,6 +125,7 @@ func TestRepository_RefreshTokenLifecycle(t *testing.T) {
 	}
 }
 
+// TestRepository_DeleteUserCascadesProfileAndTokens tests the DeleteUser method that cascades to profile and tokens
 func TestRepository_DeleteUserCascadesProfileAndTokens(t *testing.T) {
 	pool := testPool(t)
 	repo := NewRepository(pool)

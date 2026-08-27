@@ -1,7 +1,7 @@
 import React, { useMemo, useRef, useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/router";
-import { ArrowUpRight, Download, LogOut, QrCode, Shield, MapPin } from "lucide-react";
+import { ArrowRight, ArrowUpRight, CalendarDays, Download, LogOut, QrCode, Shield, Ticket } from "lucide-react";
 import QRCode from "qrcode";
 import { api } from "../lib/api";
 import { withMinSkeleton } from "../lib/withMinSkeleton";
@@ -9,9 +9,8 @@ import { SportHeader, SportFooter } from "../components/SportHeader";
 import { Skeleton } from "../components/Skeleton";
 import { BakongPayment } from "../components/BakongPayment";
 import { AlertBanner } from "../components/alerts/AlertSystem";
+import { useSiteConfig } from "../components/site/SiteConfigProvider";
 import type { Event, MeResponse, PaymentCheckout, Registration } from "../types";
-
-const acid = "#d9ff00";
 
 const statusStyles: Record<string, string> = {
   CONFIRMED: "text-black",
@@ -25,7 +24,17 @@ function formatDate(value?: string | null) {
   return new Intl.DateTimeFormat(undefined, { weekday: "short", day: "numeric", month: "short" }).format(new Date(value));
 }
 
+function statusLabel(registration: Registration) {
+  if (registration.checked_in_at) return "Checked in";
+  if (registration.status === "PENDING") return "Payment due";
+  if (registration.status === "CONFIRMED") return "Confirmed";
+  if (registration.status === "CANCELLED") return "Cancelled";
+  return "Refunded";
+}
+
 export default function DashboardPage() {
+  const { config } = useSiteConfig();
+  const acid = config.primary_color;
   const [user, setUser] = useState<MeResponse | null>(null);
   const [registrations, setRegistrations] = useState<Registration[]>([]);
   const [events, setEvents] = useState<Event[]>([]);
@@ -68,23 +77,33 @@ export default function DashboardPage() {
 
   const eventById = useMemo(() => new Map(events.map((e) => [e.id, e])), [events]);
 
-  // Next race = earliest upcoming confirmed registration with a known event.
-  const nextRace = useMemo(() => {
-    const confirmed = registrations.filter((r) => r.status === "CONFIRMED");
-    const dated = confirmed
+  // Put unfinished payment first; otherwise show the nearest confirmed race.
+  // This keeps the one action that can block a runner from receiving a ticket
+  // in the most visible place on the page.
+  const featuredRegistration = useMemo(() => {
+    const active = registrations.filter((registration) => registration.status === "PENDING" || registration.status === "CONFIRMED");
+    const dated = active
       .map((r) => ({ reg: r, event: eventById.get(r.event_id) }))
       .filter((x): x is { reg: Registration; event: Event } => !!x.event?.event_date)
       .sort((a, b) => +new Date(a.event.event_date) - +new Date(b.event.event_date));
     const startOfToday = new Date();
     startOfToday.setHours(0, 0, 0, 0);
-    const upcoming = dated.find((entry) => new Date(entry.event.event_date) >= startOfToday);
-    return upcoming?.reg ?? dated.at(-1)?.reg ?? confirmed[0] ?? null;
+    const pending = dated.find((entry) => entry.reg.status === "PENDING");
+    const upcoming = dated.find((entry) => entry.reg.status === "CONFIRMED" && new Date(entry.event.event_date) >= startOfToday);
+    const confirmed = dated.filter((entry) => entry.reg.status === "CONFIRMED");
+    return pending?.reg ?? upcoming?.reg ?? confirmed.at(-1)?.reg ?? active[0] ?? registrations[0] ?? null;
   }, [registrations, eventById]);
 
-  const others = useMemo(
-    () => registrations.filter((r) => r.id !== nextRace?.id),
-    [registrations, nextRace]
-  );
+  const others = useMemo(() => registrations
+    .filter((registration) => registration.id !== featuredRegistration?.id)
+    .sort((a, b) => {
+      const rank = (status: Registration["status"]) => status === "PENDING" ? 0 : status === "CONFIRMED" ? 1 : 2;
+      const statusDifference = rank(a.status) - rank(b.status);
+      if (statusDifference !== 0) return statusDifference;
+      const aDate = eventById.get(a.event_id)?.event_date || a.created_at;
+      const bDate = eventById.get(b.event_id)?.event_date || b.created_at;
+      return +new Date(aDate) - +new Date(bDate);
+    }), [registrations, featuredRegistration, eventById]);
 
   const handleLogout = async () => {
     await api.logout();
@@ -182,19 +201,19 @@ export default function DashboardPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#111] text-white">
+      <div className="min-h-screen text-white" style={{ backgroundColor: config.background_color }}>
         <SportHeader active="account" accountHref="/dashboard" accountLabel="Account" />
         <section className="border-b border-white/10">
-          <div className="mx-auto max-w-[1440px] px-5 pb-12 pt-14 sm:px-8 sm:pb-16 sm:pt-20">
-            <Skeleton className="h-3 w-56" />
-            <Skeleton className="mt-10 h-[15vw] max-h-[120px] w-80 rounded-xl" />
-            <div className="mt-6 flex gap-4">
+          <div className="mx-auto max-w-[1200px] px-5 py-10 sm:px-8 sm:py-12">
+            <Skeleton className="h-3 w-28" />
+            <Skeleton className="mt-4 h-14 w-64 rounded-lg" />
+            <div className="mt-5 flex gap-4">
               <Skeleton className="h-3 w-32" />
               <Skeleton className="h-3 w-24" />
             </div>
           </div>
         </section>
-        <section className="mx-auto grid max-w-[1440px] gap-10 px-5 py-12 sm:px-8 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] lg:gap-14 lg:py-16">
+        <section className="mx-auto grid max-w-[1200px] gap-10 px-5 py-10 sm:px-8 lg:grid-cols-[minmax(0,1.12fr)_minmax(320px,0.88fr)] lg:gap-10 lg:py-14">
           {/* Next-race ticket placeholder */}
           <div>
             <Skeleton className="h-3 w-16" />
@@ -229,63 +248,48 @@ export default function DashboardPage() {
   }
 
   const firstName = (user?.name || user?.email || "Runner").split(/[\s@]/)[0];
+  const confirmedCount = registrations.filter((registration) => registration.status === "CONFIRMED").length;
+  const pendingCount = registrations.filter((registration) => registration.status === "PENDING").length;
 
   return (
-    <div className="min-h-screen bg-[#111] text-white">
+    <div className="min-h-screen text-white" style={{ backgroundColor: config.background_color }}>
 		{payment && <BakongPayment checkout={payment} eventName={paymentEventName} onPaid={finishPayment} onClose={() => setPayment(null)} />}
       <SportHeader active="account" accountHref="/dashboard" accountLabel="Account" />
 
       <main>
-        {/* Hero */}
-        <section className="relative overflow-hidden border-b border-white/10">
-          <div className="topo-surface absolute inset-0 opacity-90" />
-          <div className="relative mx-auto max-w-[1440px] px-5 pb-12 pt-14 sm:px-8 sm:pb-16 sm:pt-20">
-            <div className="flex items-start justify-between gap-6">
-              <p className="max-w-xs text-xs font-bold uppercase leading-5 tracking-[0.14em]" style={{ color: acid }}>
-                Race wallet — tickets, bibs and check-in codes live here.
-              </p>
-              {isStaffOrAdmin && (
-                <Link
-                  href="/admin"
-                  className="inline-flex shrink-0 items-center gap-1.5 rounded-full px-4 py-2.5 text-xs font-bold uppercase tracking-[0.08em] text-black transition hover:opacity-90"
-                  style={{ backgroundColor: acid }}
-                >
-                  <Shield className="h-3.5 w-3.5" /> Admin
-                </Link>
-              )}
+        <section className="border-b border-white/10">
+          <div className="mx-auto max-w-[1200px] px-5 py-9 sm:px-8 sm:py-12">
+            <div className="flex flex-col justify-between gap-6 sm:flex-row sm:items-start">
+              <div>
+                <p className="font-mono text-[9px] font-black uppercase tracking-[0.18em]" style={{ color: acid }}>Race wallet</p>
+                <h1 className="sport-display mt-3 text-5xl uppercase leading-[0.85] tracking-[-0.035em] sm:text-6xl">Hi, {firstName}.</h1>
+                <p className="mt-4 text-sm text-white/50">
+                  {registrations.length} {registrations.length === 1 ? "entry" : "entries"} · {confirmedCount} confirmed{pendingCount > 0 ? ` · ${pendingCount} awaiting payment` : ""}
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                {isStaffOrAdmin && <Link href="/admin" className="inline-flex h-10 items-center gap-2 rounded-full px-4 text-[10px] font-black uppercase tracking-[0.1em] text-black" style={{ backgroundColor: acid }}><Shield className="h-3.5 w-3.5" /> Control</Link>}
+                <button onClick={handleLogout} className="inline-flex h-10 items-center gap-2 rounded-full border border-white/15 px-4 text-[10px] font-black uppercase tracking-[0.1em] text-white/60 transition hover:border-white/40 hover:text-white"><LogOut className="h-3.5 w-3.5" /> Log out</button>
+              </div>
             </div>
 
-            <h1 className="sport-display mt-10 text-[18vw] uppercase leading-[0.82] tracking-[-0.04em] sm:text-[10vw] lg:text-[120px]">
-              {firstName}&rsquo;s runs
-            </h1>
-
-            <p className="mt-6 flex flex-wrap items-center gap-x-5 gap-y-1 text-xs font-bold uppercase tracking-[0.16em] text-white/50">
-              <span>
-                {registrations.length} registration{registrations.length === 1 ? "" : "s"}
-              </span>
-              <span aria-hidden className="text-white/20">·</span>
-              <span>
-                {registrations.filter((r) => r.status === "CONFIRMED").length} confirmed
-              </span>
-              <button
-                onClick={handleLogout}
-                className="inline-flex items-center gap-1.5 text-white/40 transition hover:text-white"
-              >
-                <LogOut className="h-3.5 w-3.5" /> Log out
-              </button>
-            </p>
+            <nav aria-label="Dashboard" className="mt-8 flex gap-1 overflow-x-auto border-t border-white/10 pt-4">
+              {featuredRegistration && <a href="#ticket" className="inline-flex shrink-0 items-center gap-2 rounded-full px-4 py-2 text-[10px] font-black uppercase tracking-[0.1em] text-black" style={{ backgroundColor: acid }}><Ticket className="h-3.5 w-3.5" />{featuredRegistration.status === "PENDING" ? "Payment" : featuredRegistration.status === "CONFIRMED" ? "My ticket" : "Latest entry"}</a>}
+              {others.length > 0 && <a href="#entries" className="inline-flex shrink-0 items-center gap-2 rounded-full px-4 py-2 text-[10px] font-black uppercase tracking-[0.1em] text-white/55 transition hover:bg-white/10 hover:text-white">Other entries</a>}
+              <Link href="/events" className="inline-flex shrink-0 items-center gap-2 rounded-full px-4 py-2 text-[10px] font-black uppercase tracking-[0.1em] text-white/55 transition hover:bg-white/10 hover:text-white">Find a race <ArrowUpRight className="h-3.5 w-3.5" /></Link>
+            </nav>
           </div>
         </section>
 
         {error && (
-          <div className="mx-auto max-w-[1440px] px-5 pt-8 sm:px-8">
+          <div className="mx-auto max-w-[1200px] px-5 pt-6 sm:px-8">
             <AlertBanner tone="error" title="Race wallet needs attention" appearance="dark" onDismiss={() => setError(null)}>{error}</AlertBanner>
           </div>
         )}
 
         {/* Tickets */}
         {registrations.length === 0 ? (
-          <section className="mx-auto max-w-[1440px] px-5 py-20 text-center sm:px-8">
+          <section className="mx-auto max-w-[1200px] px-5 py-20 text-center sm:px-8">
             <p className="sport-display text-4xl uppercase leading-none text-white/10 sm:text-6xl">No races yet</p>
             <p className="mx-auto mt-4 max-w-sm text-xs font-bold uppercase leading-5 tracking-[0.14em] text-white/40">
               Sign up for an event and your race ticket appears here.
@@ -299,22 +303,27 @@ export default function DashboardPage() {
             </Link>
           </section>
         ) : (
-          <section className="mx-auto grid max-w-[1440px] gap-10 px-5 py-12 sm:px-8 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] lg:gap-14 lg:py-16">
+          <section className="mx-auto grid max-w-[1200px] gap-10 px-5 py-10 sm:px-8 lg:grid-cols-[minmax(0,1.12fr)_minmax(320px,0.88fr)] lg:gap-10 lg:py-14">
             {/* Next race — the ticket */}
-            {nextRace && (() => {
-              const event = eventById.get(nextRace.event_id);
-              const isOpen = openTicketId === nextRace.id;
+            {featuredRegistration && (() => {
+              const event = eventById.get(featuredRegistration.event_id);
+              const isOpen = openTicketId === featuredRegistration.id;
               return (
-                <div>
-                  <p className="text-xs font-bold uppercase tracking-[0.18em] text-white/40">Next up</p>
+                <div id="ticket" className="scroll-mt-32">
+                  <div className="flex items-center justify-between gap-4">
+                    <p className="text-xs font-bold uppercase tracking-[0.18em] text-white/45">
+                      {featuredRegistration.status === "PENDING" ? "Action needed" : featuredRegistration.status === "CONFIRMED" ? "Next race" : "Latest entry"}
+                    </p>
+                    {event && <Link href={`/events/${event.slug}`} className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-[0.1em] text-white/45 transition hover:text-white">Race details <ArrowUpRight className="h-3.5 w-3.5" /></Link>}
+                  </div>
 
                   <article
-                    ref={(node) => { ticketRefs.current[nextRace.id] = node; }}
+                    ref={(node) => { ticketRefs.current[featuredRegistration.id] = node; }}
                     className="relative mt-4 select-none overflow-hidden rounded-2xl bg-white text-black shadow-[0_24px_80px_-24px_rgba(217,255,0,0.25)]"
                   >
                     {/* punched notches */}
-                    <span aria-hidden className="absolute -left-3 top-1/2 h-6 w-6 -translate-y-1/2 rounded-full bg-[#111]" />
-                    <span aria-hidden className="absolute -right-3 top-1/2 h-6 w-6 -translate-y-1/2 rounded-full bg-[#111]" />
+                    <span aria-hidden className="absolute -left-3 top-1/2 h-6 w-6 -translate-y-1/2 rounded-full" style={{ backgroundColor: config.background_color }} />
+                    <span aria-hidden className="absolute -right-3 top-1/2 h-6 w-6 -translate-y-1/2 rounded-full" style={{ backgroundColor: config.background_color }} />
 
                     <div className="p-6 sm:p-8">
                       <div className="flex items-center justify-between gap-4">
@@ -322,12 +331,14 @@ export default function DashboardPage() {
                           Unity Runn Club · Official Entry
                         </span>
                         <span
-                          className={`rounded-full border px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] ${
-                            statusStyles[nextRace.status] ?? ""
-                          }`}
-                          style={nextRace.status === "CONFIRMED" ? { backgroundColor: acid, borderColor: acid } : undefined}
+                          className="rounded-full border px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.12em]"
+                          style={featuredRegistration.status === "CONFIRMED"
+                            ? { backgroundColor: acid, borderColor: acid }
+                            : featuredRegistration.status === "PENDING"
+                              ? { backgroundColor: "#fff3cd", borderColor: "#e4bd4f", color: "#725000" }
+                              : { backgroundColor: "#eeeeea", borderColor: "#d1d1ca", color: "#666" }}
                         >
-                          {nextRace.checked_in_at ? "CHECKED IN" : nextRace.status}
+                          {statusLabel(featuredRegistration)}
                         </span>
                       </div>
 
@@ -338,7 +349,7 @@ export default function DashboardPage() {
                       <dl className="mt-6 grid grid-cols-2 gap-x-6 gap-y-4 border-t border-dashed border-black/15 pt-5 text-xs sm:grid-cols-4">
                         <div>
                           <dt className="font-bold uppercase tracking-[0.14em] text-black/40">Bib no.</dt>
-                          <dd className="mt-1 whitespace-nowrap font-mono text-sm font-semibold">{nextRace.registration_number ?? "—"}</dd>
+                          <dd className="mt-1 whitespace-nowrap font-mono text-sm font-semibold">{featuredRegistration.registration_number ?? "—"}</dd>
                         </div>
                         <div>
                           <dt className="font-bold uppercase tracking-[0.14em] text-black/40">Date</dt>
@@ -346,33 +357,42 @@ export default function DashboardPage() {
                         </div>
                         <div>
                           <dt className="font-bold uppercase tracking-[0.14em] text-black/40">Runner</dt>
-                          <dd className="mt-1 truncate font-semibold">{nextRace.full_name}</dd>
+                          <dd className="mt-1 truncate font-semibold">{featuredRegistration.full_name}</dd>
                         </div>
                         <div>
                           <dt className="font-bold uppercase tracking-[0.14em] text-black/40">Tee</dt>
-                          <dd className="mt-1 font-semibold">{nextRace.tshirt_size || "—"}</dd>
+                          <dd className="mt-1 font-semibold">{featuredRegistration.tshirt_size || "—"}</dd>
                         </div>
                       </dl>
                     </div>
 
                     {/* perforated stub */}
-                    <div className="border-t-2 border-dashed border-black/15 p-6 sm:p-8" style={{ backgroundColor: nextRace.status === "CONFIRMED" ? acid : "#f4f4f4" }}>
-                      {nextRace.checked_in_at ? (
+                    <div className="border-t-2 border-dashed border-black/15 p-6 sm:p-8" style={{ backgroundColor: featuredRegistration.status === "CONFIRMED" ? acid : "#f4f4f4" }}>
+                      {featuredRegistration.checked_in_at ? (
                         <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.14em] text-black/65">
                           <span className="flex h-6 w-6 items-center justify-center rounded-full bg-black text-[#d9ff00]">✓</span>
-                          Checked in {new Date(nextRace.checked_in_at).toLocaleString()}
+                          Checked in {new Date(featuredRegistration.checked_in_at).toLocaleString()}
                         </div>
-                      ) : nextRace.status !== "CONFIRMED" ? (
-                        <p className="text-xs font-bold uppercase tracking-[0.14em] text-black/50">
-                          Complete payment to unlock your check-in QR.
-                        </p>
+                      ) : featuredRegistration.status === "PENDING" ? (
+                        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                          <div>
+                            <p className="text-xs font-bold uppercase tracking-[0.12em] text-black/70">Finish payment</p>
+                            <p className="mt-1 text-[11px] font-medium text-black/50">Your ticket and QR unlock after confirmation.</p>
+                          </div>
+                          <button onClick={() => resumePayment(featuredRegistration)} disabled={paymentLoadingId === featuredRegistration.id} className="inline-flex h-11 items-center justify-center gap-2 rounded-full bg-black px-6 text-[11px] font-bold uppercase tracking-[0.1em] text-white transition hover:opacity-80 disabled:opacity-50">
+                            {paymentLoadingId === featuredRegistration.id ? <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/25 border-t-white" /> : <ArrowRight className="h-4 w-4" />}
+                            {paymentLoadingId === featuredRegistration.id ? "Opening" : "Pay now"}
+                          </button>
+                        </div>
+                      ) : featuredRegistration.status !== "CONFIRMED" ? (
+                        <p className="text-xs font-bold uppercase tracking-[0.12em] text-black/50">This registration is {statusLabel(featuredRegistration).toLowerCase()}.</p>
                       ) : isOpen ? (
                         <div className="flex flex-col items-center gap-3 sm:flex-row sm:items-center sm:gap-6">
                           <div
                             role="img"
-                            aria-label={`Check-in QR for ${nextRace.registration_number}`}
+                            aria-label={`Check-in QR for ${featuredRegistration.registration_number}`}
                             className="h-36 w-36 rounded-lg bg-white p-2 shadow-sm motion-safe:animate-[qrIn_.35s_ease-out] [&_svg]:block [&_svg]:h-full [&_svg]:w-full"
-                            dangerouslySetInnerHTML={{ __html: qrByRegId[nextRace.id] }}
+                            dangerouslySetInnerHTML={{ __html: qrByRegId[featuredRegistration.id] }}
                           />
                           <div className="text-center sm:text-left">
                             <p className="text-xs font-bold uppercase tracking-[0.14em]">Scan at the check-in desk</p>
@@ -381,18 +401,18 @@ export default function DashboardPage() {
                             </p>
                             <div data-ticket-export-hide="true" className="mt-3 flex flex-wrap justify-center gap-4 sm:justify-start">
                               <button
-                                onClick={() => downloadTicket(nextRace)}
-                                disabled={ticketDownloadingId === nextRace.id}
+                                onClick={() => downloadTicket(featuredRegistration)}
+                                disabled={ticketDownloadingId === featuredRegistration.id}
                                 className="inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-[0.12em] underline underline-offset-4 hover:opacity-70 disabled:opacity-50"
                               >
-                                {ticketDownloadingId === nextRace.id ? (
+                                {ticketDownloadingId === featuredRegistration.id ? (
                                   <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-black/25 border-t-black" />
                                 ) : (
                                   <Download className="h-3.5 w-3.5" />
                                 )}
-                                {ticketDownloadingId === nextRace.id ? "Saving ticket" : "Save ticket"}
+                                {ticketDownloadingId === featuredRegistration.id ? "Saving ticket" : "Save ticket"}
                               </button>
-                              <button onClick={() => toggleQr(nextRace)} className="text-[11px] font-bold uppercase tracking-[0.12em] underline underline-offset-4 hover:opacity-70">
+                              <button onClick={() => toggleQr(featuredRegistration)} className="text-[11px] font-bold uppercase tracking-[0.12em] underline underline-offset-4 hover:opacity-70">
                                 Hide code
                               </button>
                             </div>
@@ -400,11 +420,11 @@ export default function DashboardPage() {
                         </div>
                       ) : (
                         <button
-                          onClick={() => toggleQr(nextRace)}
-                          disabled={qrLoadingId === nextRace.id}
+                          onClick={() => toggleQr(featuredRegistration)}
+                          disabled={qrLoadingId === featuredRegistration.id}
                           className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-black py-3.5 text-xs font-bold uppercase tracking-[0.1em] text-white transition hover:opacity-85 disabled:opacity-60 sm:w-auto sm:px-8"
                         >
-                          {qrLoadingId === nextRace.id ? (
+                          {qrLoadingId === featuredRegistration.id ? (
                             <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/30 border-t-white" />
                           ) : (
                             <QrCode className="h-4 w-4" />
@@ -419,9 +439,9 @@ export default function DashboardPage() {
             })()}
 
             {/* Everything else */}
-            <div>
+            <div id="entries" className="scroll-mt-32">
               <p className="text-xs font-bold uppercase tracking-[0.18em] text-white/40">
-                All entries {others.length > 0 && `(${others.length})`}
+                Other entries {others.length > 0 && `(${others.length})`}
               </p>
 
               {others.length === 0 ? (
@@ -450,14 +470,14 @@ export default function DashboardPage() {
                               className={`shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] ${statusStyles[reg.status] ?? ""}`}
                               style={reg.status === "CONFIRMED" ? { backgroundColor: acid, borderColor: acid, color: "#000" } : undefined}
                             >
-                              {reg.checked_in_at ? "CHECKED IN" : reg.status}
+                              {statusLabel(reg)}
                             </span>
                             <div className="min-w-0 flex-1">
-                              <p className="truncate text-sm font-bold">{event?.name ?? "Registration"}</p>
+                              {event ? <Link href={`/events/${event.slug}`} className="block truncate text-sm font-bold transition hover:text-white/70">{event.name}</Link> : <p className="truncate text-sm font-bold">Registration</p>}
                               <p className="mt-0.5 flex items-center gap-3 text-[11px] font-medium text-white/40">
                                 <span className="font-mono">{reg.registration_number ?? reg.id.slice(0, 8)}</span>
                                 <span className="inline-flex items-center gap-1">
-                                  <MapPin className="h-3 w-3" /> {formatDate(event?.event_date)}
+                                  <CalendarDays className="h-3 w-3" /> {formatDate(event?.event_date)}
                                 </span>
                               </p>
                             </div>
@@ -477,12 +497,12 @@ export default function DashboardPage() {
                             )}
 							{reg.status === "PENDING" && (
 								<button onClick={() => resumePayment(reg)} disabled={paymentLoadingId === reg.id} className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-[#d9ff00] px-3.5 py-2 text-[11px] font-bold uppercase tracking-[0.1em] text-black transition hover:opacity-85 disabled:opacity-60">
-									{paymentLoadingId === reg.id ? <span className="h-3 w-3 animate-spin rounded-full border-2 border-black/20 border-t-black" /> : <QrCode className="h-3.5 w-3.5" />} Pay now
+										{paymentLoadingId === reg.id ? <span className="h-3 w-3 animate-spin rounded-full border-2 border-black/20 border-t-black" /> : <ArrowRight className="h-3.5 w-3.5" />} Pay now
 								</button>
 							)}
                           </div>
                           {isOpen && canQr && qrByRegId[reg.id] && (
-                            <div className="flex items-center gap-4 border-t border-white/10 p-4 sm:p-5">
+                            <div className="flex flex-col items-start gap-4 border-t border-white/10 p-4 sm:flex-row sm:items-center sm:p-5">
                               <div
                                 role="img"
                                 aria-label={`Check-in QR for ${reg.registration_number}`}
@@ -496,7 +516,7 @@ export default function DashboardPage() {
                                 data-ticket-export-hide="true"
                                 onClick={() => downloadTicket(reg)}
                                 disabled={ticketDownloadingId === reg.id}
-                                className="ml-auto inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-[0.1em] text-white/70 hover:text-white disabled:opacity-50"
+                                className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-[0.1em] text-white/70 hover:text-white disabled:opacity-50 sm:ml-auto"
                               >
                                 {ticketDownloadingId === reg.id ? (
                                   <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/25 border-t-white" />

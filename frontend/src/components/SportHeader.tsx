@@ -5,6 +5,7 @@ import { ArrowUpRight, Gauge, Menu, UserRound, X } from "lucide-react";
 import { api } from "../lib/api";
 import { useSiteConfig } from "./site/SiteConfigProvider";
 import { AnnouncementStrip } from "./site/AnnouncementStrip";
+import { openCookiePreferences } from "../lib/cookieConsent";
 
 type SportHeaderProps = {
   active?: "home" | "events" | "about" | "account" | "control";
@@ -119,5 +120,5 @@ function MobileNavLink({ href, eyebrow, label, active, cobalt, primary, accent }
 
 export function SportFooter() {
   const { config } = useSiteConfig();
-  return <footer className="border-t border-white/10 px-5 py-7 text-center text-[10px] font-bold uppercase tracking-[0.16em] text-white/35">{config.footer_text}</footer>;
+  return <footer className="border-t border-white/10 px-5 py-7 text-[10px] font-bold uppercase tracking-[0.16em] text-white/35"><div className="mx-auto flex max-w-[1200px] flex-col items-center justify-between gap-3 sm:flex-row"><span>{config.footer_text}</span><button type="button" onClick={openCookiePreferences} className="border-b border-white/25 pb-0.5 transition hover:border-white hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white">Cookie settings</button></div></footer>;
 }

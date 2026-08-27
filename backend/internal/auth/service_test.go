@@ -10,7 +10,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-// fakeAuthRepo is an in-memory authRepository for service unit tests.
+// fakeAuthRepo is an in-memory authRepository for service unit tests
 type fakeAuthRepo struct {
 	usersByID    map[uuid.UUID]*User
 	usersByEmail map[string]*User
@@ -19,6 +19,7 @@ type fakeAuthRepo struct {
 	identities   map[string]*OAuthIdentity
 }
 
+// newFakeAuthRepo creates a new fakeAuthRepo
 func newFakeAuthRepo() *fakeAuthRepo {
 	return &fakeAuthRepo{
 		usersByID:    map[uuid.UUID]*User{},
@@ -29,8 +30,10 @@ func newFakeAuthRepo() *fakeAuthRepo {
 	}
 }
 
+// identityKey creates a key for the identity
 func identityKey(provider, subject string) string { return provider + "\x00" + subject }
 
+// GetUserByIdentity gets a user by identity
 func (f *fakeAuthRepo) GetUserByIdentity(ctx context.Context, provider, subject string) (*User, error) {
 	identity, ok := f.identities[identityKey(provider, subject)]
 	if !ok {
@@ -39,6 +42,7 @@ func (f *fakeAuthRepo) GetUserByIdentity(ctx context.Context, provider, subject 
 	return f.GetUserByID(ctx, identity.UserID)
 }
 
+// LinkIdentity links an identity to a user
 func (f *fakeAuthRepo) LinkIdentity(_ context.Context, identity *OAuthIdentity) error {
 	key := identityKey(identity.Provider, identity.Subject)
 	if _, exists := f.identities[key]; !exists {
@@ -49,6 +53,7 @@ func (f *fakeAuthRepo) LinkIdentity(_ context.Context, identity *OAuthIdentity) 
 	return nil
 }
 
+// CreateUserWithProfile creates a user and profile
 func (f *fakeAuthRepo) CreateUserWithProfile(ctx context.Context, u *User, p *Profile) error {
 	if _, exists := f.usersByEmail[u.Email]; exists {
 		return ErrEmailTaken
@@ -65,6 +70,7 @@ func (f *fakeAuthRepo) CreateUserWithProfile(ctx context.Context, u *User, p *Pr
 	return nil
 }
 
+// GetUserByEmail gets a user by email
 func (f *fakeAuthRepo) GetUserByEmail(ctx context.Context, email string) (*User, error) {
 	u, ok := f.usersByEmail[email]
 	if !ok {
@@ -73,6 +79,7 @@ func (f *fakeAuthRepo) GetUserByEmail(ctx context.Context, email string) (*User,
 	return u, nil
 }
 
+// GetUserByID gets a user by ID
 func (f *fakeAuthRepo) GetUserByID(ctx context.Context, id uuid.UUID) (*User, error) {
 	u, ok := f.usersByID[id]
 	if !ok {
@@ -81,6 +88,7 @@ func (f *fakeAuthRepo) GetUserByID(ctx context.Context, id uuid.UUID) (*User, er
 	return u, nil
 }
 
+// GetProfileByUserID gets a profile by user ID
 func (f *fakeAuthRepo) GetProfileByUserID(ctx context.Context, userID uuid.UUID) (*Profile, error) {
 	p, ok := f.profiles[userID]
 	if !ok {
@@ -89,6 +97,7 @@ func (f *fakeAuthRepo) GetProfileByUserID(ctx context.Context, userID uuid.UUID)
 	return p, nil
 }
 
+// UpdateProfile updates a profile
 func (f *fakeAuthRepo) UpdateProfile(ctx context.Context, p *Profile) error {
 	if _, ok := f.profiles[p.UserID]; !ok {
 		return ErrNotFound
@@ -97,6 +106,7 @@ func (f *fakeAuthRepo) UpdateProfile(ctx context.Context, p *Profile) error {
 	return nil
 }
 
+// CreateRefreshToken creates a refresh token
 func (f *fakeAuthRepo) CreateRefreshToken(ctx context.Context, t *RefreshToken) error {
 	t.ID = uuid.New()
 	t.CreatedAt = time.Now()
@@ -104,6 +114,7 @@ func (f *fakeAuthRepo) CreateRefreshToken(ctx context.Context, t *RefreshToken) 
 	return nil
 }
 
+// GetRefreshTokenByHash gets a refresh token by hash
 func (f *fakeAuthRepo) GetRefreshTokenByHash(ctx context.Context, hash string) (*RefreshToken, error) {
 	t, ok := f.tokens[hash]
 	if !ok {
@@ -112,6 +123,7 @@ func (f *fakeAuthRepo) GetRefreshTokenByHash(ctx context.Context, hash string) (
 	return t, nil
 }
 
+// RevokeRefreshToken revokes a refresh token
 func (f *fakeAuthRepo) RevokeRefreshToken(ctx context.Context, id uuid.UUID, now time.Time) error {
 	for _, t := range f.tokens {
 		if t.ID == id {
@@ -122,6 +134,7 @@ func (f *fakeAuthRepo) RevokeRefreshToken(ctx context.Context, id uuid.UUID, now
 	return ErrNotFound
 }
 
+// ListUsers lists users
 func (f *fakeAuthRepo) ListUsers(ctx context.Context, role *Role, limit, offset int) ([]User, int, error) {
 	users := make([]User, 0, len(f.usersByID))
 	for _, user := range f.usersByID {
@@ -132,6 +145,7 @@ func (f *fakeAuthRepo) ListUsers(ctx context.Context, role *Role, limit, offset 
 	return users, len(users), nil
 }
 
+// UpdateUserRole updates a user role
 func (f *fakeAuthRepo) UpdateUserRole(ctx context.Context, id uuid.UUID, role Role) (*User, error) {
 	user, ok := f.usersByID[id]
 	if !ok {
@@ -142,6 +156,7 @@ func (f *fakeAuthRepo) UpdateUserRole(ctx context.Context, id uuid.UUID, role Ro
 	return user, nil
 }
 
+// newTestService creates a new test service
 func newTestService() (*Service, *fakeAuthRepo) {
 	repo := newFakeAuthRepo()
 	tokens := NewTokenIssuer("test-secret", time.Hour)
@@ -149,10 +164,12 @@ func newTestService() (*Service, *fakeAuthRepo) {
 	return svc, repo
 }
 
+// validRegisterReq creates a valid register request
 func validRegisterReq() RegisterRequest {
 	return RegisterRequest{Email: "runner@unityrunclub.com", Password: "hunter22", FullName: "Test Runner"}
 }
 
+// TestService_LoginWithGoogle_CreatesAndReusesLinkedAccount tests the LoginWithGoogle method that creates and reuses a linked account
 func TestService_LoginWithGoogle_CreatesAndReusesLinkedAccount(t *testing.T) {
 	svc, repo := newTestService()
 	profile := GoogleProfile{
@@ -175,6 +192,7 @@ func TestService_LoginWithGoogle_CreatesAndReusesLinkedAccount(t *testing.T) {
 	}
 }
 
+// TestService_LoginWithGoogle_LinksVerifiedExistingEmail tests the LoginWithGoogle method that links a verified existing email
 func TestService_LoginWithGoogle_LinksVerifiedExistingEmail(t *testing.T) {
 	svc, repo := newTestService()
 	existing, err := svc.Register(context.Background(), RegisterRequest{
@@ -194,6 +212,7 @@ func TestService_LoginWithGoogle_LinksVerifiedExistingEmail(t *testing.T) {
 	}
 }
 
+// TestService_LoginWithGoogle_RejectsUnverifiedEmail tests the LoginWithGoogle method that rejects an unverified email
 func TestService_LoginWithGoogle_RejectsUnverifiedEmail(t *testing.T) {
 	svc, _ := newTestService()
 	_, err := svc.LoginWithGoogle(context.Background(), GoogleProfile{
@@ -204,6 +223,7 @@ func TestService_LoginWithGoogle_RejectsUnverifiedEmail(t *testing.T) {
 	}
 }
 
+// TestService_Register_Success tests the Register method that successfully registers a user
 func TestService_Register_Success(t *testing.T) {
 	svc, _ := newTestService()
 
@@ -219,6 +239,7 @@ func TestService_Register_Success(t *testing.T) {
 	}
 }
 
+// TestService_Register_DuplicateEmailRejected tests the Register method that rejects a duplicate email
 func TestService_Register_DuplicateEmailRejected(t *testing.T) {
 	svc, _ := newTestService()
 	ctx := context.Background()
@@ -233,6 +254,7 @@ func TestService_Register_DuplicateEmailRejected(t *testing.T) {
 	}
 }
 
+// TestService_EmailIdentityIsCaseInsensitive tests the Register method that is case insensitive
 func TestService_EmailIdentityIsCaseInsensitive(t *testing.T) {
 	svc, _ := newTestService()
 	ctx := context.Background()
@@ -249,6 +271,7 @@ func TestService_EmailIdentityIsCaseInsensitive(t *testing.T) {
 	}
 }
 
+// TestService_Login_WrongPasswordRejected tests the Login method that rejects a wrong password
 func TestService_Login_WrongPasswordRejected(t *testing.T) {
 	svc, _ := newTestService()
 	ctx := context.Background()
@@ -263,6 +286,7 @@ func TestService_Login_WrongPasswordRejected(t *testing.T) {
 	}
 }
 
+// TestService_Login_UnknownEmailRejected tests the Login method that rejects an unknown email
 func TestService_Login_UnknownEmailRejected(t *testing.T) {
 	svc, _ := newTestService()
 
@@ -272,6 +296,7 @@ func TestService_Login_UnknownEmailRejected(t *testing.T) {
 	}
 }
 
+// TestService_Login_Success tests the Login method that successfully logs in a user
 func TestService_Login_Success(t *testing.T) {
 	svc, _ := newTestService()
 	ctx := context.Background()
@@ -289,6 +314,7 @@ func TestService_Login_Success(t *testing.T) {
 	}
 }
 
+// TestService_Refresh_RotatesAndInvalidatesOldToken tests the Refresh method that rotates and invalidates an old token
 func TestService_Refresh_RotatesAndInvalidatesOldToken(t *testing.T) {
 	svc, _ := newTestService()
 	ctx := context.Background()
@@ -317,6 +343,7 @@ func TestService_Refresh_RotatesAndInvalidatesOldToken(t *testing.T) {
 	}
 }
 
+// TestService_Refresh_ExpiredTokenRejected tests the Refresh method that rejects an expired token
 func TestService_Refresh_ExpiredTokenRejected(t *testing.T) {
 	repo := newFakeAuthRepo()
 	tokens := NewTokenIssuer("test-secret", time.Hour)
@@ -334,6 +361,7 @@ func TestService_Refresh_ExpiredTokenRejected(t *testing.T) {
 	}
 }
 
+// TestService_Logout_RevokesToken tests the Logout method that revokes a token
 func TestService_Logout_RevokesToken(t *testing.T) {
 	svc, _ := newTestService()
 	ctx := context.Background()
@@ -352,6 +380,7 @@ func TestService_Logout_RevokesToken(t *testing.T) {
 	}
 }
 
+// TestService_Logout_UnknownTokenIsNoop tests the Logout method that is a noop for an unknown token
 func TestService_Logout_UnknownTokenIsNoop(t *testing.T) {
 	svc, _ := newTestService()
 
@@ -360,6 +389,7 @@ func TestService_Logout_UnknownTokenIsNoop(t *testing.T) {
 	}
 }
 
+// TestService_UpdateUserRole_PreventsSelfDemotion tests the UpdateUserRole method that prevents self demotion
 func TestService_UpdateUserRole_PreventsSelfDemotion(t *testing.T) {
 	svc, repo := newTestService()
 	actorID := uuid.New()
@@ -371,6 +401,7 @@ func TestService_UpdateUserRole_PreventsSelfDemotion(t *testing.T) {
 	}
 }
 
+// TestService_UpdateProfile tests the UpdateProfile method that updates a profile
 func TestService_UpdateProfile(t *testing.T) {
 	svc, _ := newTestService()
 	ctx := context.Background()

@@ -1,7 +1,3 @@
-// Package payments defines the payment provider abstraction.
-// Registration logic depends only on this interface, never on a
-// specific gateway, so a real Cambodian payment provider can be
-// wired in later without touching internal/registrations.
 package payments
 
 import (
@@ -15,8 +11,6 @@ var (
 	ErrUnsupported     = errors.New("payments: operation is not supported by provider")
 )
 
-// Status is a payment's lifecycle state, mirroring the payments
-// table's CHECK constraint.
 type Status string
 
 const (
@@ -26,8 +20,6 @@ const (
 	StatusRefunded  Status = "REFUNDED"
 )
 
-// Payment is the result of creating or looking up a payment with a
-// provider.
 type Payment struct {
 	ProviderReference string
 	Status            Status
@@ -35,15 +27,12 @@ type Payment struct {
 	Verification      *Verification
 }
 
-// Checkout contains the provider-generated instructions shown to the payer.
-// QRString is the EMV KHQR payload; it is not a ticket/check-in code.
 type Checkout struct {
 	QRString  string    `json:"qr_string"`
 	DeepLink  string    `json:"deep_link,omitempty"`
 	ExpiresAt time.Time `json:"expires_at"`
 }
 
-// Verification is trusted settlement data returned by the provider API.
 type Verification struct {
 	AmountCents     int    `json:"amount_cents"`
 	Currency        string `json:"currency"`
@@ -51,17 +40,13 @@ type Verification struct {
 	TransactionHash string `json:"transaction_hash,omitempty"`
 }
 
-// WebhookEvent is a provider-agnostic representation of a payment
-// webhook callback, after signature verification.
+// WebhookEvent is a provider-agnostic representation of a payment webhook callback, after signature verification.
 type WebhookEvent struct {
 	ProviderReference string
 	Status            Status
 }
 
 // Provider abstracts a payment gateway. Implementations must verify
-// webhook authenticity themselves (e.g. signature headers) — callers
-// never trust payment status supplied by the frontend or an
-// unverified webhook body.
 type Provider interface {
 	// Name identifies the provider (stored on the payments row).
 	Name() string

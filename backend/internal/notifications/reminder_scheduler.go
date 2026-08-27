@@ -9,26 +9,16 @@ import (
 	"github.com/unity-run-club/api/internal/registrations"
 )
 
-// reminderEventLister is the read-only slice this package needs to
-// find events due for a reminder. Must be wired to
-// *events.Repository, not events.Service — same page-size-clamp
-// reasoning as registrationLister in event_notifier.go.
+// reminderEventLister is the read-only slice this package needs to find events due for a reminder. 
 type reminderEventLister interface {
 	List(ctx context.Context, filter events.ListFilter) ([]events.Event, int, error)
 }
 
-// remindableStatuses are the event statuses worth reminding
-// registrants about — excludes DRAFT (not public yet), CANCELLED/
-// ARCHIVED (nothing to remind about), and COMPLETED (already happened).
 var remindableStatuses = []events.Status{
 	events.StatusPublished, events.StatusRegistrationOpen, events.StatusRegistrationClosed,
 }
 
-// ReminderScheduler periodically finds events happening soon and
-// enqueues an EVENT_REMINDER for each confirmed registrant who
-// doesn't already have one. Idempotent by construction: the
-// notifications unique index (type, entity_type, entity_id) means a
-// second poll tick, or two overlapping ticks, never double-sends.
+// ReminderScheduler periodically finds events happening soon and enqueues an EVENT_REMINDER 
 type ReminderScheduler struct {
 	svc          *Service
 	events       reminderEventLister

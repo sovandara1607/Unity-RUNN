@@ -1,7 +1,7 @@
 # Unity Runn Club — Project Progress
 
-Last updated: 2026-08-24  
-Current branch: `phase-7-admin-panel`  
+Last updated: 2026-08-26
+Current branch: `phase-7-admin-panel`
 Status: Phase 7 stabilization and production-readiness work in progress
 
 ## Project summary
@@ -17,12 +17,12 @@ Unity Runn Club is a full-stack event registration and race-operations platform.
 
 ## Current health
 
-The local Docker stack is operational.
+The stack was operational at the latest live verification. The API, PostgreSQL, Redis, and realtime containers were healthy on 2026-08-26; backend tests/vet and frontend lint/build also passed.
 
 | Component | Current state |
 |---|---|
 | Go API | Operational |
-| PostgreSQL | Operational; migration 24 applied |
+| PostgreSQL | Operational at last live check; migration 26 is the latest schema migration |
 | Redis | Operational |
 | Cloudflare R2 | Operational and reachable |
 | Socket.IO | Operational and healthy on port 8081 |
@@ -52,7 +52,8 @@ The sanitized live report is available to Super Admins at `/admin/system`.
 
 - Complete event lifecycle and status transitions
 - Event categories, prices, capacity, schedules, FAQs and rules
-- Event poster upload and preview
+- Configurable poster artboard (portrait, classic, square, landscape, story, or custom) with zoom/position controls and server-enforced JPEG normalization for R2/local storage
+- Automatically generated card and hero poster variants, with backward-compatible original-image fallback on public pages
 - Resumable event-creation drafts in the admin interface
 - Registration deadlines and availability reporting
 - Transaction-safe capacity enforcement
@@ -65,6 +66,9 @@ The sanitized live report is available to Super Admins at `/admin/system`.
 - Bakong KHQR payload generation
 - Server-side payment verification
 - Payment checkout expiry and settlement state
+- USD/KHR currency stored per ticket category and enforced through checkout verification
+- Failed payment initialization releases the reserved capacity slot
+- PostgreSQL-leased background reconciliation confirms payments without browser polling
 - Mock provider for local development
 - Ticket and payment documents attached to transactional emails
 
@@ -89,6 +93,7 @@ Production Bakong activation still requires certified merchant credentials and a
 - Event reminder
 - Redis queue with PostgreSQL recovery sweep
 - Retry limits and failure tracking
+- Expiring worker heartbeat with live/stale status in the System console
 - Branded HTML and text email templates
 - Ticket/payment document attachments
 - Gmail SMTP delivery with a safe log-only fallback
@@ -97,10 +102,15 @@ Production Bakong activation still requires certified merchant credentials and a
 
 - Responsive public navigation and authenticated session awareness
 - Homepage hero carousel
+- Interactive About-page photo carousel reusing the administrator-managed club image set
 - Interactive event calendar and event detail pages
 - Event poster artwork with intentional no-image fallbacks
+- Adaptive public poster rendering preserves every selected artboard ratio with an uncropped foreground and ambient edge-to-edge backdrop
+- Event detail uses a responsive poster-and-entry-board hero that keeps artwork uncropped while moving race facts and the primary registration action above the fold
 - Registration and payment flow
+- Task-focused runner dashboard with payment-first prioritization, quick navigation, ticket/QR access, and clearly ordered registration history
 - Animated, event-specific announcement strip
+- Public cookie preferences with essential-only and accept-all choices plus a persistent footer control
 - Public-site typography and responsive design system
 
 ### Public-site administration
@@ -144,6 +154,8 @@ Current PostgreSQL schema migrations:
 - `00022`: public-site version history
 - `00023`: OAuth identities
 - `00024`: event association for public announcements
+- `00025`: per-event category-name uniqueness
+- `00026`: category currency and leased payment-reconciliation state/indexes
 
 Docker Compose currently runs:
 
@@ -151,6 +163,8 @@ Docker Compose currently runs:
 - Redis 7
 - Go API on port 8080
 - Socket.IO gateway on port 8081
+
+The local profile has conservative, environment-overridable resource ceilings: 256 MB for PostgreSQL, 256 MB for the API, 96 MB for Redis, and 96 MB for Socket.IO. PostgreSQL uses a reduced working set, Redis is capped without eviction, Go and Node heaps are bounded, health probes are less frequent, and container logs rotate. Backend build context exclusions also prevent local binaries, tests, migrations, and developer utilities from being copied into the API image build.
 
 The frontend runs separately on port 3000 during local development.
 
@@ -162,8 +176,12 @@ The frontend runs separately on port 3000 during local development.
 - `go vet ./...` and `gofmt` checks pass
 - Frontend ESLint completes with no errors
 - Frontend production build completes successfully
+- Playwright journeys pass in desktop Chromium and a mobile Pixel 7 viewport for public event discovery/poster rendering, the About gallery, runner-dashboard payment prioritization, cookie preferences, admin login persistence, and poster-artboard editing
 - Realtime gateway syntax check passes
+- Notification worker startup heartbeat and stale-heartbeat classification tests pass
+- Payment initialization compensation, currency propagation, background settlement and expiry tests pass
 - Docker Compose configuration validates
+- Compose resource limits render correctly for every service
 - PostgreSQL, Redis, API and Socket.IO health checks pass
 - R2 bucket connectivity passes
 - Socket.IO delivery and origin restrictions were tested
@@ -172,8 +190,6 @@ The frontend runs separately on port 3000 during local development.
 - Anonymous access returns `401`
 - System console and public-site behavior were visually checked in-browser
 
-There are existing non-blocking frontend lint warnings, primarily unused imports, explicit `any` types and legacy image elements. They do not currently prevent builds.
-
 ## Known gaps and risks
 
 1. Production Bakong credentials and certification are incomplete.
@@ -181,9 +197,8 @@ There are existing non-blocking frontend lint warnings, primarily unused imports
 3. Production deployment and reverse-proxy configuration are not finalized.
 4. Production build version and Git commit metadata are not embedded yet.
 5. External monitoring, alerting and error tracking are not configured.
-6. Notification workers expose queue and database state but do not yet record a formal heartbeat.
-7. `check_ins.staff_user_id` still needs a long-term soft-delete or `ON DELETE` policy for former staff accounts.
-8. The repository currently contains a large uncommitted stabilization set; preserve unrelated work and review it before committing.
+6. `check_ins.staff_user_id` still needs a long-term soft-delete or `ON DELETE` policy for former staff accounts.
+7. The repository currently contains a large uncommitted stabilization set; preserve unrelated work and review it before committing.
 
 ## Recommended next priorities
 
@@ -191,9 +206,8 @@ There are existing non-blocking frontend lint warnings, primarily unused imports
 2. Configure Bakong test credentials and complete an end-to-end payment verification.
 3. Define production hosting, HTTPS, reverse proxying and environment-specific secrets.
 4. Add build version/commit metadata to the API and System console.
-5. Add worker heartbeats and external error monitoring.
-6. Clear the remaining frontend lint warnings incrementally.
-7. Enable required status checks and branch protection on `main` in GitHub.
+5. Add external error monitoring and alert delivery.
+6. Enable required status checks and branch protection on `main` in GitHub.
 
 ## Local development
 
@@ -229,6 +243,7 @@ go vet ./...
 cd ../frontend
 npm run lint
 npm run build
+npm run test:e2e
 
 cd ..
 docker compose config --quiet

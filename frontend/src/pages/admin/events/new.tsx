@@ -4,9 +4,12 @@ import Link from "next/link";
 import { ArrowLeft, ArrowRight, Check, Clock3, MapPin, Plus, Route, Save, Trash2 } from "lucide-react";
 import { AdminLayout } from "../../../components/admin/AdminLayout";
 import { EventPosterField } from "../../../components/admin/EventPosterField";
+import { EventLocationField } from "../../../components/admin/EventLocationField";
 import { AlertBanner } from "../../../components/alerts/AlertSystem";
 import { api } from "../../../lib/api";
 import type { EventCategory } from "../../../types";
+import { formatMoney, parseMoneyInput, type SupportedCurrency } from "../../../lib/money";
+import { parseEventCoordinates } from "../../../lib/eventLocation";
 
 const STEPS = [
   { n: 1, label: "Basics", hint: "Name, date & venue" },
@@ -30,8 +33,10 @@ const INITIAL_FORM_DATA = {
   event_date: "",
   start_time: "06:00",
   location: "Koh Pich, Phnom Penh, Cambodia",
+  latitude: "",
+  longitude: "",
 };
-const INITIAL_CATEGORY_FORM = { name: "", distance: "", price: "", capacity: "" };
+const INITIAL_CATEGORY_FORM = { name: "", distance: "", price: "", currency: "USD" as SupportedCurrency, capacity: "" };
 const INITIAL_SCHEDULE_FORM = { time: "", title: "", description: "" };
 
 interface SavedEventDraft {
@@ -127,6 +132,8 @@ export default function AdminNewEventPage() {
               event_date: serverDraft.event_date.slice(0, 10),
               start_time: toInputTime(serverDraft.start_time) || "06:00",
               location: serverDraft.location || INITIAL_FORM_DATA.location,
+              latitude: serverDraft.latitude == null ? "" : String(serverDraft.latitude),
+              longitude: serverDraft.longitude == null ? "" : String(serverDraft.longitude),
             });
             setCategories(serverDraft.categories || []);
             setSchedule((serverDraft.schedule || []).map((item) => ({ id: item.id, time: toInputTime(item.time), title: item.title, description: item.description })));
@@ -193,6 +200,7 @@ export default function AdminNewEventPage() {
       if (!formData.name || !formData.event_date || !formData.start_time || !formData.location) {
         throw new Error("Fill in every required field to continue.");
       }
+      const coordinates = parseEventCoordinates(formData.latitude, formData.longitude);
       const payload = {
         name: formData.name,
         slug: formData.slug || generateSlug(formData.name),
@@ -201,6 +209,8 @@ export default function AdminNewEventPage() {
         event_date: formData.event_date,
         start_time: formData.start_time,
         location: formData.location,
+        latitude: coordinates?.latitude,
+        longitude: coordinates?.longitude,
       };
       const saved = eventId ? await api.updateEvent(eventId, payload) : await api.createEvent(payload);
       if (payload.cover_image && saved.cover_image !== payload.cover_image) {
@@ -231,11 +241,12 @@ export default function AdminNewEventPage() {
       const created = await api.createCategory(eventId!, {
         name: catForm.name,
         distance: catForm.distance,
-        price_cents: Math.round(parseFloat(catForm.price || "0") * 100),
+        price_cents: parseMoneyInput(catForm.price, catForm.currency),
+        currency: catForm.currency,
         capacity: parseInt(catForm.capacity, 10),
       });
       setCategories((prev) => [...prev, created]);
-      setCatForm({ name: "", distance: "", price: "", capacity: "" });
+      setCatForm(INITIAL_CATEGORY_FORM);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Failed to add category");
     } finally {
@@ -373,8 +384,13 @@ export default function AdminNewEventPage() {
                 <input type="time" required value={formData.start_time} onChange={(e) => setFormData({ ...formData, start_time: e.target.value })} className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500" />
               </div>
               <div className="sm:col-span-2">
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Location / Venue *</label>
-                <input type="text" required value={formData.location} onChange={(e) => setFormData({ ...formData, location: e.target.value })} className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500" />
+                <EventLocationField
+                  location={formData.location}
+                  latitude={formData.latitude}
+                  longitude={formData.longitude}
+                  disabled={loading}
+                  onChange={(location) => setFormData((current) => ({ ...current, ...location }))}
+                />
               </div>
               <div className="sm:col-span-2">
                 <label className="block text-xs font-semibold text-slate-700 mb-1">Description</label>
@@ -418,7 +434,7 @@ export default function AdminNewEventPage() {
                       <div className="flex-1 min-w-0 grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
                         <span className="font-semibold text-slate-900 truncate">{c.name}</span>
                         <span className="text-slate-500">{c.distance}</span>
-                        <span className="text-slate-500">${(c.price_cents / 100).toFixed(2)}</span>
+                        <span className="text-slate-500">{formatMoney(c.price_cents, c.currency)}</span>
                         <span className="text-slate-500">{c.capacity} slots</span>
                       </div>
                       <button type="button" onClick={() => removeCategory(c.id)} className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg transition-colors" aria-label={`Remove ${c.name}`}>
@@ -429,7 +445,7 @@ export default function AdminNewEventPage() {
                 </ul>
               )}
 
-              <form onSubmit={addCategory} className="grid grid-cols-2 sm:grid-cols-5 gap-3 items-end">
+              <form onSubmit={addCategory} className="grid grid-cols-2 sm:grid-cols-6 gap-3 items-end">
                 <div className="col-span-2 sm:col-span-1">
                   <label className="block text-[11px] font-semibold text-slate-600 mb-1">Name *</label>
                   <input type="text" placeholder="Half Marathon" value={catForm.name} onChange={(e) => setCatForm({ ...catForm, name: e.target.value })} className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500" />
@@ -439,8 +455,12 @@ export default function AdminNewEventPage() {
                   <input type="text" placeholder="21.1K" value={catForm.distance} onChange={(e) => setCatForm({ ...catForm, distance: e.target.value })} className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500" />
                 </div>
                 <div>
-                  <label className="block text-[11px] font-semibold text-slate-600 mb-1">Price ($)</label>
-                  <input type="number" min="0" step="0.01" placeholder="25.00" value={catForm.price} onChange={(e) => setCatForm({ ...catForm, price: e.target.value })} className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500" />
+                  <label className="block text-[11px] font-semibold text-slate-600 mb-1">Price</label>
+                  <input type="number" min="0" step={catForm.currency === "KHR" ? "1" : "0.01"} placeholder={catForm.currency === "KHR" ? "100000" : "25.00"} value={catForm.price} onChange={(e) => setCatForm({ ...catForm, price: e.target.value })} className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500" />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-600 mb-1">Currency</label>
+                  <select value={catForm.currency} onChange={(e) => setCatForm({ ...catForm, currency: e.target.value as SupportedCurrency })} className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-orange-500"><option value="USD">USD</option><option value="KHR">KHR</option></select>
                 </div>
                 <div>
                   <label className="block text-[11px] font-semibold text-slate-600 mb-1">Capacity *</label>

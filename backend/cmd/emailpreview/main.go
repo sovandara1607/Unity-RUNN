@@ -1,5 +1,4 @@
-// Command emailpreview renders representative transactional emails and their
-// attachments for local visual QA. It never sends mail.
+
 package main
 
 import (

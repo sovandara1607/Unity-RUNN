@@ -1,7 +1,3 @@
-// Package auditlog records who did what to which entity, for
-// sensitive staff/admin actions (starting with check-in). Generic
-// enough that later admin actions (event publish/cancel, etc.) can
-// write to the same table without a schema change.
 package auditlog
 
 import (
@@ -10,7 +6,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// Entry is one audit log record.
+// Entry is one audit log record
 type Entry struct {
 	ID         uuid.UUID      `json:"id"`
 	ActorID    *uuid.UUID     `json:"actor_id"`

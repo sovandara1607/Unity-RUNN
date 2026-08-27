@@ -1,7 +1,3 @@
-// Package admin holds thin HTTP handlers for STAFF+ admin views that
-// don't own their own domain — they read through existing domain
-// services (registrations, events) rather than querying tables
-// directly, keeping one source of truth per entity.
 package admin
 
 import (
@@ -21,14 +17,12 @@ import (
 	"github.com/unity-run-club/api/internal/registrations"
 )
 
-// registrationsReader is the slice of registrations.Service this
-// handler needs.
 type registrationsReader interface {
 	ListAll(ctx context.Context, filter registrations.AdminListFilter) ([]registrations.Registration, int, error)
 	GetByID(ctx context.Context, callerID uuid.UUID, callerRole auth.Role, id uuid.UUID) (*registrations.Registration, error)
 }
 
-// auditListReader is the slice of auditlog.Repository this handler
+// auditListReader is the slice of auditlog.Repository this handler needs
 // needs for the audit trail view.
 type auditListReader interface {
 	List(ctx context.Context, filter auditlog.ListFilter) ([]auditlog.Entry, error)
@@ -43,7 +37,6 @@ type auditRecorder interface {
 	Record(ctx context.Context, actorID *uuid.UUID, action, entityType string, entityID *uuid.UUID, metadata map[string]any)
 }
 
-// Handler serves admin registration views.
 type Handler struct {
 	regs     registrationsReader
 	audit    auditListReader
@@ -51,8 +44,6 @@ type Handler struct {
 	recorder auditRecorder
 }
 
-// NewHandler builds a Handler backed by regs. audit may be nil in
-// tests that don't exercise the audit trail.
 func NewHandler(regs registrationsReader, audit auditListReader, users userManager, recorder auditRecorder) *Handler {
 	return &Handler{regs: regs, audit: audit, users: users, recorder: recorder}
 }
@@ -69,7 +60,6 @@ func publicUser(user auth.User) userResponse {
 	return userResponse{ID: user.ID, Email: user.Email, Role: user.Role, CreatedAt: user.CreatedAt, UpdatedAt: user.UpdatedAt}
 }
 
-// ListUsers handles GET /api/v1/admin/users (SUPER_ADMIN only).
 func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
 	actor, ok := auth.UserFromContext(r.Context())
 	if !ok || actor.Role != auth.RoleSuperAdmin {
@@ -99,7 +89,6 @@ func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
 	httpresponse.WriteData(w, http.StatusOK, map[string]any{"users": response, "total": total})
 }
 
-// UpdateUserRole handles PATCH /api/v1/admin/users/:id/role.
 func (h *Handler) UpdateUserRole(w http.ResponseWriter, r *http.Request) {
 	actor, ok := auth.UserFromContext(r.Context())
 	if !ok || actor.Role != auth.RoleSuperAdmin {
@@ -134,8 +123,6 @@ func (h *Handler) UpdateUserRole(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// ListRegistrations handles GET /api/v1/admin/registrations
-// (STAFF+ only, guarded at the route level).
 func (h *Handler) ListRegistrations(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	filter := registrations.AdminListFilter{}
@@ -177,8 +164,6 @@ func (h *Handler) ListRegistrations(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// GetRegistration handles GET /api/v1/admin/registrations/:id
-// (STAFF+ only, guarded at the route level).
 func (h *Handler) GetRegistration(w http.ResponseWriter, r *http.Request) {
 	staff, ok := auth.UserFromContext(r.Context())
 	if !ok {
@@ -192,10 +177,6 @@ func (h *Handler) GetRegistration(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// staff.Role is always STAFF+ here (route-level RequireAuth), so
-	// registrations.Service.GetByID's owner-or-STAFF+ check always
-	// takes the STAFF+ branch — reusing it rather than adding a
-	// separate ownership-free lookup keeps one access-check path.
 	reg, err := h.regs.GetByID(r.Context(), staff.ID, staff.Role, id)
 	switch {
 	case errors.Is(err, registrations.ErrNotFound):
@@ -207,8 +188,6 @@ func (h *Handler) GetRegistration(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// ListAuditLogs handles GET /api/v1/admin/audit-logs (STAFF+ only,
-// guarded at the route level). Supports entity_type, limit, offset.
 func (h *Handler) ListAuditLogs(w http.ResponseWriter, r *http.Request) {
 	if h.audit == nil {
 		httpresponse.WriteError(w, http.StatusInternalServerError, "internal_error", "audit log unavailable")

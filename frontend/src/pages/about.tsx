@@ -2,6 +2,7 @@ import React from "react";
 import Link from "next/link";
 import { ArrowUpRight, Compass, Flag, Handshake, ShieldCheck, UserRound, Users } from "lucide-react";
 import { SportFooter, SportHeader } from "../components/SportHeader";
+import { AboutCarousel } from "../components/AboutCarousel";
 import { useSiteConfig } from "../components/site/SiteConfigProvider";
 import type { LucideIcon } from "lucide-react";
 
@@ -53,6 +54,8 @@ export default function AboutPage() {
             <span className="font-mono text-[9px] font-black uppercase tracking-[0.14em] text-white/35">{config.location_label}</span>
           </div>
         </section>
+
+        <AboutCarousel slides={config.hero_slides} accent={acid} />
 
         {/* Values marquee, matching the homepage treatment */}
         <section className="topo-surface relative overflow-hidden border-y border-white/10 py-14 sm:py-20">

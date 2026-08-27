@@ -1,4 +1,3 @@
-// Package stats exposes small, public aggregate figures for the club site.
 package stats
 
 import (
@@ -11,16 +10,12 @@ import (
 	"github.com/unity-run-club/api/internal/httpresponse"
 )
 
-// Summary contains only aggregate, publicly safe figures. Individual runner
-// details stay behind authenticated endpoints.
 type Summary struct {
 	OpenEvents       int `json:"open_events"`
 	ConfirmedRunners int `json:"confirmed_runners"`
 	Locations        int `json:"locations"`
 }
 
-// AdminSummary contains exact operational totals for the race-control
-// dashboard. It is only exposed behind STAFF+ authentication.
 type AdminSummary struct {
 	TotalEvents            int `json:"total_events"`
 	ActiveEvents           int `json:"active_events"`
@@ -68,8 +63,6 @@ func NewRepository(pool *pgxpool.Pool) *Repository {
 	return &Repository{pool: pool}
 }
 
-// Summary counts registration-open events, confirmed registrations for public
-// events, and distinct published locations in one database round trip.
 func (r *Repository) Summary(ctx context.Context) (Summary, error) {
 	const query = `
 		SELECT

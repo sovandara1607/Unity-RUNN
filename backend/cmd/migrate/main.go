@@ -1,12 +1,3 @@
-// Command migrate applies (or rolls back) Goose SQL migrations in
-// backend/migrations against DATABASE_URL. It exists so `make
-// migrate` doesn't require a separately-installed goose binary.
-//
-// Usage:
-//
-//	go run ./cmd/migrate up
-//	go run ./cmd/migrate down
-//	go run ./cmd/migrate status
 package main
 
 import (

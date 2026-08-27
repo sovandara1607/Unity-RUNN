@@ -17,14 +17,13 @@ import (
 	"github.com/unity-run-club/api/internal/objectstore"
 )
 
-// Handler wires HTTP requests to the event Service. Handlers stay
-// thin: decode -> validate -> service -> respond.
+// Handler wires HTTP requests to the event Service. Handlers stay thin: decode -> validate -> service -> respond
 type Handler struct {
 	svc   *Service
 	store objectstore.Store
 }
 
-// NewHandler builds a Handler backed by svc.
+// NewHandler builds a Handler backed by svc
 func NewHandler(svc *Service, uploadRoot ...string) *Handler {
 	root := "uploads"
 	if len(uploadRoot) > 0 && strings.TrimSpace(uploadRoot[0]) != "" {
@@ -33,14 +32,36 @@ func NewHandler(svc *Service, uploadRoot ...string) *Handler {
 	return NewHandlerWithStore(svc, objectstore.NewLocal(root, "/uploads"))
 }
 
+// NewHandlerWithStore builds a Handler backed by svc and store
 func NewHandlerWithStore(svc *Service, store objectstore.Store) *Handler {
 	return &Handler{svc: svc, store: store}
 }
 
+// maxPosterBytes is the maximum size of a poster image
 const maxPosterBytes = 8 << 20
 
-// UploadPoster stores an event poster and returns the public URL to save in
-// the event's existing cover_image field.
+func requestedPosterDimensions(r *http.Request) (int, int, error) {
+	width, height := DefaultPosterWidth, DefaultPosterHeight
+	var err error
+	if raw := strings.TrimSpace(r.FormValue("width")); raw != "" {
+		width, err = strconv.Atoi(raw)
+		if err != nil {
+			return 0, 0, err
+		}
+	}
+	if raw := strings.TrimSpace(r.FormValue("height")); raw != "" {
+		height, err = strconv.Atoi(raw)
+		if err != nil {
+			return 0, 0, err
+		}
+	}
+	if width < minPosterDimension || width > maxPosterDimension || height < minPosterDimension || height > maxPosterDimension || int64(width)*int64(height) > maxOutputPixels {
+		return 0, 0, errInvalidPosterImage
+	}
+	return width, height, nil
+}
+
+// UploadPoster stores an event poster and returns the public URL to save in the event's existing cover_image field
 func (h *Handler) UploadPoster(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxPosterBytes+(1<<20))
 	if err := r.ParseMultipartForm(maxPosterBytes); err != nil {
@@ -49,6 +70,11 @@ func (h *Handler) UploadPoster(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.MultipartForm != nil {
 		defer r.MultipartForm.RemoveAll()
+	}
+	posterWidth, posterHeight, err := requestedPosterDimensions(r)
+	if err != nil {
+		httpresponse.WriteError(w, http.StatusBadRequest, "invalid_artboard", "poster dimensions must be between 400 and 2400 pixels and no larger than 4.5 megapixels")
+		return
 	}
 
 	file, _, err := r.FormFile("poster")
@@ -66,18 +92,12 @@ func (h *Handler) UploadPoster(w http.ResponseWriter, r *http.Request) {
 	}
 	header = header[:n]
 
-	extensions := map[string]string{
-		"image/jpeg": ".jpg",
-		"image/png":  ".png",
-		"image/webp": ".webp",
-	}
-	ext, ok := extensions[http.DetectContentType(header)]
-	if !ok {
+	contentType := http.DetectContentType(header)
+	if contentType != "image/jpeg" && contentType != "image/png" && contentType != "image/webp" {
 		httpresponse.WriteError(w, http.StatusUnsupportedMediaType, "unsupported_image", "use a JPG, PNG, or WebP image")
 		return
 	}
 
-	name := uuid.NewString() + ext
 	data, err := io.ReadAll(io.LimitReader(io.MultiReader(bytes.NewReader(header), file), maxPosterBytes+1))
 	if err != nil {
 		httpresponse.WriteError(w, http.StatusBadRequest, "invalid_upload", "could not read poster image")
@@ -87,23 +107,50 @@ func (h *Handler) UploadPoster(w http.ResponseWriter, r *http.Request) {
 		httpresponse.WriteError(w, http.StatusRequestEntityTooLarge, "image_too_large", "poster must be no larger than 8 MB")
 		return
 	}
-	url, err := h.store.Put(r.Context(), "events/"+name, http.DetectContentType(header), bytes.NewReader(data), int64(len(data)))
+	normalized, err := normalizePoster(data, posterWidth, posterHeight)
+	if err != nil {
+		httpresponse.WriteError(w, http.StatusBadRequest, "invalid_upload", "poster image could not be processed")
+		return
+	}
+	card, err := posterVariant(normalized, 720, 720, 82)
+	if err != nil {
+		httpresponse.WriteError(w, http.StatusBadRequest, "invalid_upload", "poster card preview could not be created")
+		return
+	}
+	hero, err := posterVariant(normalized, 1440, 1440, 84)
+	if err != nil {
+		httpresponse.WriteError(w, http.StatusBadRequest, "invalid_upload", "poster hero preview could not be created")
+		return
+	}
+	baseName := uuid.NewString()
+	url, err := h.store.Put(r.Context(), "events/"+baseName+".jpg", "image/jpeg", bytes.NewReader(normalized), int64(len(normalized)))
 	if err != nil {
 		httpresponse.WriteError(w, http.StatusInternalServerError, "storage_unavailable", "poster storage is unavailable")
 		return
 	}
-	httpresponse.WriteData(w, http.StatusCreated, map[string]string{"url": url})
+	cardURL, err := h.store.Put(r.Context(), "events/"+baseName+"@card.jpg", "image/jpeg", bytes.NewReader(card), int64(len(card)))
+	if err != nil {
+		httpresponse.WriteError(w, http.StatusInternalServerError, "storage_unavailable", "poster card storage is unavailable")
+		return
+	}
+	heroURL, err := h.store.Put(r.Context(), "events/"+baseName+"@hero.jpg", "image/jpeg", bytes.NewReader(hero), int64(len(hero)))
+	if err != nil {
+		httpresponse.WriteError(w, http.StatusInternalServerError, "storage_unavailable", "poster hero storage is unavailable")
+		return
+	}
+	httpresponse.WriteData(w, http.StatusCreated, map[string]any{
+		"url": url, "card_url": cardURL, "hero_url": heroURL,
+		"width": posterWidth, "height": posterHeight, "format": "jpeg",
+	})
 }
 
-// isStaffOrAbove reports whether the authenticated caller (see
-// internal/auth) holds STAFF role or higher, which relaxes list/detail
-// visibility to include non-public events (DRAFT, CANCELLED, etc).
+// isStaffOrAbove reports whether the authenticated caller (see internal/auth) holds STAFF role or higher, which relaxes list/detail visibility to include non-public events (DRAFT, CANCELLED, etc)
 func isStaffOrAbove(r *http.Request) bool {
 	u, ok := auth.UserFromContext(r.Context())
 	return ok && u.Role.AtLeast(auth.RoleStaff)
 }
 
-// List handles GET /api/v1/events.
+// List handles GET /api/v1/events
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 
@@ -120,8 +167,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	admin := isStaffOrAbove(r)
-	// Public callers may narrow the public status set; the service is
-	// the security boundary that strips non-public statuses.
+	// Public callers may narrow the public status set; the service is the security boundary that strips non-public statuses
 	raw := q.Get("statuses")
 	if raw == "" {
 		raw = q.Get("status")
@@ -143,8 +189,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Note: list items don't embed categories, so no capacity is
-	// exposed here; detail responses are masked separately.
+	// Note: list items don't embed categories, so no capacity is exposed here; detail responses are masked separately
 
 	httpresponse.WriteData(w, http.StatusOK, map[string]any{
 		"events": events,
@@ -154,7 +199,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// GetBySlug handles GET /api/v1/events/:slug.
+// GetBySlug handles GET /api/v1/events/:slug
 func (h *Handler) GetBySlug(w http.ResponseWriter, r *http.Request) {
 	slug := chi.URLParam(r, "id")
 
@@ -168,7 +213,7 @@ func (h *Handler) GetBySlug(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Hide capacity from non-staff callers (see List).
+	// Hide capacity from non-staff callers (see List)
 	if !isStaffOrAbove(r) {
 		detail.Categories = maskCategoryCapacity(detail.Categories)
 	}
@@ -176,7 +221,7 @@ func (h *Handler) GetBySlug(w http.ResponseWriter, r *http.Request) {
 	httpresponse.WriteData(w, http.StatusOK, detail)
 }
 
-// GetByID handles GET /api/v1/events/by-id/:id (admin only).
+// GetByID handles GET /api/v1/events/by-id/:id (admin only)
 func (h *Handler) GetByID(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
 	id, err := uuid.Parse(idStr)
@@ -198,8 +243,7 @@ func (h *Handler) GetByID(w http.ResponseWriter, r *http.Request) {
 	httpresponse.WriteData(w, http.StatusOK, e)
 }
 
-// Create handles POST /api/v1/events (ADMIN role required — guarded
-// by auth.RequireAuth at the route level).
+// Create handles POST /api/v1/events (ADMIN role required — guarded by auth.RequireAuth at the route level)
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	var req CreateEventRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -222,7 +266,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// Update handles PATCH /api/v1/events/:id (admin only).
+// Update handles PATCH /api/v1/events/:id (admin only)
 func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
@@ -255,7 +299,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// Delete handles DELETE /api/v1/events/:id (admin only).
+// Delete handles DELETE /api/v1/events/:id (admin only)
 func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
@@ -276,8 +320,7 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// maskCategoryCapacity zeroes capacity so it isn't exposed to
-// regular users.
+// maskCategoryCapacity zeroes capacity so it isn't exposed to regular users
 func maskCategoryCapacity(in []EventCategory) []EventCategory {
 	out := make([]EventCategory, len(in))
 	copy(out, in)

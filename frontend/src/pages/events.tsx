@@ -139,8 +139,8 @@ function EventCard({ event, primary }: { event: Event; primary: string }) {
       : primary;
   return (
     <Link href={`/events/${event.slug}`} className="group flex flex-col overflow-hidden border border-white/10 bg-[#1a1a1a] transition hover:border-white/30">
-      <div className="relative h-40 w-full overflow-hidden bg-[#252525]">
-        <EventArtwork coverImage={event.cover_image} eventName={event.name} imageClassName="h-full w-full object-cover opacity-90 transition duration-500 group-hover:scale-105" />
+      <div className="relative h-56 w-full overflow-hidden bg-[#252525] sm:h-64">
+        <EventArtwork coverImage={event.cover_image} eventName={event.name} variant="card" />
         <span
           className="absolute left-0 top-4 border-y border-r border-white/20 border-l-[5px] bg-black/90 px-3 py-2 font-mono text-[9px] font-black uppercase tracking-[0.16em] text-white"
           style={{ borderLeftColor: statusColor }}
@@ -173,7 +173,7 @@ function Loading() {
       <div className="grid gap-4 py-8 sm:grid-cols-2 lg:grid-cols-3">
         {[0, 1, 2, 3, 4, 5].map((item) => (
           <div key={item} className="rounded-xl border border-white/10 p-5">
-            <div className="h-40 w-full animate-pulse rounded-lg bg-white/10" />
+            <div className="h-56 w-full animate-pulse rounded-lg bg-white/10 sm:h-64" />
             <div className="mt-4 h-6 w-3/4 animate-pulse rounded bg-white/10" />
             <div className="mt-3 h-3.5 w-1/2 animate-pulse rounded bg-white/10" />
           </div>

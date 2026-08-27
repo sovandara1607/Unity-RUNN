@@ -37,7 +37,7 @@ func (r *Repository) Update(ctx context.Context, actorID uuid.UUID, s Settings) 
 	if err != nil {
 		return nil, fmt.Errorf("siteconfig: begin update: %w", err)
 	}
-	defer tx.Rollback(ctx) //nolint:errcheck -- safe after commit
+	defer tx.Rollback(ctx) //nolint:errcheck, safe after commit
 
 	values, err := json.Marshal(s.ValueMessages)
 	if err != nil {

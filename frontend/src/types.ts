@@ -103,6 +103,7 @@ export interface EventCategory {
   name: string;
   distance: string;
   price_cents: number;
+  currency: "USD" | "KHR";
   capacity: number;
   registration_deadline?: string | null;
   status: string;
@@ -323,6 +324,8 @@ export interface SystemStatusSnapshot {
     smtp_secret_configured: boolean; payment_secret_configured: boolean;
   };
   workers: {
+    notification_status: SystemState; notification_detail: string; notification_last_seen: string;
+    notification_heartbeat_age_seconds: number;
     notification_queue_depth: number; notifications_pending: number; notifications_failed: number;
     notification_sweep: string; notification_max_attempts: number; reminder_poll: string; reminder_window: string;
   };

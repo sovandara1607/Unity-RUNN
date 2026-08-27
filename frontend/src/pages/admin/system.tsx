@@ -143,13 +143,14 @@ function SystemBoard({ snapshot }: { snapshot: SystemStatusSnapshot }) {
 
     <div className="grid gap-6 xl:grid-cols-[.9fr_1.1fr]">
       <Panel icon={<Activity />} eyebrow="Email and reminders" title="Background workers">
+        <div className="mb-4 flex items-start justify-between gap-4 rounded-2xl border border-black/10 bg-[#151515] p-4 text-white"><div><p className="text-xs font-black">Notification delivery worker</p><p className="mt-1 text-[10px] font-semibold leading-4 text-white/45">{snapshot.workers.notification_detail}</p></div><StateBadge state={snapshot.workers.notification_status} label={snapshot.workers.notification_status === "operational" ? "Live" : undefined} /></div>
         <div className="grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-black/10 bg-black/10">
           <WorkerDatum label="Queue" value={snapshot.workers.notification_queue_depth} note="waiting" />
           <WorkerDatum label="Pending" value={snapshot.workers.notifications_pending} note="database" />
           <WorkerDatum label="Failed" value={snapshot.workers.notifications_failed} note="needs review" />
           <WorkerDatum label="Attempts" value={snapshot.workers.notification_max_attempts} note="maximum" />
         </div>
-        <div className="mt-4 grid gap-x-6 sm:grid-cols-2"><DataRow label="Recovery sweep" value={snapshot.workers.notification_sweep} /><DataRow label="Reminder poll" value={snapshot.workers.reminder_poll} /><DataRow label="Reminder window" value={snapshot.workers.reminder_window} /></div>
+        <div className="mt-4 grid gap-x-6 sm:grid-cols-2"><DataRow label="Last heartbeat" value={snapshot.workers.notification_last_seen ? `${snapshot.workers.notification_heartbeat_age_seconds}s ago` : "Not observed"} /><DataRow label="Recovery sweep" value={snapshot.workers.notification_sweep} /><DataRow label="Reminder poll" value={snapshot.workers.reminder_poll} /><DataRow label="Reminder window" value={snapshot.workers.reminder_window} /></div>
       </Panel>
 
       <Panel icon={<TriangleAlert />} eyebrow="Recovery readiness" title="Resilience">

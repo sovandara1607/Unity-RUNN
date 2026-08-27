@@ -26,7 +26,7 @@ const (
 	googleUserInfoURL      = "https://openidconnect.googleapis.com/v1/userinfo"
 )
 
-// GoogleOAuthConfig contains only server-side OAuth web-client settings.
+// GoogleOAuthConfig contains only server-side OAuth web-client settings
 type GoogleOAuthConfig struct {
 	ClientID     string
 	ClientSecret string
@@ -39,8 +39,7 @@ type googleOAuthFlow struct {
 	client *http.Client
 }
 
-// ConfigureGoogle enables Google sign-in. Leaving ClientID empty keeps the
-// provider disabled and the normal password flow unchanged.
+// ConfigureGoogle enables Google sign-in. Leaving ClientID empty keeps the provider disabled and the normal password flow unchanged
 func (h *Handler) ConfigureGoogle(config GoogleOAuthConfig) {
 	if config.ClientID == "" {
 		h.google = nil
@@ -52,13 +51,13 @@ func (h *Handler) ConfigureGoogle(config GoogleOAuthConfig) {
 	}
 }
 
-// Providers reports which optional sign-in providers are available.
+// Providers reports which optional sign-in providers are available
 func (h *Handler) Providers(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	httpresponse.WriteData(w, http.StatusOK, map[string]bool{"google": h.google != nil})
 }
 
-// GoogleStart begins the authorization-code flow with a browser-bound state.
+// GoogleStart begins the authorization-code flow with a browser-bound state
 func (h *Handler) GoogleStart(w http.ResponseWriter, r *http.Request) {
 	if h.google == nil {
 		httpresponse.WriteError(w, http.StatusNotFound, "provider_unavailable", "Google sign-in is not configured")
@@ -84,9 +83,7 @@ func (h *Handler) GoogleStart(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, googleAuthorizeURL+"?"+query.Encode(), http.StatusFound)
 }
 
-// GoogleCallback exchanges the one-time code, verifies the Google profile via
-// the OIDC userinfo endpoint, creates/links the local account, and establishes
-// the same rotating refresh session used by password login.
+// GoogleCallback exchanges the one-time code, verifies the Google profile via the OIDC userinfo endpoint, creates/links the local account, and establishes the same rotating refresh session used by password login
 func (h *Handler) GoogleCallback(w http.ResponseWriter, r *http.Request) {
 	if h.google == nil {
 		httpresponse.WriteError(w, http.StatusNotFound, "provider_unavailable", "Google sign-in is not configured")
