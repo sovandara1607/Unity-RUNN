@@ -8,12 +8,34 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
 // fakePinger is a test double for Pinger.
 type fakePinger struct {
 	err error
+}
+
+func TestFilesOnlyFS_DisablesDirectoryListing(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "events"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "events", "poster.png"), []byte("png"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	secureFS := filesOnlyFS{root: http.Dir(root)}
+	if dir, err := secureFS.Open("/events"); err == nil {
+		_ = dir.Close()
+		t.Fatal("directory opened successfully; listing should be disabled")
+	}
+	file, err := secureFS.Open("/events/poster.png")
+	if err != nil {
+		t.Fatalf("open uploaded file: %v", err)
+	}
+	_ = file.Close()
 }
 
 func (f fakePinger) Ping(ctx context.Context) error {

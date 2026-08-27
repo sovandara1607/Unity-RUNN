@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/google/uuid"
+
 	"github.com/unity-run-club/api/internal/auth"
 	"github.com/unity-run-club/api/internal/httpresponse"
 )
@@ -38,12 +40,24 @@ func (h *Handler) CheckIn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := h.svc.CheckIn(r.Context(), staff.ID, req.Token)
+	var eventID *uuid.UUID
+	if req.EventID != "" {
+		parsed, parseErr := uuid.Parse(req.EventID)
+		if parseErr != nil {
+			httpresponse.WriteError(w, http.StatusUnprocessableEntity, "validation_failed", "event_id must be a UUID")
+			return
+		}
+		eventID = &parsed
+	}
+
+	result, err := h.svc.CheckIn(r.Context(), staff.ID, eventID, req.Token)
 	switch {
 	case errors.Is(err, ErrInvalidToken):
 		httpresponse.WriteError(w, http.StatusNotFound, "invalid_token", "ticket token not recognized")
 	case errors.Is(err, ErrNotConfirmed):
 		httpresponse.WriteError(w, http.StatusConflict, "not_confirmed", "registration is not confirmed")
+	case errors.Is(err, ErrWrongEvent):
+		httpresponse.WriteError(w, http.StatusConflict, "wrong_event", "this ticket belongs to a different event")
 	case errors.Is(err, ErrAlreadyCheckedIn):
 		httpresponse.WriteError(w, http.StatusConflict, "already_checked_in", "this registration has already been checked in")
 	case err != nil:

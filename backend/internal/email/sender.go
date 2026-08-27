@@ -6,6 +6,7 @@
 package email
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"fmt"
@@ -16,10 +17,20 @@ import (
 
 // Message is a rendered email ready to send.
 type Message struct {
-	To      string
-	Subject string
-	HTML    string
-	Text    string
+	To          string
+	Subject     string
+	HTML        string
+	Text        string
+	Attachments []Attachment
+}
+
+// Attachment is an in-memory file delivered with an email. Notification
+// documents are generated just-in-time, so no runner data has to be written to
+// a shared filesystem before SMTP delivery.
+type Attachment struct {
+	Filename    string
+	ContentType string
+	Data        []byte
 }
 
 // Sender delivers a Message.
@@ -64,6 +75,15 @@ func (s *SMTPSender) Send(ctx context.Context, msg Message) error {
 	m.Subject(msg.Subject)
 	m.SetBodyString(gomail.TypeTextPlain, msg.Text)
 	m.AddAlternativeString(gomail.TypeTextHTML, msg.HTML)
+	for _, attachment := range msg.Attachments {
+		options := []gomail.FileOption{}
+		if attachment.ContentType != "" {
+			options = append(options, gomail.WithFileContentType(gomail.ContentType(attachment.ContentType)))
+		}
+		if err := m.AttachReader(attachment.Filename, bytes.NewReader(attachment.Data), options...); err != nil {
+			return fmt.Errorf("email: attach %s: %w", attachment.Filename, err)
+		}
+	}
 
 	if err := s.client.DialAndSendWithContext(ctx, m); err != nil {
 		return fmt.Errorf("email: send: %w", err)
@@ -86,7 +106,8 @@ func NewNoopSender(log *slog.Logger) *NoopSender {
 
 func (s *NoopSender) Send(ctx context.Context, msg Message) error {
 	s.log.Info("email_not_sent_smtp_unconfigured",
-		"to", msg.To, "subject", msg.Subject, "text_preview", truncate(msg.Text, 200))
+		"to", msg.To, "subject", msg.Subject, "attachments", len(msg.Attachments),
+		"text_preview", truncate(msg.Text, 200))
 	return nil
 }
 

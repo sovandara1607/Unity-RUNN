@@ -22,6 +22,9 @@ var ErrInvalidTransition = errors.New("events: invalid status transition")
 // that isn't in DRAFT status.
 var ErrDeleteNotAllowed = errors.New("events: only draft events can be deleted")
 
+// ErrCategoryInUse protects registration and check-in history from deletion.
+var ErrCategoryInUse = errors.New("events: category has registrations")
+
 // eventRepository is the subset of Repository the service depends on.
 // Defined here (consumer side) so tests can supply a fake.
 type eventRepository interface {
@@ -32,6 +35,15 @@ type eventRepository interface {
 	Create(ctx context.Context, e *Event) error
 	Update(ctx context.Context, e *Event) error
 	Delete(ctx context.Context, id uuid.UUID) error
+	GetCategoryByID(ctx context.Context, id uuid.UUID) (*EventCategory, error)
+	listCategories(ctx context.Context, eventID uuid.UUID) ([]EventCategory, error)
+	listSchedule(ctx context.Context, eventID uuid.UUID) ([]EventSchedule, error)
+	CreateCategory(ctx context.Context, c *EventCategory) error
+	UpdateCategory(ctx context.Context, id uuid.UUID, p *UpdateCategoryRequest) (*EventCategory, error)
+	DeleteCategory(ctx context.Context, id uuid.UUID) error
+	CreateScheduleItem(ctx context.Context, s *EventSchedule) error
+	UpdateScheduleItem(ctx context.Context, id uuid.UUID, p *UpdateScheduleRequest) (*EventSchedule, error)
+	DeleteScheduleItem(ctx context.Context, id uuid.UUID) error
 }
 
 // EventNotifier is implemented by internal/notifications (wired in
@@ -62,16 +74,30 @@ const (
 	maxListLimit     = 100
 )
 
-// List returns events visible under filter. When includeAll is false,
-// filter.Statuses is forced to the public status set regardless of
-// what was requested (defense in depth — handlers should already
-// enforce this via the admin-key check).
+// List returns events visible under filter. Public callers may narrow the
+// public statuses, but can never use a filter to reveal non-public events.
 // filter is mutated in place with the effective (defaulted/clamped)
 // limit and offset, so callers building a response envelope can
 // report what was actually applied.
 func (s *Service) List(ctx context.Context, filter *ListFilter, includeAll bool) ([]Event, int, error) {
 	if !includeAll {
-		filter.Statuses = nil // repository defaults to public statuses
+		if len(filter.Statuses) > 0 {
+			public := make([]Status, 0, len(filter.Statuses))
+			for _, status := range filter.Statuses {
+				if status.IsPublic() {
+					public = append(public, status)
+				}
+			}
+			if len(public) == 0 {
+				public = []Status{Status("__NO_PUBLIC_STATUS__")}
+			}
+			filter.Statuses = public
+		}
+	} else if len(filter.Statuses) == 0 {
+		// Admin viewing "all" (no explicit status filter) should see
+		// every status, including DRAFT/CANCELLED/ARCHIVED — not just
+		// the public set the repository defaults to.
+		filter.Statuses = allStatuses()
 	}
 	if filter.Limit <= 0 {
 		filter.Limit = defaultListLimit
@@ -97,6 +123,11 @@ func (s *Service) GetDetailBySlug(ctx context.Context, slug string, includeAll b
 		return nil, ErrNotFound
 	}
 	return detail, nil
+}
+
+// GetByID returns an event by ID (admin only — no visibility filtering).
+func (s *Service) GetByID(ctx context.Context, id uuid.UUID) (*Event, error) {
+	return s.repo.GetByID(ctx, id)
 }
 
 // Create validates and persists a new event in DRAFT status.
@@ -283,4 +314,132 @@ func slugify(name string) string {
 		}
 	}
 	return strings.Trim(b.String(), "-")
+}
+
+// CreateCategory adds a registerable category to an event.
+func (s *Service) CreateCategory(ctx context.Context, eventID uuid.UUID, req CreateCategoryRequest) (*EventCategory, error) {
+	if err := validate.Struct(req); err != nil {
+		return nil, err
+	}
+	if _, err := s.repo.GetByID(ctx, eventID); err != nil {
+		return nil, err
+	}
+	c := &EventCategory{
+		EventID:              eventID,
+		Name:                 req.Name,
+		Distance:             req.Distance,
+		PriceCents:           req.PriceCents,
+		Capacity:             req.Capacity,
+		RegistrationDeadline: req.RegistrationDeadline,
+		Status:               "OPEN",
+	}
+	if err := s.repo.CreateCategory(ctx, c); err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
+// UpdateCategory patches a category that belongs to eventID.
+func (s *Service) UpdateCategory(ctx context.Context, eventID, categoryID uuid.UUID, req UpdateCategoryRequest) (*EventCategory, error) {
+	if err := validate.Struct(req); err != nil {
+		return nil, err
+	}
+	c, err := s.repo.GetCategoryByID(ctx, categoryID)
+	if err != nil {
+		return nil, err
+	}
+	if c.EventID != eventID {
+		return nil, ErrNotFound
+	}
+	return s.repo.UpdateCategory(ctx, categoryID, &req)
+}
+
+// DeleteCategory removes a category that belongs to eventID.
+func (s *Service) DeleteCategory(ctx context.Context, eventID, categoryID uuid.UUID) error {
+	c, err := s.repo.GetCategoryByID(ctx, categoryID)
+	if err != nil {
+		return err
+	}
+	if c.EventID != eventID {
+		return ErrNotFound
+	}
+	return s.repo.DeleteCategory(ctx, categoryID)
+}
+
+// ListCategories returns an event's categories.
+func (s *Service) ListCategories(ctx context.Context, eventID uuid.UUID) ([]EventCategory, error) {
+	if _, err := s.repo.GetByID(ctx, eventID); err != nil {
+		return nil, err
+	}
+	return s.repo.listCategories(ctx, eventID)
+}
+
+// CreateScheduleItem adds a day-of schedule line to an event.
+func (s *Service) CreateScheduleItem(ctx context.Context, eventID uuid.UUID, req CreateScheduleRequest) (*EventSchedule, error) {
+	if err := validate.Struct(req); err != nil {
+		return nil, err
+	}
+	if _, err := s.repo.GetByID(ctx, eventID); err != nil {
+		return nil, err
+	}
+	t, err := time.Parse("15:04:05", req.Time)
+	if err != nil {
+		t, err = time.Parse("15:04", req.Time)
+		if err != nil {
+			return nil, err
+		}
+	}
+	item := &EventSchedule{
+		EventID:     eventID,
+		Time:        t,
+		Title:       req.Title,
+		Description: req.Description,
+		SortOrder:   req.SortOrder,
+	}
+	if err := s.repo.CreateScheduleItem(ctx, item); err != nil {
+		return nil, err
+	}
+	return item, nil
+}
+
+// UpdateScheduleItem patches a schedule line that belongs to eventID.
+func (s *Service) UpdateScheduleItem(ctx context.Context, eventID, scheduleID uuid.UUID, req UpdateScheduleRequest) (*EventSchedule, error) {
+	if err := validate.Struct(req); err != nil {
+		return nil, err
+	}
+	item, err := s.getScheduleItem(ctx, eventID, scheduleID)
+	if err != nil {
+		return nil, err
+	}
+	return s.repo.UpdateScheduleItem(ctx, item.ID, &req)
+}
+
+// DeleteScheduleItem removes a schedule line that belongs to eventID.
+func (s *Service) DeleteScheduleItem(ctx context.Context, eventID, scheduleID uuid.UUID) error {
+	item, err := s.getScheduleItem(ctx, eventID, scheduleID)
+	if err != nil {
+		return err
+	}
+	return s.repo.DeleteScheduleItem(ctx, item.ID)
+}
+
+// ListSchedule returns an event's day-of schedule lines in order.
+func (s *Service) ListSchedule(ctx context.Context, eventID uuid.UUID) ([]EventSchedule, error) {
+	if _, err := s.repo.GetByID(ctx, eventID); err != nil {
+		return nil, err
+	}
+	return s.repo.listSchedule(ctx, eventID)
+}
+
+func (s *Service) getScheduleItem(ctx context.Context, eventID, scheduleID uuid.UUID) (*EventSchedule, error) {
+	items, err := s.repo.listSchedule(ctx, eventID)
+	if err != nil {
+		return nil, err
+	}
+	for i := range items {
+		if items[i].ID == scheduleID {
+			return &items[i], nil
+		}
+	}
+	return nil, ErrNotFound
 }

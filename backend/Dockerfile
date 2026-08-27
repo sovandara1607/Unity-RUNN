@@ -16,6 +16,7 @@ RUN apk add --no-cache ca-certificates && \
     addgroup -S app && adduser -S app -G app
 WORKDIR /app
 COPY --from=builder /out/server ./server
+RUN mkdir -p /app/uploads && chown -R app:app /app/uploads
 USER app
 
 EXPOSE 8080

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"runtime/debug"
+	"strings"
 	"time"
 
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
@@ -14,6 +15,66 @@ import (
 
 	applogger "github.com/unity-run-club/api/internal/logger"
 )
+
+// SecurityHeaders applies conservative response headers to every API and
+// upload response. The API is never intended to render executable HTML.
+func SecurityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'; base-uri 'none'")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		next.ServeHTTP(w, r)
+	})
+}
+
+// LimitJSONBody caps JSON request bodies before handlers decode them. Uploads
+// have their own stricter multipart limit in the events handler.
+func LimitJSONBody(maxBytes int64) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Body != nil && strings.Contains(strings.ToLower(r.Header.Get("Content-Type")), "application/json") {
+				if r.ContentLength > maxBytes {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusRequestEntityTooLarge)
+					_, _ = w.Write([]byte(`{"error":{"code":"body_too_large","message":"request body is too large"}}`))
+					return
+				}
+				r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// RequireAllowedOrigin blocks browser cross-site requests that can carry the
+// refresh-token cookie. Requests without Origin remain available to trusted
+// non-browser clients and local operational tooling.
+func RequireAllowedOrigin(allowedOrigins []string) func(http.Handler) http.Handler {
+	allowed := make(map[string]struct{}, len(allowedOrigins))
+	for _, origin := range allowedOrigins {
+		origin = strings.TrimRight(strings.TrimSpace(origin), "/")
+		if origin != "" {
+			allowed[origin] = struct{}{}
+		}
+	}
+
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			origin := strings.TrimRight(strings.TrimSpace(r.Header.Get("Origin")), "/")
+			if origin != "" {
+				if _, ok := allowed[origin]; !ok {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusForbidden)
+					_, _ = w.Write([]byte(`{"error":{"code":"invalid_origin","message":"request origin is not allowed"}}`))
+					return
+				}
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
 
 // RequestID assigns/propagates an X-Request-ID header and makes it
 // available via chi's request ID context (which our logger helpers

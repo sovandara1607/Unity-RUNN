@@ -45,7 +45,7 @@ func (r *Repository) HasActiveRegistration(ctx context.Context, userID, eventID 
 	err := r.pool.QueryRow(ctx, `
 		SELECT EXISTS(
 			SELECT 1 FROM registrations
-			WHERE user_id = $1 AND event_id = $2 AND status != 'CANCELLED'
+			WHERE user_id = $1 AND event_id = $2 AND status IN ('PENDING', 'CONFIRMED')
 		)`, userID, eventID).Scan(&exists)
 	if err != nil {
 		return false, fmt.Errorf("registrations: check active registration: %w", err)
@@ -235,6 +235,57 @@ func (r *Repository) GetRegistrationIDByTicketTokenHash(ctx context.Context, tok
 	return registrationID, nil
 }
 
+// GetByRegistrationNumber fetches a registration by its
+// URC-YYYY-NNNNNN number. Used by check-in as a fallback when a scan
+// or manual entry doesn't resolve to a ticket token.
+func (r *Repository) GetByRegistrationNumber(ctx context.Context, number string) (*Registration, error) {
+	const query = `
+		SELECT id, registration_number, user_id, event_id, event_category_id, status,
+		       full_name, email, phone, date_of_birth, gender,
+		       emergency_contact_name, emergency_contact_phone, tshirt_size,
+		       created_at, updated_at
+		FROM registrations WHERE registration_number = $1`
+
+	var reg Registration
+	err := r.pool.QueryRow(ctx, query, number).Scan(&reg.ID, &reg.RegistrationNumber, &reg.UserID,
+		&reg.EventID, &reg.EventCategoryID, &reg.Status, &reg.FullName, &reg.Email, &reg.Phone,
+		&reg.DateOfBirth, &reg.Gender, &reg.EmergencyContactName, &reg.EmergencyContactPhone,
+		&reg.TshirtSize, &reg.CreatedAt, &reg.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("registrations: get by registration number: %w", err)
+	}
+	return &reg, nil
+}
+
+// RotateTicketToken replaces the stored token hash for a
+// registration's ticket. Raw tokens are never persisted, so issuing
+// a token to display again always rotates the hash — previous QRs
+// stop scanning.
+func (r *Repository) RotateTicketToken(ctx context.Context, registrationID uuid.UUID, tokenHash string) error {
+	ct, err := r.pool.Exec(ctx,
+		`UPDATE tickets SET token_hash = $2, updated_at = now() WHERE registration_id = $1`,
+		registrationID, tokenHash)
+	if err != nil {
+		return fmt.Errorf("registrations: rotate ticket token: %w", err)
+	}
+	if ct.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (r *Repository) HasCheckIn(ctx context.Context, registrationID uuid.UUID) (bool, error) {
+	var exists bool
+	if err := r.pool.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM check_ins WHERE registration_id = $1)`, registrationID).Scan(&exists); err != nil {
+		return false, fmt.Errorf("registrations: check check-in status: %w", err)
+	}
+	return exists, nil
+}
+
 // ListFilter narrows an admin ListAll query.
 type AdminListFilter struct {
 	EventID *uuid.UUID
@@ -252,18 +303,18 @@ func (r *Repository) ListAll(ctx context.Context, filter AdminListFilter) ([]Reg
 	argN := 1
 
 	if filter.EventID != nil {
-		where += fmt.Sprintf(" AND event_id = $%d", argN)
+		where += fmt.Sprintf(" AND r.event_id = $%d", argN)
 		args = append(args, *filter.EventID)
 		argN++
 	}
 	if filter.Status != nil {
-		where += fmt.Sprintf(" AND status = $%d", argN)
+		where += fmt.Sprintf(" AND r.status = $%d", argN)
 		args = append(args, *filter.Status)
 		argN++
 	}
 
 	var total int
-	countQuery := "SELECT count(*) FROM registrations " + where
+	countQuery := "SELECT count(*) FROM registrations r " + where
 	if err := r.pool.QueryRow(ctx, countQuery, args...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("registrations: admin count: %w", err)
 	}
@@ -271,11 +322,13 @@ func (r *Repository) ListAll(ctx context.Context, filter AdminListFilter) ([]Reg
 	limit, offset := filter.Limit, filter.Offset
 	args = append(args, limit, offset)
 	query := fmt.Sprintf(`
-		SELECT id, registration_number, user_id, event_id, event_category_id, status,
-		       full_name, email, phone, date_of_birth, gender,
-		       emergency_contact_name, emergency_contact_phone, tshirt_size,
-		       created_at, updated_at
-		FROM registrations %s ORDER BY created_at DESC LIMIT $%d OFFSET $%d`, where, argN, argN+1)
+		SELECT r.id, r.registration_number, r.user_id, r.event_id, r.event_category_id, r.status,
+		       r.full_name, r.email, r.phone, r.date_of_birth, r.gender,
+		       r.emergency_contact_name, r.emergency_contact_phone, r.tshirt_size,
+		       r.created_at, r.updated_at, ci.checked_in_at
+		FROM registrations r
+		LEFT JOIN check_ins ci ON ci.registration_id = r.id
+		%s ORDER BY r.created_at DESC LIMIT $%d OFFSET $%d`, where, argN, argN+1)
 
 	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
@@ -289,7 +342,7 @@ func (r *Repository) ListAll(ctx context.Context, filter AdminListFilter) ([]Reg
 		if err := rows.Scan(&reg.ID, &reg.RegistrationNumber, &reg.UserID, &reg.EventID,
 			&reg.EventCategoryID, &reg.Status, &reg.FullName, &reg.Email, &reg.Phone,
 			&reg.DateOfBirth, &reg.Gender, &reg.EmergencyContactName, &reg.EmergencyContactPhone,
-			&reg.TshirtSize, &reg.CreatedAt, &reg.UpdatedAt); err != nil {
+			&reg.TshirtSize, &reg.CreatedAt, &reg.UpdatedAt, &reg.CheckedInAt); err != nil {
 			return nil, 0, fmt.Errorf("registrations: admin scan: %w", err)
 		}
 		out = append(out, reg)
@@ -301,11 +354,13 @@ func (r *Repository) ListAll(ctx context.Context, filter AdminListFilter) ([]Reg
 // recent first.
 func (r *Repository) ListForUser(ctx context.Context, userID uuid.UUID) ([]Registration, error) {
 	const query = `
-		SELECT id, registration_number, user_id, event_id, event_category_id, status,
-		       full_name, email, phone, date_of_birth, gender,
-		       emergency_contact_name, emergency_contact_phone, tshirt_size,
-		       created_at, updated_at
-		FROM registrations WHERE user_id = $1 ORDER BY created_at DESC`
+		SELECT r.id, r.registration_number, r.user_id, r.event_id, r.event_category_id, r.status,
+		       r.full_name, r.email, r.phone, r.date_of_birth, r.gender,
+		       r.emergency_contact_name, r.emergency_contact_phone, r.tshirt_size,
+		       r.created_at, r.updated_at, ci.checked_in_at
+		FROM registrations r
+		LEFT JOIN check_ins ci ON ci.registration_id = r.id
+		WHERE r.user_id = $1 ORDER BY r.created_at DESC`
 
 	rows, err := r.pool.Query(ctx, query, userID)
 	if err != nil {
@@ -319,7 +374,7 @@ func (r *Repository) ListForUser(ctx context.Context, userID uuid.UUID) ([]Regis
 		if err := rows.Scan(&reg.ID, &reg.RegistrationNumber, &reg.UserID, &reg.EventID,
 			&reg.EventCategoryID, &reg.Status, &reg.FullName, &reg.Email, &reg.Phone,
 			&reg.DateOfBirth, &reg.Gender, &reg.EmergencyContactName, &reg.EmergencyContactPhone,
-			&reg.TshirtSize, &reg.CreatedAt, &reg.UpdatedAt); err != nil {
+			&reg.TshirtSize, &reg.CreatedAt, &reg.UpdatedAt, &reg.CheckedInAt); err != nil {
 			return nil, fmt.Errorf("registrations: scan: %w", err)
 		}
 		out = append(out, reg)
@@ -360,11 +415,114 @@ func (r *Repository) CountActive(ctx context.Context, categoryID uuid.UUID) (int
 // CreatePayment inserts a payment record for a registration.
 func (r *Repository) CreatePayment(ctx context.Context, p *Payment) error {
 	const query = `
-		INSERT INTO payments (registration_id, provider, provider_reference, amount_cents, currency, status)
-		VALUES ($1,$2,$3,$4,$5,$6)
+		INSERT INTO payments (registration_id, provider, provider_reference, amount_cents, currency, status, checkout_payload, expires_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
 		RETURNING id, created_at, updated_at`
 	return r.pool.QueryRow(ctx, query, p.RegistrationID, p.Provider, p.ProviderReference,
-		p.AmountCents, p.Currency, p.Status).Scan(&p.ID, &p.CreatedAt, &p.UpdatedAt)
+		p.AmountCents, p.Currency, p.Status, p.CheckoutPayload, p.ExpiresAt).Scan(&p.ID, &p.CreatedAt, &p.UpdatedAt)
+}
+
+func (r *Repository) GetPaymentForRegistration(ctx context.Context, registrationID uuid.UUID) (*Payment, error) {
+	var p Payment
+	err := r.pool.QueryRow(ctx, `
+		SELECT id, registration_id, provider, provider_reference, amount_cents, currency, status,
+		       checkout_payload, expires_at, verified_at, created_at, updated_at
+		FROM payments WHERE registration_id = $1 ORDER BY created_at DESC LIMIT 1`, registrationID,
+	).Scan(&p.ID, &p.RegistrationID, &p.Provider, &p.ProviderReference, &p.AmountCents, &p.Currency,
+		&p.Status, &p.CheckoutPayload, &p.ExpiresAt, &p.VerifiedAt, &p.CreatedAt, &p.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("registrations: get payment: %w", err)
+	}
+	return &p, nil
+}
+
+// ExpirePendingPayments releases capacity held by abandoned KHQR checkouts.
+// Payment and registration rows transition in one transaction.
+func (r *Repository) ExpirePendingPayments(ctx context.Context, now time.Time) ([]uuid.UUID, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("registrations: begin payment expiry: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	rows, err := tx.Query(ctx, `
+		UPDATE registrations r SET status='CANCELLED', updated_at=now()
+		WHERE r.status='PENDING' AND EXISTS (
+			SELECT 1 FROM payments p WHERE p.registration_id=r.id
+			AND p.status='PENDING' AND p.expires_at IS NOT NULL AND p.expires_at <= $1
+		) RETURNING r.event_category_id`, now)
+	if err != nil {
+		return nil, fmt.Errorf("registrations: expire registrations: %w", err)
+	}
+	var categoryIDs []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		categoryIDs = append(categoryIDs, id)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	rows.Close()
+	if _, err := tx.Exec(ctx, `UPDATE payments SET status='FAILED', updated_at=now() WHERE status='PENDING' AND expires_at IS NOT NULL AND expires_at <= $1`, now); err != nil {
+		return nil, fmt.Errorf("registrations: expire payments: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("registrations: commit payment expiry: %w", err)
+	}
+	return categoryIDs, nil
+}
+
+// ConfirmStoredPayment is idempotent: concurrent verification polls can only
+// transition one pending row and the ticket insert is protected by its unique
+// registration relationship.
+func (r *Repository) ConfirmStoredPayment(ctx context.Context, registrationID, paymentID uuid.UUID, ticketTokenHash string) (*Registration, bool, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, false, fmt.Errorf("registrations: begin payment confirmation: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	var reg Registration
+	err = tx.QueryRow(ctx, `
+		SELECT id, registration_number, user_id, event_id, event_category_id, status,
+		       full_name, email, phone, date_of_birth, gender, emergency_contact_name,
+		       emergency_contact_phone, tshirt_size, created_at, updated_at
+		FROM registrations WHERE id = $1 FOR UPDATE`, registrationID,
+	).Scan(&reg.ID, &reg.RegistrationNumber, &reg.UserID, &reg.EventID, &reg.EventCategoryID, &reg.Status,
+		&reg.FullName, &reg.Email, &reg.Phone, &reg.DateOfBirth, &reg.Gender,
+		&reg.EmergencyContactName, &reg.EmergencyContactPhone, &reg.TshirtSize, &reg.CreatedAt, &reg.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, false, ErrNotFound
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("registrations: lock payment registration: %w", err)
+	}
+
+	if _, err = tx.Exec(ctx, `UPDATE payments SET status='SUCCEEDED', verified_at=COALESCE(verified_at, now()), updated_at=now() WHERE id=$1 AND registration_id=$2`, paymentID, registrationID); err != nil {
+		return nil, false, fmt.Errorf("registrations: mark payment succeeded: %w", err)
+	}
+	newlyConfirmed := reg.Status == StatusPending
+	if reg.Status == StatusPending {
+		err = tx.QueryRow(ctx, `UPDATE registrations SET status='CONFIRMED', updated_at=now() WHERE id=$1 RETURNING status, updated_at`, registrationID).Scan(&reg.Status, &reg.UpdatedAt)
+		if err != nil {
+			return nil, false, fmt.Errorf("registrations: confirm paid registration: %w", err)
+		}
+		_, err = tx.Exec(ctx, `INSERT INTO tickets (registration_id, token_hash) VALUES ($1,$2) ON CONFLICT (registration_id) DO NOTHING`, registrationID, ticketTokenHash)
+		if err != nil {
+			return nil, false, fmt.Errorf("registrations: issue paid ticket: %w", err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, false, fmt.Errorf("registrations: commit payment confirmation: %w", err)
+	}
+	return &reg, newlyConfirmed, nil
 }
 
 // ConfirmWithPayment records a succeeded payment, flips a PENDING

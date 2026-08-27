@@ -1,78 +1,31 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
-  QrCode,
-  CheckCircle,
-  AlertCircle,
-  AlertTriangle,
-  Search,
-  Users,
-  Shirt,
-  Flame,
-  Volume2,
-  VolumeX,
-  RefreshCw,
-  Clock,
-  Sparkles,
+  Activity, AlertCircle, AlertTriangle, CheckCircle, Clock, Keyboard,
+  QrCode, Radio, ScanLine, Search, Shirt, TicketCheck, Users,
+  Volume2, VolumeX,
 } from "lucide-react";
 import { AdminLayout } from "../../../components/admin/AdminLayout";
 import { QRCodeScanner } from "../../../components/admin/QRCodeScanner";
+import { withMinSkeleton } from "../../../lib/withMinSkeleton";
 import { api } from "../../../lib/api";
 import type { Event, Registration } from "../../../types";
 
-// Sound synthesis helper via Web Audio API (no external mp3 files needed)
 function playSound(type: "success" | "warning" | "error") {
   if (typeof window === "undefined") return;
   try {
-    const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
-    if (!AudioContext) return;
-    const ctx = new AudioContext();
-
-    if (type === "success") {
-      // High pleasant two-tone chime
-      const osc1 = ctx.createOscillator();
-      const osc2 = ctx.createOscillator();
-      const gain = ctx.createGain();
-
-      osc1.frequency.setValueAtTime(587.33, ctx.currentTime); // D5
-      osc1.frequency.setValueAtTime(880, ctx.currentTime + 0.1); // A5
-      gain.gain.setValueAtTime(0.2, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
-
-      osc1.connect(gain);
-      gain.connect(ctx.destination);
-      osc1.start();
-      osc1.stop(ctx.currentTime + 0.35);
-    } else if (type === "warning") {
-      // Low buzzing double tone
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = "sawtooth";
-      osc.frequency.setValueAtTime(220, ctx.currentTime);
-      osc.frequency.setValueAtTime(196, ctx.currentTime + 0.15);
-      gain.gain.setValueAtTime(0.15, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
-
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start();
-      osc.stop(ctx.currentTime + 0.4);
-    } else {
-      // Error descending buzz
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = "triangle";
-      osc.frequency.setValueAtTime(300, ctx.currentTime);
-      osc.frequency.setValueAtTime(150, ctx.currentTime + 0.2);
-      gain.gain.setValueAtTime(0.2, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
-
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start();
-      osc.stop(ctx.currentTime + 0.35);
-    }
-  } catch (e) {
-    // Audio context may be restricted before user gesture
+    const BrowserAudioContext = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!BrowserAudioContext) return;
+    const context = new BrowserAudioContext();
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    oscillator.type = type === "warning" ? "sawtooth" : type === "error" ? "triangle" : "sine";
+    oscillator.frequency.setValueAtTime(type === "success" ? 587.33 : type === "warning" ? 220 : 300, context.currentTime);
+    oscillator.frequency.setValueAtTime(type === "success" ? 880 : type === "warning" ? 196 : 150, context.currentTime + 0.14);
+    gain.gain.setValueAtTime(type === "warning" ? 0.15 : 0.2, context.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, context.currentTime + 0.38);
+    oscillator.connect(gain); gain.connect(context.destination); oscillator.start(); oscillator.stop(context.currentTime + 0.4);
+  } catch {
+    // Browsers may restrict audio until the volunteer interacts with the page.
   }
 }
 
@@ -83,368 +36,168 @@ interface ScanResult {
   timestamp: string;
 }
 
+type ApiError = Error & { code?: string; status?: number };
+type RecentCheckin = { name: string; number: string; tshirt: string; time: string };
+
+function recentForEvent(registrations: Registration[], eventId: string): RecentCheckin[] {
+  return registrations
+    .filter((registration) => registration.event_id === eventId && Boolean(registration.checked_in_at))
+    .sort((a, b) => String(b.checked_in_at).localeCompare(String(a.checked_in_at)))
+    .slice(0, 15)
+    .map((registration) => ({
+      name: registration.full_name,
+      number: registration.registration_number,
+      tshirt: registration.tshirt_size,
+      time: new Date(registration.checked_in_at as string).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+    }));
+}
+
 export default function AdminCheckinPage() {
   const [events, setEvents] = useState<Event[]>([]);
-  const [selectedEventId, setSelectedEventId] = useState<string>("");
+  const [selectedEventId, setSelectedEventId] = useState("");
   const [registrations, setRegistrations] = useState<Registration[]>([]);
   const [manualToken, setManualToken] = useState("");
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [lastResult, setLastResult] = useState<ScanResult | null>(null);
-  const [recentCheckins, setRecentCheckins] = useState<
-    { name: string; number: string; tshirt: string; time: string }[]
-  >([]);
-
+  const [recentCheckins, setRecentCheckins] = useState<RecentCheckin[]>([]);
   const manualInputRef = useRef<HTMLInputElement>(null);
 
-  // Load events and registrations
   useEffect(() => {
-    async function loadEvents() {
+    async function loadStation() {
       try {
         setLoading(true);
-        const [eventsRes, regsRes] = await Promise.all([
+        const [eventsResponse, registrationsResponse] = await withMinSkeleton(() => Promise.all([
           api.listEvents({ limit: 50 }),
           api.adminListRegistrations({ limit: 300 }),
-        ]);
-
-        const evList = eventsRes.events || [];
-        setEvents(evList);
-        setRegistrations(regsRes.registrations || []);
-
-        if (evList.length > 0) {
-          // Select the first live or published event
-          const active = evList.find((e) =>
-            ["REGISTRATION_OPEN", "REGISTRATION_CLOSED", "PUBLISHED"].includes(e.status)
-          );
-          setSelectedEventId(active ? active.id : evList[0].id);
+        ]));
+        const eventList = (eventsResponse.events || []).filter((event) => ["PUBLISHED", "REGISTRATION_OPEN", "REGISTRATION_CLOSED"].includes(event.status));
+        const registrationList = registrationsResponse.registrations || [];
+        setEvents(eventList); setRegistrations(registrationList);
+        if (eventList.length > 0) {
+          const initialEventId = eventList[0].id;
+          setSelectedEventId(initialEventId);
+          setRecentCheckins(recentForEvent(registrationList, initialEventId));
         }
-      } catch (err) {
-        console.error("Check-in station load error:", err);
       } finally {
         setLoading(false);
       }
     }
-    loadEvents();
+    void loadStation();
   }, []);
 
   const handleProcessScan = async (tokenOrId: string) => {
     const raw = tokenOrId.trim();
     if (!raw || processing) return;
+    if (!selectedEventId) {
+      setLastResult({ status: "error", message: "Select an event before scanning.", timestamp: new Date().toLocaleTimeString() });
+      return;
+    }
 
-    setProcessing(true);
-    setManualToken("");
-
+    setProcessing(true); setManualToken("");
     try {
-      // Find matching registration in local cache or by token/id
-      const reg = registrations.find(
-        (r) =>
-          r.id === raw ||
-          r.registration_number?.toLowerCase() === raw.toLowerCase() ||
-          r.email?.toLowerCase() === raw.toLowerCase()
-      );
-
-      const eventIdToUse = reg?.event_id || selectedEventId;
-      const regIdToUse = reg?.id || raw;
-
-      const res = await api.checkIn({
-        eventId: eventIdToUse,
-        registrationId: regIdToUse,
-        qrToken: raw,
-      });
-
+      const match = registrations.find((registration) => registration.event_id === selectedEventId && (
+        registration.id === raw ||
+        registration.registration_number?.toLowerCase() === raw.toLowerCase() ||
+        registration.email?.toLowerCase() === raw.toLowerCase()
+      ));
+      const response = await api.checkIn({ eventId: selectedEventId, qrToken: match?.registration_number || raw });
       if (soundEnabled) playSound("success");
-
-      const scannedReg = reg || {
-        id: regIdToUse,
-        registration_number: raw.slice(0, 8),
-        full_name: "Verified Participant",
-        email: "",
-        phone: "",
-        tshirt_size: "Standard",
-        gender: "",
-        emergency_contact_name: "",
-        emergency_contact_phone: "",
-        status: "CONFIRMED" as any,
-        event_id: eventIdToUse,
-        event_category_id: "",
-        user_id: "",
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      };
-
-      setLastResult({
-        status: "success",
-        message: "Check-in successful! Participant verified.",
-        registration: scannedReg,
-        timestamp: new Date().toLocaleTimeString(),
-      });
-
-      setRecentCheckins((prev) => [
-        {
-          name: scannedReg.full_name || "Runner",
-          number: scannedReg.registration_number || scannedReg.id.slice(0, 8),
-          tshirt: scannedReg.tshirt_size || "M",
-          time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-        },
-        ...prev.slice(0, 14),
-      ]);
-    } catch (err: any) {
-      console.warn("Check-in issue:", err);
-      const isAlready =
-        err?.message?.includes("already") || err?.code === "already_checked_in";
-
-      if (isAlready) {
+      const scannedRegistration = response.registration;
+      setRegistrations((current) => current.map((registration) => registration.id === scannedRegistration.id ? { ...registration, checked_in_at: response.check_in.checked_in_at } : registration));
+      setLastResult({ status: "success", message: "Ticket verified. Hand over the runner kit and admit entry.", registration: scannedRegistration, timestamp: new Date().toLocaleTimeString() });
+      setRecentCheckins((current) => [{
+        name: scannedRegistration.full_name || "Runner",
+        number: scannedRegistration.registration_number || scannedRegistration.id.slice(0, 8),
+        tshirt: scannedRegistration.tshirt_size || "M",
+        time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      }, ...current.slice(0, 14)]);
+    } catch (caught: unknown) {
+      const error = caught as ApiError;
+      const alreadyCheckedIn = error.message?.includes("already") || error.code === "already_checked_in";
+      if (alreadyCheckedIn) {
         if (soundEnabled) playSound("warning");
         setLastResult({
           status: "already_checked_in",
-          message: "Participant has ALREADY been checked in previously.",
+          message: "This runner was admitted earlier. Do not issue another kit.",
+          registration: registrations.find((registration) => registration.event_id === selectedEventId && [registration.registration_number, registration.email, registration.id].some((value) => value?.toLowerCase() === raw.toLowerCase())),
           timestamp: new Date().toLocaleTimeString(),
         });
       } else {
         if (soundEnabled) playSound("error");
-        setLastResult({
-          status: "error",
-          message: err?.message || "Invalid ticket token or registration not found.",
-          timestamp: new Date().toLocaleTimeString(),
-        });
+        setLastResult({ status: "error", message: error.code === "wrong_event" ? "This ticket belongs to another event. Switch the gate assignment before scanning it." : error.message || "The ticket code could not be verified.", timestamp: new Date().toLocaleTimeString() });
       }
     } finally {
       setProcessing(false);
-      // Re-focus manual input for continuous USB scanner typing
-      if (manualInputRef.current) {
-        manualInputRef.current.focus();
-      }
+      manualInputRef.current?.focus();
     }
   };
 
-  const handleManualSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (manualToken) {
-      handleProcessScan(manualToken);
-    }
-  };
-
-  // Compute checked-in counts for current event
-  const currentEvent = events.find((e) => e.id === selectedEventId);
-  const currentEventRegs = registrations.filter((r) => r.event_id === selectedEventId);
-  const checkedInCount = recentCheckins.length; // Live count
-  const totalCount = currentEventRegs.length || 1;
-  const progressPercent = Math.min(100, Math.round((checkedInCount / totalCount) * 100));
+  const confirmedRegistrations = registrations.filter((registration) => registration.event_id === selectedEventId && registration.status === "CONFIRMED");
+  const checkedInCount = confirmedRegistrations.filter((registration) => Boolean(registration.checked_in_at)).length;
+  const confirmedCount = confirmedRegistrations.length;
+  const remainingCount = Math.max(0, confirmedCount - checkedInCount);
+  const progressPercent = confirmedCount === 0 ? 0 : Math.min(100, Math.round((checkedInCount / confirmedCount) * 100));
+  const selectedEvent = events.find((event) => event.id === selectedEventId);
 
   return (
     <AdminLayout
-      title="Race-Day Check-in Station"
-      subtitle="Fast participant check-in, QR ticket scanner, and kit pickup verification"
-      actions={
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setSoundEnabled(!soundEnabled)}
-            className={`p-2 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition-colors ${
-              soundEnabled
-                ? "bg-slate-100 border-slate-200 text-slate-700 hover:bg-slate-200"
-                : "bg-rose-50 border-rose-200 text-rose-700"
-            }`}
-            title={soundEnabled ? "Audio chime enabled" : "Audio muted"}
-          >
-            {soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
-            <span className="hidden sm:inline">{soundEnabled ? "Sound ON" : "Sound Muted"}</span>
-          </button>
-        </div>
-      }
+      title="Check-in Station"
+      subtitle="Race-day entry verification and kit handoff"
+      actions={<button onClick={() => setSoundEnabled((enabled) => !enabled)} className={`grid h-10 w-10 place-items-center rounded-full border text-[10px] font-black uppercase tracking-[0.1em] transition sm:flex sm:w-auto sm:gap-2 sm:px-3.5 ${soundEnabled ? "border-slate-200 bg-white text-slate-800 hover:bg-slate-50" : "border-rose-200 bg-rose-50 text-rose-700"}`} aria-label={soundEnabled ? "Mute check-in sounds" : "Enable check-in sounds"} title={soundEnabled ? "Sound on" : "Sound muted"}>{soundEnabled ? <Volume2 className="h-3.5 w-3.5" /> : <VolumeX className="h-3.5 w-3.5" />}<span className="hidden sm:inline">{soundEnabled ? "Sound on" : "Muted"}</span></button>}
     >
-      {/* Top Controls & Event Selector Bar */}
-      <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm mb-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">
-            Active Event for Check-in
-          </label>
-          <select
-            value={selectedEventId}
-            onChange={(e) => setSelectedEventId(e.target.value)}
-            className="w-full md:w-80 px-3.5 py-2 text-sm font-bold bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500 text-slate-900"
-          >
-            {events.map((ev) => (
-              <option key={ev.id} value={ev.id}>
-                {ev.name} ({ev.status})
-              </option>
-            ))}
-          </select>
-        </div>
-
-        {/* Live Check-in Progress Bar */}
-        <div className="flex-1 max-w-sm">
-          <div className="flex justify-between text-xs font-medium mb-1">
-            <span className="text-slate-600 font-semibold">Today's Check-in Progress</span>
-            <span className="text-orange-600 font-bold">
-              {checkedInCount} checked in
-            </span>
+      <section className="mb-5 overflow-hidden rounded-[26px] bg-[#151515] text-white shadow-[0_25px_70px_-45px_rgba(0,0,0,.8)]">
+        <div className="grid lg:grid-cols-[minmax(0,1fr)_auto]">
+          <div className="border-b border-white/10 p-5 sm:p-6 lg:border-b-0 lg:border-r lg:border-white/10">
+            <div className="flex items-center gap-2 text-[9px] font-black uppercase tracking-[0.18em] text-[#d9ff00]"><Radio className="h-3.5 w-3.5" /> Live gate assignment</div>
+            <label htmlFor="checkin-event" className="sr-only">Active event for check-in</label>
+            <select id="checkin-event" value={selectedEventId} onChange={(event) => { setSelectedEventId(event.target.value); setRecentCheckins(recentForEvent(registrations, event.target.value)); setLastResult(null); }} disabled={loading} className="mt-3 w-full appearance-none bg-transparent pr-8 text-xl font-black tracking-[-0.02em] text-white outline-none sm:text-2xl">
+              {loading ? <option value="">Loading events…</option> : events.map((event) => <option key={event.id} value={event.id} className="text-slate-900">{event.name}</option>)}
+            </select>
+            <p className="mt-2 text-xs text-white/40"><span className="mr-2 font-black uppercase tracking-[0.08em] text-[#d9ff00]">{selectedEvent?.status.replaceAll("_", " ")}</span>Every scan is checked against this event. Switch assignments before scanning another race.</p>
           </div>
-          <div className="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden">
-            <div
-              className="bg-gradient-to-r from-orange-500 to-amber-500 h-2.5 rounded-full transition-all duration-300"
-              style={{ width: `${Math.max(5, progressPercent)}%` }}
-            />
-          </div>
+          <div className="grid grid-cols-3 divide-x divide-white/10 lg:min-w-[420px]"><GateMetric value={checkedInCount} label="Entered" accent /><GateMetric value={remainingCount} label="Waiting" /><GateMetric value={`${progressPercent}%`} label="Flow" /></div>
         </div>
-      </div>
+        <div className="h-1.5 bg-white/10"><div className="h-full bg-[#d9ff00] transition-all duration-500" style={{ width: `${progressPercent}%` }} /></div>
+      </section>
 
-      {/* Main Grid: Scanner + Result Banner on Left, Live Feed on Right */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Left Column: Scanner & Input (7 cols) */}
-        <div className="lg:col-span-7 space-y-6">
-          {/* Result Alert Card */}
-          {lastResult && (
-            <div
-              className={`rounded-2xl p-5 border shadow-sm transition-all animate-fadeIn ${
-                lastResult.status === "success"
-                  ? "bg-emerald-50 border-emerald-300 text-emerald-950"
-                  : lastResult.status === "already_checked_in"
-                  ? "bg-amber-50 border-amber-300 text-amber-950"
-                  : "bg-rose-50 border-rose-300 text-rose-950"
-              }`}
-            >
-              <div className="flex items-start gap-3.5">
-                {lastResult.status === "success" && (
-                  <CheckCircle className="w-7 h-7 text-emerald-600 flex-shrink-0 mt-0.5" />
-                )}
-                {lastResult.status === "already_checked_in" && (
-                  <AlertTriangle className="w-7 h-7 text-amber-600 flex-shrink-0 mt-0.5" />
-                )}
-                {lastResult.status === "error" && (
-                  <AlertCircle className="w-7 h-7 text-rose-600 flex-shrink-0 mt-0.5" />
-                )}
-
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between">
-                    <h4 className="font-bold text-base">
-                      {lastResult.status === "success"
-                        ? "CHECK-IN CONFIRMED"
-                        : lastResult.status === "already_checked_in"
-                        ? "ALREADY CHECKED IN"
-                        : "CHECK-IN FAILED"}
-                    </h4>
-                    <span className="text-xs opacity-75 font-mono">{lastResult.timestamp}</span>
-                  </div>
-                  <p className="text-xs mt-1 font-medium">{lastResult.message}</p>
-
-                  {lastResult.registration && (
-                    <div className="mt-4 pt-3 border-t border-black/10 grid grid-cols-2 gap-3 text-xs">
-                      <div>
-                        <span className="text-slate-500 block text-[11px]">Runner Name</span>
-                        <span className="font-bold text-sm text-slate-900 truncate block">
-                          {lastResult.registration.full_name}
-                        </span>
-                      </div>
-                      <div>
-                        <span className="text-slate-500 block text-[11px]">Race Ref / Bib</span>
-                        <span className="font-mono font-bold text-sm text-slate-900 block">
-                          #{lastResult.registration.registration_number || lastResult.registration.id.slice(0, 8)}
-                        </span>
-                      </div>
-                      <div className="col-span-2 p-2.5 rounded-xl bg-white/70 border border-black/5 flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <Shirt className="w-4 h-4 text-orange-600" />
-                          <span className="font-bold text-xs text-slate-900">
-                            Kit / T-shirt Size:
-                          </span>
-                        </div>
-                        <span className="text-sm font-black px-3 py-1 bg-orange-600 text-white rounded-lg shadow-sm">
-                          {lastResult.registration.tshirt_size || "L"}
-                        </span>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
+      {!loading && events.length === 0 ? (
+        <div className="rounded-[26px] border border-slate-200 bg-white p-12 text-center"><TicketCheck className="mx-auto h-10 w-10 text-slate-300" /><h2 className="mt-4 text-lg font-black text-slate-900">No event is ready for check-in</h2><p className="mt-1 text-sm text-slate-500">Publish an event before opening this station.</p></div>
+      ) : (
+        <div className="grid gap-5 xl:grid-cols-12">
+          <section className="overflow-hidden rounded-[26px] bg-[#151515] text-white shadow-sm xl:col-span-8" aria-label="Ticket scanner">
+            <div className="flex items-center justify-between border-b border-white/10 px-5 py-4 sm:px-6"><div><p className="text-[9px] font-black uppercase tracking-[0.18em] text-[#d9ff00]">Scan lane 01</p><h2 className="mt-1 flex items-center gap-2 text-sm font-black uppercase tracking-[0.06em]"><ScanLine className="h-4 w-4" /> Scan ticket QR</h2></div><span className="flex items-center gap-2 rounded-full border border-emerald-400/25 bg-emerald-400/10 px-3 py-1.5 text-[9px] font-black uppercase tracking-[0.12em] text-emerald-300"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" /><span className="hidden sm:inline">Gate</span> Ready</span></div>
+            <div className="p-3 sm:p-5"><QRCodeScanner onScan={handleProcessScan} paused={processing || !selectedEventId} /></div>
+            <div className="border-t border-white/10 p-4 sm:p-5">
+              <div className="mb-2 flex items-center gap-2 text-[9px] font-black uppercase tracking-[0.14em] text-white/40"><Keyboard className="h-3.5 w-3.5" /> Handheld scanner or desk lookup</div>
+              <form onSubmit={(event) => { event.preventDefault(); void handleProcessScan(manualToken); }} className="flex flex-col gap-2 sm:flex-row">
+                <div className="relative flex-1"><Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-white/35" /><input ref={manualInputRef} type="text" placeholder="Registration number, email, or ticket code" value={manualToken} onChange={(event) => setManualToken(event.target.value)} className="w-full rounded-xl border border-white/10 bg-white/5 py-3.5 pl-11 pr-4 font-mono text-xs text-white outline-none placeholder:text-white/25 focus:border-[#d9ff00] focus:ring-2 focus:ring-[#d9ff00]/20" /></div>
+                <button type="submit" disabled={processing || !manualToken || !selectedEventId} className="inline-flex min-w-28 items-center justify-center gap-2 rounded-xl bg-[#d9ff00] px-5 py-3.5 text-xs font-black uppercase tracking-[0.08em] text-black transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-40">{processing ? <><Activity className="h-4 w-4 animate-pulse" /> Checking</> : <>Verify <QrCode className="h-4 w-4" /></>}</button>
+              </form>
             </div>
-          )}
+          </section>
 
-          {/* Camera Scanner Box */}
-          <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2">
-                <QrCode className="w-4 h-4 text-orange-600" />
-                <span>Live Camera Scanner</span>
-              </h3>
-              <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                Active
-              </span>
-            </div>
-
-            <QRCodeScanner onScan={handleProcessScan} />
-
-            {/* Manual Lookup / Handheld Scanner Input */}
-            <form onSubmit={handleManualSubmit} className="mt-4 flex gap-2">
-              <div className="relative flex-1">
-                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                <input
-                  ref={manualInputRef}
-                  type="text"
-                  placeholder="Scan QR or type Reg # / Email..."
-                  value={manualToken}
-                  onChange={(e) => setManualToken(e.target.value)}
-                  className="w-full pl-9 pr-3 py-2.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500 font-mono"
-                />
-              </div>
-              <button
-                type="submit"
-                disabled={processing || !manualToken}
-                className="px-4 py-2.5 bg-orange-600 hover:bg-orange-700 disabled:opacity-50 text-white text-xs font-semibold rounded-xl shadow-sm transition-colors"
-              >
-                {processing ? "Verifying..." : "Verify"}
-              </button>
-            </form>
-          </div>
+          <aside className="space-y-5 xl:col-span-4">
+            <CheckinResultPanel result={lastResult} eventName={selectedEvent?.name} />
+            <RecentFeed items={recentCheckins} />
+          </aside>
         </div>
-
-        {/* Right Column: Live Check-in Feed (5 cols) */}
-        <div className="lg:col-span-5 bg-white rounded-2xl border border-slate-200 p-5 shadow-sm flex flex-col h-full min-h-[420px]">
-          <div className="flex items-center justify-between mb-4 pb-2 border-b border-slate-100">
-            <div>
-              <h3 className="font-bold text-sm text-slate-900">Recent Check-in Feed</h3>
-              <p className="text-xs text-slate-500">Live verified participants</p>
-            </div>
-            <span className="text-xs font-bold px-2 py-1 bg-orange-50 text-orange-700 rounded-lg">
-              {recentCheckins.length} Total
-            </span>
-          </div>
-
-          {recentCheckins.length === 0 ? (
-            <div className="flex-1 flex flex-col items-center justify-center text-center p-8 text-slate-400 text-xs">
-              <Users className="w-10 h-10 opacity-30 mb-2" />
-              <p className="font-medium">No check-ins recorded yet today.</p>
-              <p className="text-slate-400 mt-1">Scanned participants will stream live into this feed.</p>
-            </div>
-          ) : (
-            <div className="flex-1 space-y-2.5 overflow-y-auto max-h-[500px] pr-1">
-              {recentCheckins.map((item, idx) => (
-                <div
-                  key={idx}
-                  className="p-3 rounded-xl border border-slate-100 bg-slate-50/70 hover:bg-slate-50 flex items-center justify-between text-xs"
-                >
-                  <div className="min-w-0 flex-1 mr-2">
-                    <h5 className="font-bold text-slate-900 truncate">{item.name}</h5>
-                    <p className="text-[11px] text-slate-400 font-mono mt-0.5">
-                      Bib #{item.number}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    <span className="px-2 py-0.5 bg-orange-100 text-orange-800 font-bold rounded text-[11px]">
-                      Size {item.tshirt}
-                    </span>
-                    <span className="text-[11px] text-slate-400 flex items-center gap-1 font-mono">
-                      <Clock className="w-3 h-3" />
-                      {item.time}
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
+      )}
     </AdminLayout>
   );
+}
+
+function GateMetric({ value, label, accent = false }: { value: number | string; label: string; accent?: boolean }) {
+  return <div className="flex min-h-28 flex-col justify-center px-4 py-5 text-center"><strong className={`text-3xl font-black tracking-[-0.04em] sm:text-4xl ${accent ? "text-[#d9ff00]" : "text-white"}`}>{value}</strong><span className="mt-1 text-[8px] font-black uppercase tracking-[0.16em] text-white/35">{label}</span></div>;
+}
+
+function CheckinResultPanel({ result, eventName }: { result: ScanResult | null; eventName?: string }) {
+  if (!result) return <section className="flex min-h-64 flex-col justify-between rounded-[26px] border border-slate-200 bg-[#eef0ff] p-5 shadow-sm"><div className="flex items-center justify-between"><span className="text-[9px] font-black uppercase tracking-[0.16em] text-[#3155ff]">Verification result</span><span className="h-2 w-2 animate-pulse rounded-full bg-[#3155ff]" /></div><div><TicketCheck className="h-10 w-10 text-[#3155ff]" /><h2 className="mt-4 text-2xl font-black tracking-[-0.03em] text-slate-950">Ready for the next ticket.</h2><p className="mt-2 text-xs leading-5 text-slate-500">Scanning against {eventName || "the selected event"}.</p></div></section>;
+  const style = result.status === "success" ? { shell: "border-emerald-200 bg-emerald-500", text: "text-emerald-950", icon: <CheckCircle className="h-8 w-8" />, title: "Entry confirmed" } : result.status === "already_checked_in" ? { shell: "border-amber-200 bg-amber-300", text: "text-amber-950", icon: <AlertTriangle className="h-8 w-8" />, title: "Already inside" } : { shell: "border-rose-200 bg-rose-500", text: "text-white", icon: <AlertCircle className="h-8 w-8" />, title: "Ticket stopped" };
+  return <section className={`min-h-64 rounded-[26px] border p-5 shadow-sm animate-fadeIn ${style.shell} ${style.text}`} role="status"><div className="flex items-start justify-between gap-4">{style.icon}<span className="font-mono text-[9px] font-bold opacity-60">{result.timestamp}</span></div><h2 className="mt-7 text-3xl font-black tracking-[-0.04em]">{style.title}</h2><p className="mt-2 text-xs font-semibold leading-5 opacity-75">{result.message}</p>{result.registration && <div className="mt-5 border-t border-black/10 pt-4"><p className="truncate text-lg font-black">{result.registration.full_name}</p><div className="mt-3 grid grid-cols-2 gap-3"><div><span className="block text-[8px] font-black uppercase tracking-[0.14em] opacity-55">Bib / reference</span><span className="mt-1 block font-mono text-xs font-black">#{result.registration.registration_number || result.registration.id.slice(0, 8)}</span></div><div><span className="block text-[8px] font-black uppercase tracking-[0.14em] opacity-55">Hand over kit</span><span className="mt-1 inline-flex items-center gap-1.5 rounded-full bg-black px-2.5 py-1 text-[10px] font-black text-white"><Shirt className="h-3 w-3" /> SIZE {result.registration.tshirt_size || "L"}</span></div></div></div>}</section>;
+}
+
+function RecentFeed({ items }: { items: RecentCheckin[] }) {
+  return <section className="overflow-hidden rounded-[26px] border border-slate-200 bg-white shadow-sm"><div className="flex items-center justify-between border-b border-slate-100 px-5 py-4"><div><p className="text-[9px] font-black uppercase tracking-[0.16em] text-[#3155ff]">Arrival stream</p><h2 className="mt-1 text-sm font-black text-slate-900">Recent runners</h2></div><span className="rounded-full bg-slate-100 px-2.5 py-1 font-mono text-[10px] font-bold text-slate-500">{items.length}</span></div>{items.length === 0 ? <div className="flex min-h-48 flex-col items-center justify-center px-8 text-center"><Users className="h-8 w-8 text-slate-200" /><p className="mt-3 text-xs font-bold text-slate-500">Waiting for the first runner</p><p className="mt-1 text-[11px] leading-5 text-slate-400">Verified arrivals appear here immediately.</p></div> : <div className="max-h-[410px] divide-y divide-slate-100 overflow-y-auto">{items.map((item, index) => <div key={`${item.number}-${index}`} className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 px-5 py-3.5"><span className="grid h-8 w-8 place-items-center rounded-full bg-[#eef0ff] text-[10px] font-black text-[#3155ff]">{String(index + 1).padStart(2, "0")}</span><div className="min-w-0"><p className="truncate text-xs font-black text-slate-900">{item.name}</p><p className="mt-0.5 font-mono text-[9px] text-slate-400">#{item.number} · SIZE {item.tshirt}</p></div><span className="flex items-center gap-1 font-mono text-[9px] text-slate-400"><Clock className="h-3 w-3" />{item.time}</span></div>)}</div>}</section>;
 }

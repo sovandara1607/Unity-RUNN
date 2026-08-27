@@ -18,10 +18,11 @@ type fakeRegRepo struct {
 	regs         map[uuid.UUID]*Registration
 	payments     []Payment
 	ticketHashes map[string]uuid.UUID
+	checkedIn    map[uuid.UUID]bool
 }
 
 func newFakeRegRepo() *fakeRegRepo {
-	return &fakeRegRepo{regs: map[uuid.UUID]*Registration{}, ticketHashes: map[string]uuid.UUID{}}
+	return &fakeRegRepo{regs: map[uuid.UUID]*Registration{}, ticketHashes: map[string]uuid.UUID{}, checkedIn: map[uuid.UUID]bool{}}
 }
 
 func (f *fakeRegRepo) HasActiveRegistration(ctx context.Context, userID, eventID uuid.UUID) (bool, error) {
@@ -88,6 +89,27 @@ func (f *fakeRegRepo) GetRegistrationIDByTicketTokenHash(ctx context.Context, to
 		return uuid.Nil, ErrNotFound
 	}
 	return id, nil
+}
+
+func (f *fakeRegRepo) GetByRegistrationNumber(ctx context.Context, number string) (*Registration, error) {
+	for _, r := range f.regs {
+		if r.RegistrationNumber == number {
+			return r, nil
+		}
+	}
+	return nil, ErrNotFound
+}
+
+func (f *fakeRegRepo) RotateTicketToken(ctx context.Context, registrationID uuid.UUID, tokenHash string) error {
+	if _, ok := f.regs[registrationID]; !ok {
+		return ErrNotFound
+	}
+	f.ticketHashes[tokenHash] = registrationID
+	return nil
+}
+
+func (f *fakeRegRepo) HasCheckIn(ctx context.Context, registrationID uuid.UUID) (bool, error) {
+	return f.checkedIn[registrationID], nil
 }
 
 func (f *fakeRegRepo) ListAll(ctx context.Context, filter AdminListFilter) ([]Registration, int, error) {
@@ -186,8 +208,8 @@ func (f *fakePaymentProvider) CreatePayment(ctx context.Context, registrationID,
 	}
 	return payments.Payment{ProviderReference: "fake_ref", Status: f.status}, nil
 }
-func (f *fakePaymentProvider) GetPaymentStatus(ctx context.Context, ref string) (payments.Status, error) {
-	return f.status, nil
+func (f *fakePaymentProvider) GetPaymentStatus(ctx context.Context, ref string) (payments.Payment, error) {
+	return payments.Payment{ProviderReference: ref, Status: f.status}, nil
 }
 func (f *fakePaymentProvider) HandleWebhook(ctx context.Context, payload []byte, sig string) (payments.WebhookEvent, error) {
 	return payments.WebhookEvent{}, nil
@@ -412,6 +434,22 @@ func TestService_Cancel_ForbiddenForNonOwnerNonStaff(t *testing.T) {
 	err = svc.Cancel(context.Background(), uuid.New(), auth.RoleUser, result.Registration.ID)
 	if !errors.Is(err, ErrForbidden) {
 		t.Fatalf("Cancel() by non-owner error = %v, want ErrForbidden", err)
+	}
+}
+
+func TestService_Cancel_CheckedInRegistrationRejected(t *testing.T) {
+	svc, repo, er := newTestSetup(&fakePaymentProvider{status: payments.StatusSucceeded})
+	eventID, categoryID := seedEventAndCategory(er, 0, 10)
+	owner := uuid.New()
+	result, err := svc.Register(context.Background(), owner, eventID, validRegisterReq(categoryID))
+	if err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
+	repo.checkedIn[result.Registration.ID] = true
+
+	err = svc.Cancel(context.Background(), owner, auth.RoleUser, result.Registration.ID)
+	if !errors.Is(err, ErrCannotCancelCheckedIn) {
+		t.Fatalf("Cancel() error = %v, want ErrCannotCancelCheckedIn", err)
 	}
 }
 

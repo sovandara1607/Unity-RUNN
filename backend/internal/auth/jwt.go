@@ -13,6 +13,11 @@ import (
 // validate: bad signature, malformed, expired, or unknown claims.
 var ErrInvalidToken = errors.New("auth: invalid access token")
 
+const (
+	accessTokenIssuer   = "unity-run-club-api"
+	accessTokenAudience = "unity-run-club-web"
+)
+
 // Claims is the JWT payload for access tokens.
 type Claims struct {
 	UserID uuid.UUID `json:"sub_uuid"`
@@ -40,6 +45,8 @@ func (i *TokenIssuer) GenerateAccessToken(userID uuid.UUID, role Role) (string, 
 		Role:   role,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   userID.String(),
+			Issuer:    accessTokenIssuer,
+			Audience:  jwt.ClaimStrings{accessTokenAudience},
 			IssuedAt:  jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(now.Add(i.ttl)),
 			ID:        uuid.NewString(),
@@ -58,13 +65,15 @@ func (i *TokenIssuer) GenerateAccessToken(userID uuid.UUID, role Role) (string, 
 // returns its claims.
 func (i *TokenIssuer) ParseAccessToken(raw string) (*Claims, error) {
 	var claims Claims
-	token, err := jwt.ParseWithClaims(raw, &claims, func(t *jwt.Token) (any, error) {
-		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
-		}
+	token, err := jwt.ParseWithClaims(raw, &claims, func(_ *jwt.Token) (any, error) {
 		return i.secret, nil
-	})
-	if err != nil || !token.Valid {
+	},
+		jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}),
+		jwt.WithIssuer(accessTokenIssuer),
+		jwt.WithAudience(accessTokenAudience),
+		jwt.WithIssuedAt(),
+	)
+	if err != nil || !token.Valid || claims.UserID == uuid.Nil || !claims.Role.IsValid() || claims.Subject != claims.UserID.String() {
 		return nil, ErrInvalidToken
 	}
 	return &claims, nil

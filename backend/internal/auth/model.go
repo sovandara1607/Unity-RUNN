@@ -88,6 +88,27 @@ type RefreshToken struct {
 	CreatedAt time.Time
 }
 
+// OAuthIdentity links a local account to a stable identity-provider subject.
+// Provider access and refresh tokens are deliberately never persisted.
+type OAuthIdentity struct {
+	ID        uuid.UUID
+	UserID    uuid.UUID
+	Provider  string
+	Subject   string
+	Email     string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+// GoogleProfile is the minimum verified OpenID profile needed to sign in.
+type GoogleProfile struct {
+	Subject       string
+	Email         string
+	EmailVerified bool
+	FullName      string
+	AvatarURL     string
+}
+
 // IsActive reports whether the refresh token is neither expired nor
 // revoked as of now.
 func (t RefreshToken) IsActive(now time.Time) bool {

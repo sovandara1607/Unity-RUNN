@@ -20,8 +20,8 @@ func newTestRouter(svc *Service, tokens *auth.TokenIssuer) http.Handler {
 	h := NewHandler(svc)
 	r := chi.NewRouter()
 	r.Route("/api/v1", func(api chi.Router) {
-		api.Get("/events/{eventId}/categories/{categoryId}/availability", h.Availability)
-		api.With(auth.RequireAuth(tokens, auth.RoleUser)).Post("/events/{eventId}/registrations", h.Register)
+		api.Get("/events/{id}/categories/{categoryId}/availability", h.Availability)
+		api.With(auth.RequireAuth(tokens, auth.RoleUser)).Post("/events/{id}/registrations", h.Register)
 		api.Route("/registrations", func(reg chi.Router) {
 			reg.Use(auth.RequireAuth(tokens, auth.RoleUser))
 			reg.Get("/{id}", h.GetByID)

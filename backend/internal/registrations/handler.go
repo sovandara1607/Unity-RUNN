@@ -26,13 +26,18 @@ func NewHandler(svc *Service) *Handler {
 
 // Availability handles GET /api/v1/events/:eventId/categories/:categoryId/availability.
 func (h *Handler) Availability(w http.ResponseWriter, r *http.Request) {
+	eventID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpresponse.WriteError(w, http.StatusBadRequest, "invalid_id", "event id must be a UUID")
+		return
+	}
 	categoryID, err := uuid.Parse(chi.URLParam(r, "categoryId"))
 	if err != nil {
 		httpresponse.WriteError(w, http.StatusBadRequest, "invalid_id", "categoryId must be a UUID")
 		return
 	}
 
-	avail, err := h.svc.GetAvailability(r.Context(), categoryID)
+	avail, err := h.svc.GetAvailability(r.Context(), eventID, categoryID)
 	if errors.Is(err, events.ErrNotFound) {
 		httpresponse.WriteError(w, http.StatusNotFound, "not_found", "category not found")
 		return
@@ -53,7 +58,7 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	eventID, err := uuid.Parse(chi.URLParam(r, "eventId"))
+	eventID, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
 		httpresponse.WriteError(w, http.StatusBadRequest, "invalid_id", "eventId must be a UUID")
 		return
@@ -89,7 +94,65 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		httpresponse.WriteData(w, http.StatusCreated, map[string]any{
 			"registration": result.Registration,
 			"ticket_token": result.TicketToken,
+			"payment":      result.Payment,
 		})
+	}
+}
+
+// Payment handles GET /api/v1/registrations/:id/payment and supports
+// resuming a pending KHQR checkout after a refresh or another device visit.
+func (h *Handler) Payment(w http.ResponseWriter, r *http.Request) {
+	caller, ok := auth.UserFromContext(r.Context())
+	if !ok {
+		httpresponse.WriteError(w, http.StatusUnauthorized, "unauthorized", "missing or invalid access token")
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpresponse.WriteError(w, http.StatusBadRequest, "invalid_id", "id must be a UUID")
+		return
+	}
+	payment, err := h.svc.GetPayment(r.Context(), caller.ID, caller.Role, id)
+	writePaymentResult(w, payment, err)
+}
+
+// VerifyPayment handles POST /api/v1/registrations/:id/payment/verify. It
+// checks Bakong directly and may atomically confirm the registration.
+func (h *Handler) VerifyPayment(w http.ResponseWriter, r *http.Request) {
+	caller, ok := auth.UserFromContext(r.Context())
+	if !ok {
+		httpresponse.WriteError(w, http.StatusUnauthorized, "unauthorized", "missing or invalid access token")
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpresponse.WriteError(w, http.StatusBadRequest, "invalid_id", "id must be a UUID")
+		return
+	}
+	result, err := h.svc.VerifyPayment(r.Context(), caller.ID, caller.Role, id)
+	if err != nil {
+		writePaymentResult(w, nil, err)
+		return
+	}
+	httpresponse.WriteData(w, http.StatusOK, map[string]any{"registration": result.Registration, "payment": result.Payment})
+}
+
+func writePaymentResult(w http.ResponseWriter, payment *PaymentCheckout, err error) {
+	switch {
+	case errors.Is(err, ErrNotFound):
+		httpresponse.WriteError(w, http.StatusNotFound, "not_found", "payment not found")
+	case errors.Is(err, ErrForbidden):
+		httpresponse.WriteError(w, http.StatusForbidden, "forbidden", "you don't have access to this payment")
+	case errors.Is(err, ErrPaymentMismatch):
+		httpresponse.WriteError(w, http.StatusConflict, "payment_mismatch", "the settled payment does not match this registration")
+	case errors.Is(err, ErrPaymentUnavailable):
+		httpresponse.WriteError(w, http.StatusConflict, "payment_unavailable", "payment is not available for this registration")
+	case errors.Is(err, ErrPaymentExpired):
+		httpresponse.WriteError(w, http.StatusGone, "payment_expired", "this payment expired; choose the event again to start a new registration")
+	case err != nil:
+		httpresponse.WriteError(w, http.StatusBadGateway, "payment_provider_error", "could not verify payment with Bakong")
+	default:
+		httpresponse.WriteData(w, http.StatusOK, payment)
 	}
 }
 
@@ -137,6 +200,39 @@ func (h *Handler) ListMine(w http.ResponseWriter, r *http.Request) {
 	httpresponse.WriteData(w, http.StatusOK, map[string]any{"registrations": regs})
 }
 
+// Ticket handles POST /api/v1/registrations/:id/ticket and returns the stable
+// check-in code for a confirmed registration the caller owns.
+func (h *Handler) Ticket(w http.ResponseWriter, r *http.Request) {
+	caller, ok := auth.UserFromContext(r.Context())
+	if !ok {
+		httpresponse.WriteError(w, http.StatusUnauthorized, "unauthorized", "missing or invalid access token")
+		return
+	}
+
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpresponse.WriteError(w, http.StatusBadRequest, "invalid_id", "id must be a UUID")
+		return
+	}
+
+	token, err := h.svc.IssueTicketToken(r.Context(), caller.ID, caller.Role, id)
+	switch {
+	case errors.Is(err, ErrNotFound):
+		httpresponse.WriteError(w, http.StatusNotFound, "not_found", "registration not found")
+	case errors.Is(err, ErrForbidden):
+		httpresponse.WriteError(w, http.StatusForbidden, "forbidden", "you don't have access to this registration")
+	case errors.Is(err, ErrNotConfirmed):
+		httpresponse.WriteError(w, http.StatusConflict, "not_confirmed", "ticket is only available once registration is confirmed")
+	case err != nil:
+		httpresponse.WriteError(w, http.StatusInternalServerError, "internal_error", "failed to issue ticket")
+	default:
+		httpresponse.WriteData(w, http.StatusOK, map[string]any{
+			"ticket_token": token, // legacy response key
+			"ticket_code":  token,
+		})
+	}
+}
+
 // Cancel handles POST /api/v1/registrations/:id/cancel.
 func (h *Handler) Cancel(w http.ResponseWriter, r *http.Request) {
 	caller, ok := auth.UserFromContext(r.Context())
@@ -159,6 +255,8 @@ func (h *Handler) Cancel(w http.ResponseWriter, r *http.Request) {
 		httpresponse.WriteError(w, http.StatusForbidden, "forbidden", "you don't have access to this registration")
 	case errors.Is(err, ErrAlreadyCancelled):
 		httpresponse.WriteError(w, http.StatusConflict, "already_cancelled", "this registration is already cancelled")
+	case errors.Is(err, ErrCannotCancelCheckedIn):
+		httpresponse.WriteError(w, http.StatusConflict, "already_checked_in", "a checked-in registration cannot be cancelled")
 	case err != nil:
 		httpresponse.WriteError(w, http.StatusInternalServerError, "internal_error", "failed to cancel registration")
 	default:

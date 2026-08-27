@@ -46,6 +46,18 @@ var validStatuses = map[Status]bool{
 	StatusCancelled: true, StatusArchived: true,
 }
 
+// allStatuses returns every known event status, in no particular
+// order. Used when an admin caller lists events without an explicit
+// status filter — they should see drafts and archived events too,
+// unlike the public default (see publicStatuses).
+func allStatuses() []Status {
+	out := make([]Status, 0, len(validStatuses))
+	for s := range validStatuses {
+		out = append(out, s)
+	}
+	return out
+}
+
 // IsValid reports whether s is one of the known event statuses.
 func (s Status) IsValid() bool {
 	return validStatuses[s]

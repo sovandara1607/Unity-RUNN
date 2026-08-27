@@ -49,19 +49,23 @@ type Registration struct {
 	TshirtSize            string     `json:"tshirt_size"`
 	CreatedAt             time.Time  `json:"created_at"`
 	UpdatedAt             time.Time  `json:"updated_at"`
+	CheckedInAt           *time.Time `json:"checked_in_at,omitempty"`
 }
 
 // Payment records a payment attempt for a registration.
 type Payment struct {
-	ID                uuid.UUID `json:"id"`
-	RegistrationID    uuid.UUID `json:"registration_id"`
-	Provider          string    `json:"provider"`
-	ProviderReference string    `json:"provider_reference"`
-	AmountCents       int       `json:"amount_cents"`
-	Currency          string    `json:"currency"`
-	Status            string    `json:"status"`
-	CreatedAt         time.Time `json:"created_at"`
-	UpdatedAt         time.Time `json:"updated_at"`
+	ID                uuid.UUID  `json:"id"`
+	RegistrationID    uuid.UUID  `json:"registration_id"`
+	Provider          string     `json:"provider"`
+	ProviderReference string     `json:"provider_reference"`
+	AmountCents       int        `json:"amount_cents"`
+	Currency          string     `json:"currency"`
+	Status            string     `json:"status"`
+	CheckoutPayload   string     `json:"-"`
+	ExpiresAt         *time.Time `json:"expires_at,omitempty"`
+	VerifiedAt        *time.Time `json:"verified_at,omitempty"`
+	CreatedAt         time.Time  `json:"created_at"`
+	UpdatedAt         time.Time  `json:"updated_at"`
 }
 
 // Ticket is the QR ticket issued for a confirmed registration. The

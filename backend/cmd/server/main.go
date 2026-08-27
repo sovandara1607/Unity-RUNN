@@ -24,9 +24,14 @@ import (
 	apphttp "github.com/unity-run-club/api/internal/http"
 	"github.com/unity-run-club/api/internal/logger"
 	"github.com/unity-run-club/api/internal/notifications"
+	"github.com/unity-run-club/api/internal/objectstore"
 	"github.com/unity-run-club/api/internal/payments"
+	"github.com/unity-run-club/api/internal/realtime"
 	"github.com/unity-run-club/api/internal/redisclient"
 	"github.com/unity-run-club/api/internal/registrations"
+	"github.com/unity-run-club/api/internal/siteconfig"
+	"github.com/unity-run-club/api/internal/stats"
+	"github.com/unity-run-club/api/internal/systemstatus"
 )
 
 // Redis-backed registration tuning. Not exposed as env vars yet — the
@@ -75,7 +80,12 @@ func run() error {
 	tokens := auth.NewTokenIssuer(cfg.JWTSecret, cfg.AccessTokenTTL)
 	authRepo := auth.NewRepository(db.Pool)
 	authSvc := auth.NewService(authRepo, tokens, cfg.BcryptCost, cfg.RefreshTokenTTL)
-	authHandler := auth.NewHandler(authSvc, cfg.RefreshTokenTTL, cfg.AppEnv != "development")
+	loginLimiter := auth.NewRedisAttemptLimiter(redisClient.Raw(), 10, 15*time.Minute)
+	authHandler := auth.NewHandler(authSvc, cfg.RefreshTokenTTL, cfg.AppEnv != "development", loginLimiter)
+	authHandler.ConfigureGoogle(auth.GoogleOAuthConfig{
+		ClientID: cfg.GoogleOAuthClientID, ClientSecret: cfg.GoogleOAuthClientSecret,
+		RedirectURL: cfg.GoogleOAuthRedirectURL, PublicAppURL: cfg.PublicAppURL,
+	})
 
 	// notifications wiring comes before events/registrations: both of
 	// those define their own notifier interfaces (no import of
@@ -87,22 +97,39 @@ func run() error {
 
 	eventsRepo := events.NewRepository(db.Pool)
 	regRepo := registrations.NewRepository(db.Pool)
+	uploadStore := objectstore.Store(objectstore.NewLocal(cfg.UploadDir, "/uploads"))
+	var mediaHandler *objectstore.MediaHandler
+	if cfg.ObjectStorageProvider == "r2" {
+		r2Store, err := objectstore.NewR2(
+			cfg.R2Endpoint,
+			cfg.R2AccessKeyID,
+			cfg.R2SecretAccessKey,
+			cfg.R2Bucket,
+			cfg.R2PublicBaseURL,
+		)
+		if err != nil {
+			log.Error("object_storage_init_failed", "provider", "r2", "error", err)
+			return err
+		}
+		uploadStore = r2Store
+		mediaHandler = objectstore.NewMediaHandler(r2Store)
+	}
 
 	eventNotifier := notifications.NewEventNotifier(notifSvc, regRepo, log)
 	eventsSvc := events.NewService(eventsRepo, eventNotifier)
-	eventsHandler := events.NewHandler(eventsSvc)
+	eventsHandler := events.NewHandlerWithStore(eventsSvc, uploadStore)
 
 	regLocker := registrations.NewLocker(redisClient.Raw(), registrationLockTTL)
 	regAvailCache := registrations.NewAvailabilityCache(redisClient.Raw(), availabilityCacheTTL)
 	regRateLimiter := registrations.NewRateLimiter(redisClient.Raw(), registrationRateLimit, registrationRateWindow)
-	// MockProvider is the only payment provider until a real Cambodian
-	// gateway is integrated (see internal/payments.Provider) — it must
-	// never run in production.
-	if cfg.AppEnv == "production" {
-		log.Warn("mock_payment_provider_in_production",
-			"detail", "no real payment gateway is wired yet; all paid registrations will auto-succeed")
+	if cfg.AppEnv == "production" && cfg.PaymentProvider == "mock" {
+		return errors.New("PAYMENT_PROVIDER=mock is not allowed in production")
 	}
-	paymentProvider := payments.NewMockProvider()
+	paymentProvider, err := buildPaymentProvider(cfg)
+	if err != nil {
+		log.Error("payment_provider_init_failed", "provider", cfg.PaymentProvider, "error", err)
+		return err
+	}
 	regNotifier := notifications.NewRegistrationNotifier(notifSvc)
 	regSvc := registrations.NewService(regRepo, eventsRepo, paymentProvider, regLocker, regAvailCache, regRateLimiter, regNotifier)
 	regHandler := registrations.NewHandler(regSvc)
@@ -114,11 +141,18 @@ func run() error {
 	checkinSvc := checkin.NewService(checkinRepo, regRepo, auditSvc)
 	checkinHandler := checkin.NewHandler(checkinSvc)
 
-	adminHandler := admin.NewHandler(regSvc)
+	adminHandler := admin.NewHandler(regSvc, auditRepo, authSvc, auditSvc)
+	statsHandler := stats.NewHandler(stats.NewRepository(db.Pool))
+	realtimePublisher := realtime.NewPublisher(redisClient.Raw(), log)
+	siteConfigSvc := siteconfig.NewService(siteconfig.NewRepository(db.Pool), realtimePublisher)
+	siteConfigHandler := siteconfig.NewHandlerWithStore(siteConfigSvc, uploadStore, auditSvc)
+	storageHealth, _ := uploadStore.(systemstatus.HealthChecker)
+	systemStatusSvc := systemstatus.NewService(cfg, db.Pool, redisClient.Raw(), storageHealth)
+	systemStatusHandler := systemstatus.NewHandler(systemStatusSvc)
 
 	emailSender := buildEmailSender(cfg, log)
 	notifWorker := notifications.NewWorker(notifRepo, notifQueue, regRepo, eventsRepo, emailSender, log,
-		cfg.NotificationSweepInterval, cfg.NotificationMaxAttempts)
+		cfg.NotificationSweepInterval, cfg.NotificationMaxAttempts, cfg.PublicAppURL)
 	reminderScheduler := notifications.NewReminderScheduler(notifSvc, eventsRepo, regRepo, log,
 		cfg.ReminderPollInterval, cfg.ReminderWindow)
 
@@ -132,12 +166,17 @@ func run() error {
 		DB:                   db,
 		Redis:                redisClient,
 		CORSAllowedOrigins:   cfg.CORSAllowedOrigins,
+		UploadDir:            cfg.UploadDir,
 		Tokens:               tokens,
 		AuthHandler:          authHandler,
 		EventsHandler:        eventsHandler,
 		RegistrationsHandler: regHandler,
 		CheckinHandler:       checkinHandler,
 		AdminHandler:         adminHandler,
+		StatsHandler:         statsHandler,
+		SiteConfigHandler:    siteConfigHandler,
+		SystemStatusHandler:  systemStatusHandler,
+		MediaHandler:         mediaHandler,
 	})
 
 	srv := apphttp.NewServer(":"+cfg.Port, router)
@@ -175,6 +214,21 @@ func run() error {
 	}
 
 	return nil
+}
+
+func buildPaymentProvider(cfg *config.Config) (payments.Provider, error) {
+	if cfg.PaymentProvider == "mock" {
+		return payments.NewMockProvider(), nil
+	}
+	return payments.NewBakongProvider(payments.BakongConfig{
+		BaseURL: cfg.BakongBaseURL, Token: cfg.BakongToken, PaymentTTL: cfg.BakongPaymentTTL,
+		Merchant: payments.KHQRMerchant{
+			AccountID: cfg.BakongAccountID, MerchantID: cfg.BakongMerchantID,
+			AcquiringBank: cfg.BakongAcquiringBank, MerchantName: cfg.BakongMerchantName,
+			MerchantCity: cfg.BakongMerchantCity, MCC: cfg.BakongMCC,
+			StoreLabel: cfg.BakongStoreLabel, TerminalLabel: cfg.BakongTerminalLabel,
+		},
+	})
 }
 
 // buildEmailSender returns a real SMTPSender when SMTP is configured,

@@ -17,6 +17,8 @@ const refreshCookiePath = "/api/v1/auth"
 type Handler struct {
 	svc             *Service
 	refreshTokenTTL time.Duration
+	loginLimiter    AttemptLimiter
+	google          *googleOAuthFlow
 	// isProduction controls cookie SameSite/Secure flags: Lax+non-Secure
 	// in development (so plain-HTTP localhost testing works), None+Secure
 	// otherwise (required for a cross-site Vercel <-> API deployment).
@@ -24,8 +26,12 @@ type Handler struct {
 }
 
 // NewHandler builds a Handler backed by svc.
-func NewHandler(svc *Service, refreshTokenTTL time.Duration, isProduction bool) *Handler {
-	return &Handler{svc: svc, refreshTokenTTL: refreshTokenTTL, isProduction: isProduction}
+func NewHandler(svc *Service, refreshTokenTTL time.Duration, isProduction bool, loginLimiters ...AttemptLimiter) *Handler {
+	h := &Handler{svc: svc, refreshTokenTTL: refreshTokenTTL, isProduction: isProduction}
+	if len(loginLimiters) > 0 {
+		h.loginLimiter = loginLimiters[0]
+	}
+	return h
 }
 
 type userResponse struct {
@@ -45,6 +51,7 @@ type authResponse struct {
 
 // Register handles POST /api/v1/auth/register.
 func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	var req RegisterRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httpresponse.WriteError(w, http.StatusBadRequest, "invalid_body", "malformed JSON body")
@@ -72,6 +79,7 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 
 // Login handles POST /api/v1/auth/login.
 func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	var req LoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httpresponse.WriteError(w, http.StatusBadRequest, "invalid_body", "malformed JSON body")
@@ -81,6 +89,14 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		httpresponse.WriteError(w, http.StatusUnprocessableEntity, "validation_failed", err.Error())
 		return
 	}
+	if h.loginLimiter != nil {
+		allowed, _ := h.loginLimiter.Allow(r.Context(), req.Email)
+		if !allowed {
+			w.Header().Set("Retry-After", "900")
+			httpresponse.WriteError(w, http.StatusTooManyRequests, "login_rate_limited", "too many login attempts; try again later")
+			return
+		}
+	}
 
 	result, err := h.svc.Login(r.Context(), req)
 	switch {
@@ -89,6 +105,9 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		httpresponse.WriteError(w, http.StatusInternalServerError, "internal_error", "failed to log in")
 	default:
+		if h.loginLimiter != nil {
+			_ = h.loginLimiter.Reset(r.Context(), req.Email)
+		}
 		h.setRefreshCookie(w, result.RefreshToken)
 		httpresponse.WriteData(w, http.StatusOK, authResponse{
 			AccessToken: result.AccessToken,
@@ -99,6 +118,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 
 // Refresh handles POST /api/v1/auth/refresh.
 func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	cookie, err := r.Cookie(refreshCookieName)
 	if err != nil || cookie.Value == "" {
 		httpresponse.WriteError(w, http.StatusUnauthorized, "unauthorized", "missing refresh token")
@@ -123,6 +143,7 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 
 // Logout handles POST /api/v1/auth/logout.
 func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	if cookie, err := r.Cookie(refreshCookieName); err == nil && cookie.Value != "" {
 		_ = h.svc.Logout(r.Context(), cookie.Value) // best-effort; always clear the cookie
 	}
@@ -144,10 +165,19 @@ func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	u, err := h.svc.GetUserByID(r.Context(), authUser.ID)
+	if err != nil {
+		httpresponse.WriteError(w, http.StatusInternalServerError, "internal_error", "failed to load account")
+		return
+	}
+
 	httpresponse.WriteData(w, http.StatusOK, map[string]any{
-		"id":      authUser.ID,
-		"role":    authUser.Role,
-		"profile": profile,
+		"id":         authUser.ID,
+		"role":       authUser.Role,
+		"email":      u.Email,
+		"profile":    profile,
+		"created_at": u.CreatedAt,
+		"updated_at": u.UpdatedAt,
 	})
 }
 
@@ -201,6 +231,7 @@ func (h *Handler) clearRefreshCookie(w http.ResponseWriter) {
 		Secure:   h.isProduction,
 		SameSite: h.sameSite(),
 		MaxAge:   -1,
+		Expires:  time.Unix(1, 0),
 	})
 }
 

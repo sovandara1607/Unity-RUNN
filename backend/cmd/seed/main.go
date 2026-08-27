@@ -79,9 +79,12 @@ func run() error {
 		return err
 	}
 
-	// Clear and re-insert child rows so re-running stays idempotent
-	// without needing per-row upsert keys.
-	for _, table := range []string{"event_categories", "event_schedules", "event_faqs", "event_rules"} {
+	// Clear and re-insert schedule/FAQ/rule rows so re-running stays
+	// idempotent without needing per-row upsert keys. Categories are
+	// upserted instead (see below): once a category has registrations,
+	// deleting it fails (event_categories -> registrations is ON DELETE
+	// RESTRICT, by design — see migration 00018).
+	for _, table := range []string{"event_schedules", "event_faqs", "event_rules"} {
 		if _, err := tx.Exec(ctx, "DELETE FROM "+table+" WHERE event_id = $1", eventID); err != nil {
 			return err
 		}
@@ -93,7 +96,14 @@ func run() error {
 		VALUES
 			($1, '5K', '5K', 1500, 300, $2, 'OPEN'),
 			($1, '10K', '10K', 2500, 200, $2, 'OPEN'),
-			($1, 'Fun Run', '3K', 0, 500, $2, 'OPEN')`, eventID, categoryDeadline)
+			($1, 'Fun Run', '3K', 0, 500, $2, 'OPEN')
+		ON CONFLICT (event_id, name) DO UPDATE SET
+			distance = EXCLUDED.distance,
+			price_cents = EXCLUDED.price_cents,
+			capacity = EXCLUDED.capacity,
+			registration_deadline = EXCLUDED.registration_deadline,
+			status = EXCLUDED.status,
+			updated_at = now()`, eventID, categoryDeadline)
 	if err != nil {
 		return err
 	}

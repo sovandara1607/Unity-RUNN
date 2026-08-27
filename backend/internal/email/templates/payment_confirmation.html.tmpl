@@ -1,14 +1,16 @@
-<!DOCTYPE html>
-<html>
-<body style="font-family: sans-serif; color: #1a1a1a;">
-  <h1>Payment received</h1>
-  <p>Hi {{.FullName}},</p>
-  <p>We've received your payment for <strong>{{.EventName}}</strong> ({{.CategoryName}}).</p>
-  <ul>
-    <li>Registration number: <strong>{{.RegistrationNumber}}</strong></li>
-    <li>Amount: {{.AmountFormatted}}</li>
-  </ul>
-  <p>Thanks for running with us!</p>
-  <p>— Unity Run Club</p>
-</body>
-</html>
+{{define "emailTitle"}}Payment verified{{end}}
+{{define "preheader"}}Your payment was verified and your official receipt is attached.{{end}}
+{{define "emailContent"}}
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+  <tr><td style="padding:38px 34px 18px;color:#3155ff;font-size:11px;font-weight:800;letter-spacing:2px;text-transform:uppercase;">Payment desk / verified</td></tr>
+  <tr><td style="padding:0 34px 12px;color:#111;font-size:42px;line-height:1.02;font-weight:900;letter-spacing:-1.8px;text-transform:uppercase;">Payment received.</td></tr>
+  <tr><td style="padding:0 34px 30px;color:#5c5c58;font-size:16px;line-height:1.65;">Hi {{.FullName}}, your payment for <strong style="color:#111;">{{.EventName}}</strong> has cleared. The attached PDF is your official receipt.</td></tr>
+  <tr><td style="padding:0 34px 30px;"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#d9ff00;border:2px solid #111;"><tr><td style="padding:22px;color:#364000;font-size:10px;font-weight:900;letter-spacing:1.6px;text-transform:uppercase;">Total paid</td><td align="right" style="padding:22px;color:#111;font-size:28px;font-weight:900;">{{.AmountFormatted}}</td></tr></table></td></tr>
+  <tr><td style="padding:0 34px 30px;"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border-top:1px solid #d7d7d2;">
+    <tr><td style="padding:17px 0;color:#8a8a84;font-size:10px;font-weight:800;letter-spacing:1.5px;text-transform:uppercase;">Registration</td><td align="right" style="padding:17px 0;color:#111;font-size:14px;font-weight:800;">{{.RegistrationNumber}}</td></tr>
+    <tr><td style="padding:0 0 17px;color:#8a8a84;font-size:10px;font-weight:800;letter-spacing:1.5px;text-transform:uppercase;">Provider</td><td align="right" style="padding:0 0 17px;color:#111;font-size:14px;font-weight:800;text-transform:uppercase;">{{.PaymentProvider}}</td></tr>
+    <tr><td style="padding:0 0 17px;color:#8a8a84;font-size:10px;font-weight:800;letter-spacing:1.5px;text-transform:uppercase;">Reference</td><td align="right" style="padding:0 0 17px;color:#111;font-size:12px;font-weight:800;">{{.PaymentReference}}</td></tr>
+  </table></td></tr>
+  <tr><td style="padding:0 34px 36px;"><a href="{{.DashboardURL}}" style="display:inline-block;background:#111;color:#fff;text-decoration:none;padding:15px 21px;font-size:12px;font-weight:900;letter-spacing:1.2px;text-transform:uppercase;">View entry →</a></td></tr>
+  <tr><td style="background:#3155ff;padding:17px 34px;color:#fff;font-size:11px;font-weight:800;letter-spacing:1.1px;text-transform:uppercase;">Attachment: verified payment receipt PDF</td></tr>
+</table>{{end}}

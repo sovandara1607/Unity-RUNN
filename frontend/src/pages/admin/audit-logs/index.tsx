@@ -1,22 +1,15 @@
 import React, { useState, useEffect } from "react";
-import {
-  FileText,
-  Search,
-  Filter,
-  ShieldAlert,
-  Clock,
-  User,
-  Activity,
-  CheckCircle,
-  Tag,
-} from "lucide-react";
+import { Search, User } from "lucide-react";
 import { AdminLayout } from "../../../components/admin/AdminLayout";
+import { Skeleton } from "../../../components/Skeleton";
 import { api } from "../../../lib/api";
+import { withMinSkeleton } from "../../../lib/withMinSkeleton";
 import type { AuditLog } from "../../../types";
 
 export default function AdminAuditLogsPage() {
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [entityFilter, setEntityFilter] = useState<string>("ALL");
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -24,61 +17,18 @@ export default function AdminAuditLogsPage() {
     async function loadLogs() {
       try {
         setLoading(true);
-        // Fallback / initial sample logs
-        const sampleLogs: AuditLog[] = [
-          {
-            id: "log-101",
-            actor_user_id: "admin-001",
-            action: "event.created",
-            entity_type: "events",
-            entity_id: "ev-phnom-penh-half-2026",
-            metadata: { name: "Unity Phnom Penh Half Marathon 2026", status: "DRAFT" },
-            created_at: new Date(Date.now() - 1000 * 60 * 30).toISOString(),
-          },
-          {
-            id: "log-102",
-            actor_user_id: "admin-001",
-            action: "event.status_changed",
-            entity_type: "events",
-            entity_id: "ev-phnom-penh-half-2026",
-            metadata: { old_status: "DRAFT", new_status: "REGISTRATION_OPEN" },
-            created_at: new Date(Date.now() - 1000 * 60 * 20).toISOString(),
-          },
-          {
-            id: "log-103",
-            actor_user_id: "system",
-            action: "registration.confirmed",
-            entity_type: "registrations",
-            entity_id: "reg-94819",
-            metadata: { full_name: "Chann Vuthy", category: "10K", amount_cents: 2500 },
-            created_at: new Date(Date.now() - 1000 * 60 * 12).toISOString(),
-          },
-          {
-            id: "log-104",
-            actor_user_id: "staff-sokha",
-            action: "checkin.verified",
-            entity_type: "check_ins",
-            entity_id: "reg-94819",
-            metadata: { station: "Gate A", tshirt_given: "L" },
-            created_at: new Date(Date.now() - 1000 * 60 * 3).toISOString(),
-          },
-          {
-            id: "log-105",
-            actor_user_id: "superadmin-001",
-            action: "user.role_promoted",
-            entity_type: "users",
-            entity_id: "u-volunteer-02",
-            metadata: { new_role: "STAFF" },
-            created_at: new Date(Date.now() - 1000 * 60 * 60 * 2).toISOString(),
-          },
-        ];
-        setLogs(sampleLogs);
+        setError(null);
+        const data = await withMinSkeleton(() => api.adminListAuditLogs({ entity_type: entityFilter, limit: 200 }));
+        setLogs(data);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to load audit logs");
+        setLogs([]);
       } finally {
         setLoading(false);
       }
     }
     loadLogs();
-  }, []);
+  }, [entityFilter]);
 
   const filteredLogs = logs.filter((log) => {
     if (entityFilter !== "ALL" && log.entity_type !== entityFilter) return false;
@@ -86,8 +36,8 @@ export default function AdminAuditLogsPage() {
       const q = searchQuery.toLowerCase();
       const match =
         log.action.toLowerCase().includes(q) ||
-        log.entity_id.toLowerCase().includes(q) ||
-        log.actor_user_id.toLowerCase().includes(q);
+        (log.entity_id || "").toLowerCase().includes(q) ||
+        (log.actor_id || "").toLowerCase().includes(q);
       if (!match) return false;
     }
     return true;
@@ -141,6 +91,30 @@ export default function AdminAuditLogsPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 font-mono text-[11px]">
+              {error && (
+                <tr>
+                  <td colSpan={5} className="py-10 px-4 text-center text-rose-600 font-sans">{error}</td>
+                </tr>
+              )}
+              {!error && loading && [0, 1, 2, 3, 4, 5].map((i) => (
+                <tr key={i}>
+                  <td colSpan={5} className="px-4 py-3.5">
+                    <div className="flex items-center gap-4">
+                      <Skeleton tone="light" className="h-6 w-28 rounded-md" />
+                      <Skeleton tone="light" className="h-4 flex-1 max-w-[220px]" />
+                      <Skeleton tone="light" className="h-4 w-40" />
+                      <Skeleton tone="light" className="h-4 w-16 ml-auto" />
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {!error && !loading && filteredLogs.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="py-10 px-4 text-center text-slate-400 font-sans">
+                    No audit entries yet. Check-ins and staff actions will appear here.
+                  </td>
+                </tr>
+              )}
               {filteredLogs.map((log) => (
                 <tr key={log.id} className="hover:bg-slate-50/75 transition-colors">
                   <td className="py-3.5 px-4 font-bold text-slate-900 font-sans">
@@ -152,16 +126,16 @@ export default function AdminAuditLogsPage() {
                     <span className="text-slate-400 uppercase text-[10px] mr-1 block">
                       [{log.entity_type}]
                     </span>
-                    <span className="text-slate-800">{log.entity_id}</span>
+                    <span className="text-slate-800">{log.entity_id ?? "-"}</span>
                   </td>
                   <td className="py-3.5 px-4 text-slate-600">
                     <div className="flex items-center gap-1.5 font-sans">
                       <User className="w-3.5 h-3.5 text-slate-400" />
-                      <span>{log.actor_user_id}</span>
+                      <span>{log.actor_id ?? "system"}</span>
                     </div>
                   </td>
                   <td className="py-3.5 px-4 text-slate-500 max-w-xs truncate">
-                    {log.metadata ? JSON.stringify(log.metadata) : "-"}
+                    {log.metadata && Object.keys(log.metadata).length > 0 ? JSON.stringify(log.metadata) : "-"}
                   </td>
                   <td className="py-3.5 px-4 text-right text-slate-500 font-sans">
                     {new Date(log.created_at).toLocaleTimeString([], {

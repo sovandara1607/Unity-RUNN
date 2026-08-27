@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -28,6 +29,13 @@ type registrationGetter interface {
 	GetByID(ctx context.Context, id uuid.UUID) (*registrations.Registration, error)
 }
 
+// paymentGetter is optional so worker test doubles and alternative read models
+// do not need payment support. The production registration repository provides
+// it and payment confirmations require it for the official receipt.
+type paymentGetter interface {
+	GetPaymentForRegistration(ctx context.Context, registrationID uuid.UUID) (*registrations.Payment, error)
+}
+
 // eventGetter is the read-only slice of events the worker needs.
 type eventGetter interface {
 	GetByID(ctx context.Context, id uuid.UUID) (*events.Event, error)
@@ -49,14 +57,21 @@ type Worker struct {
 	sweepInterval time.Duration
 	sweepAge      time.Duration
 	maxAttempts   int
+	publicAppURL  string
 }
 
 // NewWorker builds a Worker.
 func NewWorker(repo workerRepository, q *Queue, regs registrationGetter, evts eventGetter,
-	sender email.Sender, log *slog.Logger, sweepInterval time.Duration, maxAttempts int) *Worker {
+	sender email.Sender, log *slog.Logger, sweepInterval time.Duration, maxAttempts int,
+	publicAppURLs ...string) *Worker {
+	publicAppURL := "http://localhost:3000"
+	if len(publicAppURLs) > 0 && publicAppURLs[0] != "" {
+		publicAppURL = publicAppURLs[0]
+	}
 	return &Worker{
 		repo: repo, queue: q, regs: regs, evts: evts, sender: sender, log: log,
 		sweepInterval: sweepInterval, sweepAge: 5 * time.Second, maxAttempts: maxAttempts,
+		publicAppURL: publicAppURL,
 	}
 }
 
@@ -144,7 +159,14 @@ func (w *Worker) send(ctx context.Context, n *Notification) error {
 		return fmt.Errorf("render: %w", err)
 	}
 
-	return w.sender.Send(ctx, email.Message{To: recipient, Subject: subject, HTML: html, Text: text})
+	attachments, err := email.AttachmentsFor(email.Type(n.Type), data)
+	if err != nil {
+		return fmt.Errorf("build attachments: %w", err)
+	}
+
+	return w.sender.Send(ctx, email.Message{
+		To: recipient, Subject: subject, HTML: html, Text: text, Attachments: attachments,
+	})
 }
 
 func (w *Worker) buildTemplateData(ctx context.Context, n *Notification) (email.TemplateData, string, error) {
@@ -169,7 +191,10 @@ func (w *Worker) buildTemplateData(ctx context.Context, n *Notification) (email.
 		CategoryName:       category.Name,
 		RegistrationNumber: reg.RegistrationNumber,
 		EventDate:          ev.EventDate.Format("Monday, January 2, 2006"),
+		StartTime:          ev.StartTime.Format("3:04 PM"),
 		Location:           ev.Location,
+		TshirtSize:         reg.TshirtSize,
+		DashboardURL:       strings.TrimRight(w.publicAppURL, "/") + "/dashboard",
 	}
 
 	if amountCents, ok := n.Payload["amount_cents"].(float64); ok {
@@ -179,7 +204,35 @@ func (w *Worker) buildTemplateData(ctx context.Context, n *Notification) (email.
 		data.ChangedFields = joinAny(changed)
 	}
 
+	if n.Type == TypePaymentConfirmation {
+		payments, ok := w.regs.(paymentGetter)
+		if !ok {
+			return email.TemplateData{}, "", errors.New("registration repository cannot load payment receipt")
+		}
+		payment, err := payments.GetPaymentForRegistration(ctx, reg.ID)
+		if err != nil {
+			return email.TemplateData{}, "", fmt.Errorf("load payment receipt: %w", err)
+		}
+		data.PaymentProvider = payment.Provider
+		data.PaymentReference = payment.ProviderReference
+		data.AmountFormatted = formatPaymentAmount(payment.AmountCents, payment.Currency)
+		if payment.VerifiedAt != nil {
+			data.PaymentVerifiedAt = payment.VerifiedAt.Format("02 Jan 2006, 15:04 MST")
+		}
+	}
+
 	return data, n.RecipientEmail, nil
+}
+
+func formatPaymentAmount(amountCents int, currency string) string {
+	switch strings.ToUpper(strings.TrimSpace(currency)) {
+	case "KHR":
+		return fmt.Sprintf("KHR %d", amountCents)
+	case "USD", "":
+		return fmt.Sprintf("$%.2f USD", float64(amountCents)/100)
+	default:
+		return fmt.Sprintf("%s %.2f", strings.ToUpper(currency), float64(amountCents)/100)
+	}
 }
 
 func joinAny(items []any) string {

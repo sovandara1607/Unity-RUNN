@@ -16,6 +16,7 @@ type fakeAuthRepo struct {
 	usersByEmail map[string]*User
 	profiles     map[uuid.UUID]*Profile // keyed by user ID
 	tokens       map[string]*RefreshToken
+	identities   map[string]*OAuthIdentity
 }
 
 func newFakeAuthRepo() *fakeAuthRepo {
@@ -24,7 +25,28 @@ func newFakeAuthRepo() *fakeAuthRepo {
 		usersByEmail: map[string]*User{},
 		profiles:     map[uuid.UUID]*Profile{},
 		tokens:       map[string]*RefreshToken{},
+		identities:   map[string]*OAuthIdentity{},
 	}
+}
+
+func identityKey(provider, subject string) string { return provider + "\x00" + subject }
+
+func (f *fakeAuthRepo) GetUserByIdentity(ctx context.Context, provider, subject string) (*User, error) {
+	identity, ok := f.identities[identityKey(provider, subject)]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	return f.GetUserByID(ctx, identity.UserID)
+}
+
+func (f *fakeAuthRepo) LinkIdentity(_ context.Context, identity *OAuthIdentity) error {
+	key := identityKey(identity.Provider, identity.Subject)
+	if _, exists := f.identities[key]; !exists {
+		copy := *identity
+		copy.ID = uuid.New()
+		f.identities[key] = &copy
+	}
+	return nil
 }
 
 func (f *fakeAuthRepo) CreateUserWithProfile(ctx context.Context, u *User, p *Profile) error {
@@ -100,6 +122,26 @@ func (f *fakeAuthRepo) RevokeRefreshToken(ctx context.Context, id uuid.UUID, now
 	return ErrNotFound
 }
 
+func (f *fakeAuthRepo) ListUsers(ctx context.Context, role *Role, limit, offset int) ([]User, int, error) {
+	users := make([]User, 0, len(f.usersByID))
+	for _, user := range f.usersByID {
+		if role == nil || user.Role == *role {
+			users = append(users, *user)
+		}
+	}
+	return users, len(users), nil
+}
+
+func (f *fakeAuthRepo) UpdateUserRole(ctx context.Context, id uuid.UUID, role Role) (*User, error) {
+	user, ok := f.usersByID[id]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	user.Role = role
+	user.UpdatedAt = time.Now()
+	return user, nil
+}
+
 func newTestService() (*Service, *fakeAuthRepo) {
 	repo := newFakeAuthRepo()
 	tokens := NewTokenIssuer("test-secret", time.Hour)
@@ -109,6 +151,57 @@ func newTestService() (*Service, *fakeAuthRepo) {
 
 func validRegisterReq() RegisterRequest {
 	return RegisterRequest{Email: "runner@unityrunclub.com", Password: "hunter22", FullName: "Test Runner"}
+}
+
+func TestService_LoginWithGoogle_CreatesAndReusesLinkedAccount(t *testing.T) {
+	svc, repo := newTestService()
+	profile := GoogleProfile{
+		Subject: "google-sub-1", Email: "Runner@Example.com", EmailVerified: true,
+		FullName: "Google Runner", AvatarURL: "https://example.com/avatar.jpg",
+	}
+	first, err := svc.LoginWithGoogle(context.Background(), profile)
+	if err != nil {
+		t.Fatalf("LoginWithGoogle() error = %v", err)
+	}
+	second, err := svc.LoginWithGoogle(context.Background(), profile)
+	if err != nil {
+		t.Fatalf("second LoginWithGoogle() error = %v", err)
+	}
+	if first.User.ID != second.User.ID || len(repo.usersByID) != 1 {
+		t.Fatalf("Google login did not reuse account: first=%s second=%s users=%d", first.User.ID, second.User.ID, len(repo.usersByID))
+	}
+	if first.User.Email != "runner@example.com" {
+		t.Fatalf("normalized email = %q", first.User.Email)
+	}
+}
+
+func TestService_LoginWithGoogle_LinksVerifiedExistingEmail(t *testing.T) {
+	svc, repo := newTestService()
+	existing, err := svc.Register(context.Background(), RegisterRequest{
+		Email: "runner@example.com", Password: "hunter22", FullName: "Existing Runner",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := svc.LoginWithGoogle(context.Background(), GoogleProfile{
+		Subject: "google-sub-2", Email: "runner@example.com", EmailVerified: true, FullName: "Google Runner",
+	})
+	if err != nil {
+		t.Fatalf("LoginWithGoogle() error = %v", err)
+	}
+	if result.User.ID != existing.User.ID || len(repo.usersByID) != 1 {
+		t.Fatal("verified Google email was not linked to the existing account")
+	}
+}
+
+func TestService_LoginWithGoogle_RejectsUnverifiedEmail(t *testing.T) {
+	svc, _ := newTestService()
+	_, err := svc.LoginWithGoogle(context.Background(), GoogleProfile{
+		Subject: "google-sub-3", Email: "runner@example.com", EmailVerified: false,
+	})
+	if !errors.Is(err, ErrUnverifiedOAuthEmail) {
+		t.Fatalf("LoginWithGoogle() error = %v, want ErrUnverifiedOAuthEmail", err)
+	}
 }
 
 func TestService_Register_Success(t *testing.T) {
@@ -137,6 +230,22 @@ func TestService_Register_DuplicateEmailRejected(t *testing.T) {
 	_, err := svc.Register(ctx, validRegisterReq())
 	if !errors.Is(err, ErrEmailTaken) {
 		t.Fatalf("second Register() error = %v, want ErrEmailTaken", err)
+	}
+}
+
+func TestService_EmailIdentityIsCaseInsensitive(t *testing.T) {
+	svc, _ := newTestService()
+	ctx := context.Background()
+	req := validRegisterReq()
+	req.Email = " Runner@UnityRunClub.COM "
+	if _, err := svc.Register(ctx, req); err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
+	if _, err := svc.Login(ctx, LoginRequest{Email: "runner@unityrunclub.com", Password: req.Password}); err != nil {
+		t.Fatalf("case-normalized Login() error = %v", err)
+	}
+	if _, err := svc.Register(ctx, validRegisterReq()); !errors.Is(err, ErrEmailTaken) {
+		t.Fatalf("case-variant duplicate error = %v, want ErrEmailTaken", err)
 	}
 }
 
@@ -248,6 +357,17 @@ func TestService_Logout_UnknownTokenIsNoop(t *testing.T) {
 
 	if err := svc.Logout(context.Background(), "not-a-real-token"); err != nil {
 		t.Fatalf("Logout() error = %v, want nil (idempotent)", err)
+	}
+}
+
+func TestService_UpdateUserRole_PreventsSelfDemotion(t *testing.T) {
+	svc, repo := newTestService()
+	actorID := uuid.New()
+	repo.usersByID[actorID] = &User{ID: actorID, Role: RoleSuperAdmin}
+
+	_, err := svc.UpdateUserRole(context.Background(), actorID, actorID, RoleAdmin)
+	if !errors.Is(err, ErrCannotDemoteSelf) {
+		t.Fatalf("UpdateUserRole() error = %v, want ErrCannotDemoteSelf", err)
 	}
 }
 

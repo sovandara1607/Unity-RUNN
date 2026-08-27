@@ -37,10 +37,11 @@ func (f *fakeCheckinRepo) Create(ctx context.Context, registrationID, staffUserI
 type fakeRegistrationsReader struct {
 	byTokenHash map[string]uuid.UUID
 	byID        map[uuid.UUID]*registrations.Registration
+	byNumber    map[string]uuid.UUID
 }
 
 func newFakeRegistrationsReader() *fakeRegistrationsReader {
-	return &fakeRegistrationsReader{byTokenHash: map[string]uuid.UUID{}, byID: map[uuid.UUID]*registrations.Registration{}}
+	return &fakeRegistrationsReader{byTokenHash: map[string]uuid.UUID{}, byID: map[uuid.UUID]*registrations.Registration{}, byNumber: map[string]uuid.UUID{}}
 }
 
 func (f *fakeRegistrationsReader) GetRegistrationIDByTicketTokenHash(ctx context.Context, hash string) (uuid.UUID, error) {
@@ -49,6 +50,14 @@ func (f *fakeRegistrationsReader) GetRegistrationIDByTicketTokenHash(ctx context
 		return uuid.Nil, registrations.ErrNotFound
 	}
 	return id, nil
+}
+
+func (f *fakeRegistrationsReader) GetByRegistrationNumber(ctx context.Context, number string) (*registrations.Registration, error) {
+	id, ok := f.byNumber[number]
+	if !ok {
+		return nil, registrations.ErrNotFound
+	}
+	return f.GetByID(ctx, id)
 }
 
 func (f *fakeRegistrationsReader) GetByID(ctx context.Context, id uuid.UUID) (*registrations.Registration, error) {
@@ -86,7 +95,7 @@ func TestService_CheckIn_Success(t *testing.T) {
 	svc, _, regs := newTestService()
 	regID := regs.seedConfirmed("raw-token-1")
 
-	result, err := svc.CheckIn(context.Background(), uuid.New(), "raw-token-1")
+	result, err := svc.CheckIn(context.Background(), uuid.New(), nil, "raw-token-1")
 	if err != nil {
 		t.Fatalf("CheckIn() error = %v", err)
 	}
@@ -98,7 +107,7 @@ func TestService_CheckIn_Success(t *testing.T) {
 func TestService_CheckIn_InvalidToken(t *testing.T) {
 	svc, _, _ := newTestService()
 
-	_, err := svc.CheckIn(context.Background(), uuid.New(), "no-such-token")
+	_, err := svc.CheckIn(context.Background(), uuid.New(), nil, "no-such-token")
 	if !errors.Is(err, ErrInvalidToken) {
 		t.Fatalf("CheckIn() error = %v, want ErrInvalidToken", err)
 	}
@@ -110,7 +119,7 @@ func TestService_CheckIn_NotConfirmedRejected(t *testing.T) {
 	regs.byTokenHash[tokenhash.Hash("pending-token")] = id
 	regs.byID[id] = &registrations.Registration{ID: id, Status: registrations.StatusPending}
 
-	_, err := svc.CheckIn(context.Background(), uuid.New(), "pending-token")
+	_, err := svc.CheckIn(context.Background(), uuid.New(), nil, "pending-token")
 	if !errors.Is(err, ErrNotConfirmed) {
 		t.Fatalf("CheckIn() error = %v, want ErrNotConfirmed", err)
 	}
@@ -121,11 +130,11 @@ func TestService_CheckIn_DuplicateRejected(t *testing.T) {
 	regs.seedConfirmed("raw-token-1")
 
 	staffID := uuid.New()
-	if _, err := svc.CheckIn(context.Background(), staffID, "raw-token-1"); err != nil {
+	if _, err := svc.CheckIn(context.Background(), staffID, nil, "raw-token-1"); err != nil {
 		t.Fatalf("first CheckIn() error = %v", err)
 	}
 
-	_, err := svc.CheckIn(context.Background(), staffID, "raw-token-1")
+	_, err := svc.CheckIn(context.Background(), staffID, nil, "raw-token-1")
 	if !errors.Is(err, ErrAlreadyCheckedIn) {
 		t.Fatalf("second CheckIn() error = %v, want ErrAlreadyCheckedIn", err)
 	}
@@ -136,7 +145,7 @@ func TestService_CheckIn_RecordsStaffAttribution(t *testing.T) {
 	regID := regs.seedConfirmed("raw-token-1")
 	staffID := uuid.New()
 
-	if _, err := svc.CheckIn(context.Background(), staffID, "raw-token-1"); err != nil {
+	if _, err := svc.CheckIn(context.Background(), staffID, nil, "raw-token-1"); err != nil {
 		t.Fatalf("CheckIn() error = %v", err)
 	}
 
@@ -146,5 +155,34 @@ func TestService_CheckIn_RecordsStaffAttribution(t *testing.T) {
 	}
 	if recorded.StaffUserID != staffID {
 		t.Errorf("StaffUserID = %v, want %v", recorded.StaffUserID, staffID)
+	}
+}
+
+func TestService_CheckIn_RegistrationNumberAndWrapper(t *testing.T) {
+	svc, _, regs := newTestService()
+	id := uuid.New()
+	number := "URC-2026-000042"
+	regs.byID[id] = &registrations.Registration{ID: id, RegistrationNumber: number, Status: registrations.StatusConfirmed}
+	regs.byNumber[number] = id
+
+	result, err := svc.CheckIn(context.Background(), uuid.New(), nil, "URC:"+number)
+	if err != nil {
+		t.Fatalf("CheckIn() error = %v", err)
+	}
+	if result.Registration.ID != id {
+		t.Fatalf("Registration.ID = %v, want %v", result.Registration.ID, id)
+	}
+}
+
+func TestService_CheckIn_WrongEventRejected(t *testing.T) {
+	svc, _, regs := newTestService()
+	registrationEventID := uuid.New()
+	selectedEventID := uuid.New()
+	id := regs.seedConfirmed("raw-token-1")
+	regs.byID[id].EventID = registrationEventID
+
+	_, err := svc.CheckIn(context.Background(), uuid.New(), &selectedEventID, "raw-token-1")
+	if !errors.Is(err, ErrWrongEvent) {
+		t.Fatalf("CheckIn() error = %v, want ErrWrongEvent", err)
 	}
 }

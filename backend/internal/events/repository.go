@@ -262,6 +262,118 @@ func (r *Repository) listCategories(ctx context.Context, eventID uuid.UUID) ([]E
 	return out, rows.Err()
 }
 
+// CreateCategory inserts a new category for an event.
+func (r *Repository) CreateCategory(ctx context.Context, c *EventCategory) error {
+	const query = `
+		INSERT INTO event_categories (event_id, name, distance, price_cents, capacity, registration_deadline, status)
+		VALUES ($1,$2,$3,$4,$5,$6,$7)
+		RETURNING id, status, created_at, updated_at`
+	return r.pool.QueryRow(ctx, query, c.EventID, c.Name, c.Distance, c.PriceCents,
+		c.Capacity, c.RegistrationDeadline, c.Status).
+		Scan(&c.ID, &c.Status, &c.CreatedAt, &c.UpdatedAt)
+}
+
+// UpdateCategory applies non-nil fields of p to a category.
+func (r *Repository) UpdateCategory(ctx context.Context, id uuid.UUID, p *UpdateCategoryRequest) (*EventCategory, error) {
+	const query = `
+		UPDATE event_categories SET
+			name = COALESCE($2, name),
+			distance = COALESCE($3, distance),
+			price_cents = COALESCE($4, price_cents),
+			capacity = COALESCE($5, capacity),
+			status = COALESCE($6, status),
+			registration_deadline = COALESCE($7, registration_deadline),
+			updated_at = now()
+		WHERE id = $1
+		RETURNING id, event_id, name, distance, price_cents, capacity,
+		          registration_deadline, status, created_at, updated_at`
+
+	var c EventCategory
+	err := r.pool.QueryRow(ctx, query, id, p.Name, p.Distance, p.PriceCents, p.Capacity, p.Status, p.RegistrationDeadline).
+		Scan(&c.ID, &c.EventID, &c.Name, &c.Distance, &c.PriceCents, &c.Capacity,
+			&c.RegistrationDeadline, &c.Status, &c.CreatedAt, &c.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("events: update category: %w", err)
+	}
+	return &c, nil
+}
+
+// DeleteCategory removes a category.
+func (r *Repository) DeleteCategory(ctx context.Context, id uuid.UUID) error {
+	ct, err := r.pool.Exec(ctx, `DELETE FROM event_categories WHERE id = $1`, id)
+	if sqlState(err) == "23503" {
+		return ErrCategoryInUse
+	}
+	if err != nil {
+		return fmt.Errorf("events: delete category: %w", err)
+	}
+	if ct.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func sqlState(err error) string {
+	if err == nil {
+		return ""
+	}
+	type stateError interface{ SQLState() string }
+	var pgErr stateError
+	if errors.As(err, &pgErr) {
+		return pgErr.SQLState()
+	}
+	return ""
+}
+
+// CreateScheduleItem inserts one schedule line for an event.
+func (r *Repository) CreateScheduleItem(ctx context.Context, s *EventSchedule) error {
+	const query = `
+		INSERT INTO event_schedules (event_id, time, title, description, sort_order)
+		VALUES ($1,$2,$3,$4,$5)
+		RETURNING id, created_at, updated_at`
+	return r.pool.QueryRow(ctx, query, s.EventID, s.Time, s.Title, s.Description, s.SortOrder).
+		Scan(&s.ID, &s.CreatedAt, &s.UpdatedAt)
+}
+
+// UpdateScheduleItem applies non-nil fields of p to a schedule item.
+func (r *Repository) UpdateScheduleItem(ctx context.Context, id uuid.UUID, p *UpdateScheduleRequest) (*EventSchedule, error) {
+	const query = `
+		UPDATE event_schedules SET
+			time = COALESCE($2, time),
+			title = COALESCE($3, title),
+			description = COALESCE($4, description),
+			sort_order = COALESCE($5, sort_order),
+			updated_at = now()
+		WHERE id = $1
+		RETURNING id, event_id, time, title, description, sort_order, created_at, updated_at`
+
+	var s EventSchedule
+	err := r.pool.QueryRow(ctx, query, id, p.Time, p.Title, p.Description, p.SortOrder).
+		Scan(&s.ID, &s.EventID, &s.Time, &s.Title, &s.Description, &s.SortOrder, &s.CreatedAt, &s.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("events: update schedule item: %w", err)
+	}
+	return &s, nil
+}
+
+// DeleteScheduleItem removes one schedule line.
+func (r *Repository) DeleteScheduleItem(ctx context.Context, id uuid.UUID) error {
+	ct, err := r.pool.Exec(ctx, `DELETE FROM event_schedules WHERE id = $1`, id)
+	if err != nil {
+		return fmt.Errorf("events: delete schedule item: %w", err)
+	}
+	if ct.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (r *Repository) listSchedule(ctx context.Context, eventID uuid.UUID) ([]EventSchedule, error) {
 	const query = `
 		SELECT id, event_id, time, title, description, sort_order, created_at, updated_at

@@ -12,6 +12,11 @@ type writer interface {
 	Insert(ctx context.Context, e *Entry) error
 }
 
+// reader is the read side used by admin views.
+type reader interface {
+	List(ctx context.Context, filter ListFilter) ([]Entry, error)
+}
+
 // Service records audit log entries. Failures to write are logged
 // but never propagated — an audit-log outage must not block the
 // underlying action (e.g. a check-in) from succeeding.
@@ -23,6 +28,13 @@ type Service struct {
 // NewService builds a Service backed by repo.
 func NewService(repo writer, log *slog.Logger) *Service {
 	return &Service{repo: repo, log: log}
+}
+
+// List returns audit entries most recent first, optionally filtered
+// by entity_type, backed by a separate read repository (the same
+// *Repository in production wiring).
+func (s *Service) List(ctx context.Context, r reader, filter ListFilter) ([]Entry, error) {
+	return r.List(ctx, filter)
 }
 
 // Record writes an audit log entry. actorID is nil for system-initiated

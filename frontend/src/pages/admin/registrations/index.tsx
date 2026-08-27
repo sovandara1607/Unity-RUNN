@@ -1,27 +1,23 @@
 import React, { useState, useEffect } from "react";
-import Link from "next/link";
 import {
   Search,
   Download,
-  Filter,
   Users,
   Eye,
-  CheckCircle2,
-  XCircle,
-  Clock,
   Phone,
   Mail,
-  Calendar,
   X,
-  QrCode,
-  Shield,
 } from "lucide-react";
 import { AdminLayout } from "../../../components/admin/AdminLayout";
+import { SkeletonTable } from "../../../components/Skeleton";
+import { withMinSkeleton } from "../../../lib/withMinSkeleton";
 import { RegistrationStatusBadge } from "../../../components/admin/RegistrationStatusBadge";
+import { useAlerts } from "../../../components/alerts/AlertSystem";
 import { api } from "../../../lib/api";
 import type { Registration, Event } from "../../../types";
 
 export default function AdminRegistrationsPage() {
+  const { notify } = useAlerts();
   const [registrations, setRegistrations] = useState<Registration[]>([]);
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
@@ -33,14 +29,13 @@ export default function AdminRegistrationsPage() {
   const fetchData = async () => {
     try {
       setLoading(true);
-      const [regsRes, eventsRes] = await Promise.all([
+      const [regsRes, eventsRes] = await withMinSkeleton(() => Promise.all([
         api.adminListRegistrations({ limit: 200 }),
         api.listEvents({ limit: 100 }),
-      ]);
+      ]));
       setRegistrations(regsRes.registrations || []);
       setEvents(eventsRes.events || []);
-    } catch (err) {
-      console.error("Failed to load registrations:", err);
+    } catch {
     } finally {
       setLoading(false);
     }
@@ -70,7 +65,7 @@ export default function AdminRegistrationsPage() {
 
   const exportToCSV = () => {
     if (filteredRegistrations.length === 0) {
-      alert("No registrations to export.");
+      notify({ tone: "warning", title: "Nothing to export", message: "Adjust the filters or wait for registrations before downloading a roster." });
       return;
     }
 
@@ -118,11 +113,12 @@ export default function AdminRegistrationsPage() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    notify({ tone: "success", title: "Roster exported", message: `${filteredRegistrations.length} registration${filteredRegistrations.length === 1 ? "" : "s"} saved as CSV.` });
   };
 
   return (
     <AdminLayout
-      title="Registrations & Attendees"
+      title="Runner roster"
       subtitle="View, search, filter participants, and export attendee rosters"
       actions={
         <button
@@ -184,9 +180,8 @@ export default function AdminRegistrationsPage() {
 
       {/* Registrations Data Table */}
       {loading ? (
-        <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center text-slate-400">
-          <div className="w-8 h-8 border-4 border-orange-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-          <p className="text-sm">Loading registrations...</p>
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+          <SkeletonTable rows={8} cols={5} />
         </div>
       ) : filteredRegistrations.length === 0 ? (
         <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center">
@@ -200,7 +195,22 @@ export default function AdminRegistrationsPage() {
         </div>
       ) : (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-          <div className="overflow-x-auto">
+          <div className="divide-y divide-slate-100 md:hidden">
+            {filteredRegistrations.map((reg) => (
+              <button key={reg.id} type="button" onClick={() => setSelectedReg(reg)} className="grid w-full grid-cols-[minmax(0,1fr)_auto] gap-3 px-4 py-4 text-left transition hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#3155ff]">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-bold text-slate-900">{reg.full_name || "Runner"}</p>
+                  <p className="mt-0.5 truncate text-[10px] text-slate-400">{reg.email}</p>
+                  <p className="mt-2 font-mono text-[10px] font-bold text-slate-600">{reg.registration_number || `#${reg.id.slice(0, 8)}`}</p>
+                </div>
+                <div className="flex flex-col items-end justify-between gap-2">
+                  <RegistrationStatusBadge status={reg.status} />
+                  <span className="text-[10px] font-bold uppercase tracking-[0.08em] text-slate-400">Kit {reg.tshirt_size || "—"} · View</span>
+                </div>
+              </button>
+            ))}
+          </div>
+          <div className="hidden overflow-x-auto md:block">
             <table className="w-full text-left text-xs text-slate-600">
               <thead className="bg-slate-50 border-b border-slate-200 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
                 <tr>

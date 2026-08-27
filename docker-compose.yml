@@ -40,6 +40,8 @@ services:
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-unity}:${POSTGRES_PASSWORD:-unity}@postgres:5432/${POSTGRES_DB:-unity_run_club}?sslmode=disable
       REDIS_ADDR: redis:6379
+      REALTIME_INTERNAL_URL: http://realtime:8081
+      UPLOAD_DIR: /app/uploads
     ports:
       - "${PORT:-8080}:8080"
     depends_on:
@@ -47,7 +49,33 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    volumes:
+      - event_uploads:/app/uploads
+
+  realtime:
+    build:
+      context: ./realtime
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      PORT: 8081
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_DB: ${REDIS_DB:-0}
+      ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000}
+    ports:
+      - "${REALTIME_PORT:-8081}:8081"
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8081/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
 
 volumes:
   postgres_data:
   redis_data:
+  event_uploads:

@@ -3,6 +3,7 @@ package notifications
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -76,7 +77,16 @@ func (f *fakeWorkerRepo) seed(n Notification) {
 
 // fakeRegGetter/fakeEvtGetter back the worker's template-data lookups.
 type fakeRegGetter struct {
-	byID map[uuid.UUID]*registrations.Registration
+	byID     map[uuid.UUID]*registrations.Registration
+	payments map[uuid.UUID]*registrations.Payment
+}
+
+func (f *fakeRegGetter) GetPaymentForRegistration(ctx context.Context, id uuid.UUID) (*registrations.Payment, error) {
+	p, ok := f.payments[id]
+	if !ok {
+		return nil, registrations.ErrNotFound
+	}
+	return p, nil
 }
 
 func (f *fakeRegGetter) GetByID(ctx context.Context, id uuid.UUID) (*registrations.Registration, error) {
@@ -128,12 +138,16 @@ func setup() (*Worker, *fakeWorkerRepo, *fakeSender, uuid.UUID) {
 	eventID := uuid.New()
 	categoryID := uuid.New()
 
+	verifiedAt := time.Date(2026, 8, 24, 15, 42, 0, 0, time.UTC)
 	regRepo := &fakeRegGetter{byID: map[uuid.UUID]*registrations.Registration{
 		regID: {
 			ID: regID, EventID: eventID, EventCategoryID: categoryID,
-			FullName: "Test Runner", Email: "runner@unityrunclub.com", RegistrationNumber: "URC-2026-000001",
+			FullName: "Test Runner", Email: "runner@unityrunclub.com", RegistrationNumber: "URC-2026-000001", TshirtSize: "M",
 		},
-	}}
+	}, payments: map[uuid.UUID]*registrations.Payment{regID: {
+		RegistrationID: regID, Provider: "bakong", ProviderReference: "KHQR-001",
+		AmountCents: 2500, Currency: "USD", Status: "PAID", VerifiedAt: &verifiedAt,
+	}}}
 	evtRepo := &fakeEvtGetter{
 		events:     map[uuid.UUID]*events.Event{eventID: {ID: eventID, Name: "Founders Run", Location: "Diamond Island"}},
 		categories: map[uuid.UUID]*events.EventCategory{categoryID: {ID: categoryID, Name: "5K"}},
@@ -161,8 +175,34 @@ func TestWorker_Process_SuccessMarksSent(t *testing.T) {
 	if len(sender.sent) != 1 {
 		t.Fatalf("sent = %d, want 1", len(sender.sent))
 	}
+	if len(sender.sent[0].Attachments) != 1 {
+		t.Fatalf("attachments = %d, want ticket PDF", len(sender.sent[0].Attachments))
+	}
 	if notifRepo.byID[id].Status != StatusSent {
 		t.Errorf("Status = %q, want %q", notifRepo.byID[id].Status, StatusSent)
+	}
+}
+
+func TestWorker_Process_PaymentConfirmationAttachesVerifiedReceipt(t *testing.T) {
+	w, notifRepo, sender, regID := setup()
+	n := Notification{Type: TypePaymentConfirmation, EntityType: "registration", EntityID: regID,
+		RecipientEmail: "runner@unityrunclub.com", Payload: map[string]any{"amount_cents": float64(2500)}}
+	notifRepo.seed(n)
+	var id uuid.UUID
+	for candidate := range notifRepo.byID {
+		id = candidate
+	}
+
+	w.process(context.Background(), id.String())
+
+	if len(sender.sent) != 1 {
+		t.Fatalf("sent = %d, want 1", len(sender.sent))
+	}
+	if len(sender.sent[0].Attachments) != 1 || sender.sent[0].Attachments[0].ContentType != "application/pdf" {
+		t.Fatal("payment confirmation should contain one PDF receipt")
+	}
+	if !strings.Contains(sender.sent[0].HTML, "$25.00 USD") {
+		t.Error("payment email should use the persisted payment amount")
 	}
 }
 

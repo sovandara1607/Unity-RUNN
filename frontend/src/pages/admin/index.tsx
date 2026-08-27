@@ -1,22 +1,19 @@
-import React, { useState, useEffect } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import {
-  Calendar,
-  Users,
-  QrCode,
-  TrendingUp,
-  Plus,
-  ArrowRight,
-  CheckCircle2,
-  Clock,
-  Sparkles,
-  AlertCircle,
-} from "lucide-react";
+import { ArrowUpRight, CalendarDays, CircleDollarSign, QrCode, Radio, Route, ScanLine, UsersRound } from "lucide-react";
 import { AdminLayout } from "../../components/admin/AdminLayout";
 import { EventStatusBadge } from "../../components/admin/EventStatusBadge";
 import { RegistrationStatusBadge } from "../../components/admin/RegistrationStatusBadge";
+import { AlertBanner } from "../../components/alerts/AlertSystem";
+import { Skeleton } from "../../components/Skeleton";
+import { withMinSkeleton } from "../../lib/withMinSkeleton";
 import { api } from "../../lib/api";
-import type { Event, Registration, AdminMetrics } from "../../types";
+import type { AdminMetrics, Event, Registration } from "../../types";
+
+function formatDate(value?: string | null) {
+  if (!value) return "Date pending";
+  return new Intl.DateTimeFormat(undefined, { day: "2-digit", month: "short", year: "numeric" }).format(new Date(value));
+}
 
 export default function AdminDashboardPage() {
   const [metrics, setMetrics] = useState<AdminMetrics | null>(null);
@@ -29,240 +26,68 @@ export default function AdminDashboardPage() {
     async function loadDashboardData() {
       try {
         setLoading(true);
-        const [eventsRes, regsRes, metricsData] = await Promise.all([
-          api.listEvents({ limit: 10 }),
-          api.adminListRegistrations({ limit: 8 }),
-          api.adminGetMetrics(),
-        ]);
-
-        setEvents(eventsRes.events || []);
-        setRecentRegistrations(regsRes.registrations || []);
-        setMetrics(metricsData);
-      } catch (err: any) {
-        console.error("Dashboard load error:", err);
-        setError(err?.message || "Failed to load dashboard metrics");
-      } finally {
-        setLoading(false);
-      }
+        const [eventsRes, regsRes, metricsData] = await withMinSkeleton(() => Promise.all([
+          api.listEvents({ limit: 10 }), api.adminListRegistrations({ limit: 8 }), api.adminGetMetrics(),
+        ]));
+        setEvents(eventsRes.events || []); setRecentRegistrations(regsRes.registrations || []); setMetrics(metricsData);
+      } catch (caught: unknown) {
+        setError(caught instanceof Error ? caught.message : "Could not load live operations data");
+      } finally { setLoading(false); }
     }
     loadDashboardData();
   }, []);
 
+  const nextEvent = useMemo(() => events.filter((event) => event.event_date && !["COMPLETED", "CANCELLED", "ARCHIVED"].includes(event.status)).sort((a, b) => +new Date(a.event_date) - +new Date(b.event_date))[0], [events]);
+  const today = new Intl.DateTimeFormat(undefined, { weekday: "long", day: "numeric", month: "long" }).format(new Date());
+  const score = [
+    { label: "Events", value: metrics?.total_events ?? events.length, note: `${metrics?.active_events ?? 0} accepting entries`, icon: CalendarDays },
+    { label: "Runners", value: metrics?.total_registrations ?? recentRegistrations.length, note: `${metrics?.confirmed_registrations ?? 0} confirmed`, icon: UsersRound },
+    { label: "Checked in", value: metrics?.total_checked_in ?? 0, note: "Across all race days", icon: ScanLine },
+    { label: "Revenue", value: `$${((metrics?.total_revenue_cents ?? 0) / 100).toLocaleString(undefined, { minimumFractionDigits: 2 })}`, note: "Verified payments", icon: CircleDollarSign },
+  ];
+
   return (
-    <AdminLayout
-      title="Club Operations Dashboard"
-      subtitle="Overview of upcoming races, live registrations, and race-day check-in status"
-      actions={
-        <div className="flex items-center gap-2">
-          <Link
-            href="/admin/events/new"
-            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-orange-600 hover:bg-orange-700 text-white text-xs font-semibold rounded-lg shadow-sm transition-colors"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>Create Event</span>
-          </Link>
-        </div>
-      }
-    >
-      {error && (
-        <div className="mb-6 p-4 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-sm flex items-center gap-3">
-          <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0" />
-          <div>
-            <p className="font-semibold">Backend Connection Notice</p>
-            <p className="text-xs text-amber-700 mt-0.5">{error} — displaying cached or local data.</p>
-          </div>
-        </div>
-      )}
-
-      {/* Metrics Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        {/* Total Events */}
-        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
-          <div>
-            <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Total Events</p>
-            <h3 className="text-2xl font-bold text-slate-900 mt-1">
-              {metrics?.total_events ?? events.length}
-            </h3>
-            <p className="text-xs text-emerald-600 font-medium mt-1 flex items-center gap-1">
-              <span className="w-2 h-2 rounded-full bg-emerald-500" />
-              {metrics?.active_events ?? 0} active registration
-            </p>
-          </div>
-          <div className="w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
-            <Calendar className="w-6 h-6" />
-          </div>
-        </div>
-
-        {/* Total Registrations */}
-        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
-          <div>
-            <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Registrations</p>
-            <h3 className="text-2xl font-bold text-slate-900 mt-1">
-              {metrics?.total_registrations ?? recentRegistrations.length}
-            </h3>
-            <p className="text-xs text-slate-500 mt-1">
-              {metrics?.confirmed_registrations ?? 0} confirmed
-            </p>
-          </div>
-          <div className="w-12 h-12 rounded-xl bg-orange-50 text-orange-600 flex items-center justify-center">
-            <Users className="w-6 h-6" />
-          </div>
-        </div>
-
-        {/* Check-ins */}
-        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
-          <div>
-            <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Check-in Status</p>
-            <h3 className="text-2xl font-bold text-slate-900 mt-1">
-              {metrics?.total_checked_in ?? 0}
-            </h3>
-            <p className="text-xs text-slate-500 mt-1">Checked-in runners</p>
-          </div>
-          <div className="w-12 h-12 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center">
-            <QrCode className="w-6 h-6" />
-          </div>
-        </div>
-
-        {/* Est. Revenue */}
-        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
-          <div>
-            <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Ticket Revenue</p>
-            <h3 className="text-2xl font-bold text-slate-900 mt-1">
-              ${((metrics?.total_revenue_cents ?? 0) / 100).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-            </h3>
-            <p className="text-xs text-emerald-600 font-medium mt-1 flex items-center gap-1">
-              <TrendingUp className="w-3.5 h-3.5" /> Direct payments
-            </p>
-          </div>
-          <div className="w-12 h-12 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
-            <Sparkles className="w-6 h-6" />
-          </div>
-        </div>
-      </div>
-
-      {/* Quick Action Station Banner */}
-      <div className="mb-8 rounded-2xl bg-gradient-to-r from-slate-900 via-slate-800 to-orange-950 p-6 sm:p-8 text-white shadow-lg flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6">
-        <div>
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-orange-500/20 border border-orange-500/30 text-orange-300 text-xs font-semibold mb-3">
-            <QrCode className="w-3.5 h-3.5" /> Race Day Station
-          </div>
-          <h2 className="text-xl sm:text-2xl font-bold">Ready for Participant Check-in?</h2>
-          <p className="text-sm text-slate-300 mt-1 max-w-xl">
-            Launch the instant QR camera scanner and ticket lookup terminal for rapid on-site runner check-in.
-          </p>
-        </div>
-        <Link
-          href="/admin/checkin"
-          className="inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-semibold text-sm shadow-md shadow-orange-500/25 transition-all flex-shrink-0"
-        >
-          <span>Open Check-in Terminal</span>
-          <ArrowRight className="w-4 h-4" />
-        </Link>
-      </div>
-
-      {/* Two-column layout: Active Events & Recent Registrations */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        {/* Active Events */}
-        <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h3 className="font-bold text-slate-900">Events Overview</h3>
-              <p className="text-xs text-slate-500">Upcoming and live run club events</p>
+    <AdminLayout title="Club operations" subtitle="Entries, check-in and event readiness in one live view">
+      <section className="overflow-hidden rounded-[26px] border border-black/10 bg-[#151515] text-white shadow-[0_22px_60px_-40px_rgba(0,0,0,.8)]">
+        <div className="grid lg:grid-cols-[1.35fr_.65fr]">
+          <div className="relative overflow-hidden p-6 sm:p-9 lg:p-11">
+            <div aria-hidden className="absolute inset-y-0 right-0 hidden w-28 opacity-15 lg:block [background:repeating-linear-gradient(90deg,transparent_0_22px,#fff_22px_24px)]" />
+            <p className="font-mono text-[9px] font-bold uppercase tracking-[0.2em] text-[#d9ff00]">{today} · Operations briefing</p>
+            <h2 className="sport-display mt-5 max-w-3xl text-[clamp(54px,8vw,108px)] uppercase leading-[0.78] tracking-[-0.045em]">Keep every runner moving.</h2>
+            <p className="mt-7 max-w-xl text-sm font-medium leading-6 text-white/50">Monitor race entries, prepare check-in, and catch operational gaps before the start horn.</p>
+            <div className="mt-8 flex flex-wrap gap-3">
+              <Link href="/admin/checkin" className="inline-flex items-center gap-2 rounded-full bg-[#d9ff00] px-5 py-3 text-[10px] font-black uppercase tracking-[0.11em] text-black transition hover:-translate-y-0.5"><QrCode className="h-4 w-4" /> Open check-in</Link>
+              <Link href="/admin/registrations" className="inline-flex items-center gap-2 rounded-full border border-white/20 px-5 py-3 text-[10px] font-black uppercase tracking-[0.11em] transition hover:border-white"><UsersRound className="h-4 w-4" /> View roster</Link>
             </div>
-            <Link
-              href="/admin/events"
-              className="text-xs font-semibold text-orange-600 hover:text-orange-700 flex items-center gap-1"
-            >
-              View all <ArrowRight className="w-3.5 h-3.5" />
-            </Link>
           </div>
-
-          {events.length === 0 ? (
-            <div className="text-center py-8 text-slate-400 text-sm">
-              <Calendar className="w-8 h-8 mx-auto mb-2 opacity-50" />
-              No events found. Create your first event to get started.
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {events.slice(0, 5).map((ev) => (
-                <div
-                  key={ev.id}
-                  className="flex items-center justify-between p-3.5 rounded-xl border border-slate-100 hover:border-slate-300 hover:bg-slate-50/50 transition-all"
-                >
-                  <div className="min-w-0 flex-1 mr-3">
-                    <div className="flex items-center gap-2">
-                      <h4 className="font-semibold text-sm text-slate-900 truncate">
-                        {ev.name}
-                      </h4>
-                      <EventStatusBadge status={ev.status} />
-                    </div>
-                    <p className="text-xs text-slate-500 mt-1 flex items-center gap-3">
-                      <span>{ev.event_date ? new Date(ev.event_date).toLocaleDateString() : "Date TBD"}</span>
-                      <span>•</span>
-                      <span className="truncate">{ev.location}</span>
-                    </p>
-                  </div>
-                  <Link
-                    href={`/admin/events/${ev.id}/edit`}
-                    className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors flex-shrink-0"
-                  >
-                    Manage
-                  </Link>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Recent Registrations */}
-        <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h3 className="font-bold text-slate-900">Recent Registrations</h3>
-              <p className="text-xs text-slate-500">Latest participant signups</p>
-            </div>
-            <Link
-              href="/admin/registrations"
-              className="text-xs font-semibold text-orange-600 hover:text-orange-700 flex items-center gap-1"
-            >
-              View all <ArrowRight className="w-3.5 h-3.5" />
-            </Link>
+          <div className="border-t border-white/10 bg-[#3155ff] p-6 sm:p-8 lg:border-l lg:border-t-0 lg:p-9">
+            <div className="flex items-center justify-between"><p className="font-mono text-[9px] font-bold uppercase tracking-[0.18em] text-white/60">Next on course</p><Radio className="h-4 w-4 animate-pulse text-[#d9ff00]" /></div>
+            {nextEvent ? <div className="mt-12 lg:mt-24"><p className="sport-display text-5xl uppercase leading-[0.86] tracking-[-0.03em]">{nextEvent.name}</p><dl className="mt-7 space-y-3 border-t border-white/20 pt-5 font-mono text-[10px]"><div className="flex justify-between gap-4"><dt className="uppercase text-white/50">Race date</dt><dd className="font-bold">{formatDate(nextEvent.event_date)}</dd></div><div className="flex justify-between gap-4"><dt className="uppercase text-white/50">Location</dt><dd className="max-w-[180px] truncate font-bold">{nextEvent.location || "TBD"}</dd></div><div className="flex justify-between gap-4"><dt className="uppercase text-white/50">State</dt><dd className="font-bold">{nextEvent.status.replaceAll("_", " ")}</dd></div></dl><Link href={`/events/${nextEvent.slug}`} target="_blank" className="mt-7 inline-flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.12em] underline decoration-white/30 underline-offset-4">View event page <ArrowUpRight className="h-3.5 w-3.5" /></Link></div> : <div className="mt-16"><Route className="h-10 w-10 text-white/30" /><p className="mt-4 text-sm font-bold">No upcoming event scheduled.</p></div>}
           </div>
-
-          {recentRegistrations.length === 0 ? (
-            <div className="text-center py-8 text-slate-400 text-sm">
-              <Users className="w-8 h-8 mx-auto mb-2 opacity-50" />
-              No registrations recorded yet.
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {recentRegistrations.slice(0, 5).map((reg) => (
-                <div
-                  key={reg.id}
-                  className="flex items-center justify-between p-3.5 rounded-xl border border-slate-100 hover:border-slate-300 hover:bg-slate-50/50 transition-all"
-                >
-                  <div className="min-w-0 flex-1 mr-3">
-                    <div className="flex items-center gap-2">
-                      <h4 className="font-semibold text-sm text-slate-900 truncate">
-                        {reg.full_name || "Anonymous Runner"}
-                      </h4>
-                      <RegistrationStatusBadge status={reg.status} />
-                    </div>
-                    <p className="text-xs text-slate-500 mt-1 truncate">
-                      {reg.email} • Ref #{reg.registration_number || reg.id.slice(0, 8)}
-                    </p>
-                  </div>
-                  <div className="text-right flex-shrink-0">
-                    <span className="text-xs text-slate-400 block">
-                      {reg.tshirt_size ? `Size ${reg.tshirt_size}` : "Registered"}
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
         </div>
-      </div>
+      </section>
+
+      {error && <AlertBanner tone="error" title="Live data interrupted" className="mt-5" onDismiss={() => setError(null)}>{error}</AlertBanner>}
+
+      <section className="mt-6 overflow-hidden rounded-[22px] border border-black/10 bg-white">
+        <div className="flex items-center justify-between border-b border-black/10 px-5 py-4 sm:px-7"><div><p className="font-mono text-[9px] font-black uppercase tracking-[0.2em] text-[#3155ff]">Live scoreboard</p><h3 className="mt-1 text-sm font-black">Club totals</h3></div><span className="flex items-center gap-2 font-mono text-[8px] font-bold uppercase tracking-[0.15em] text-black/35"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> Synced</span></div>
+        <div className="grid sm:grid-cols-2 xl:grid-cols-4">{score.map((item, index) => { const Icon = item.icon; return <div key={item.label} className={`relative p-6 sm:p-7 ${index > 0 ? "border-t border-black/10 sm:border-l" : ""} ${index === 2 ? "sm:border-l-0 xl:border-l" : ""}`}><div className="flex items-start justify-between"><p className="font-mono text-[9px] font-bold uppercase tracking-[0.16em] text-black/40">{item.label}</p><Icon className="h-4 w-4 text-[#3155ff]" /></div>{loading ? <Skeleton tone="light" className="mt-4 h-12 w-28" /> : <p className="sport-display mt-4 text-5xl uppercase leading-none tracking-[-0.03em]">{item.value}</p>}<p className="mt-2 text-[10px] font-bold text-black/40">{item.note}</p></div>; })}</div>
+      </section>
+
+      <section className="mt-6 grid gap-6 xl:grid-cols-[1.05fr_.95fr]">
+        <OperationsList title="Event board" eyebrow="Course schedule" href="/admin/events" linkLabel="Manage events">
+          {loading ? <ListSkeleton /> : events.length === 0 ? <Empty icon={<CalendarDays />} text="No events are on the calendar." /> : events.slice(0, 5).map((event) => <div key={event.id} className="grid grid-cols-[70px_minmax(0,1fr)_auto] items-center gap-4 border-t border-black/10 px-5 py-4 first:border-t-0 sm:px-6"><div className="font-mono"><p className="text-lg font-black leading-none">{event.event_date ? new Date(event.event_date).getDate().toString().padStart(2, "0") : "--"}</p><p className="mt-1 text-[8px] font-bold uppercase tracking-[0.15em] text-black/35">{event.event_date ? new Intl.DateTimeFormat(undefined, { month: "short" }).format(new Date(event.event_date)) : "TBD"}</p></div><div className="min-w-0"><p className="truncate text-xs font-black">{event.name}</p><p className="mt-1 truncate text-[10px] font-medium text-black/40">{event.location || "Location pending"}</p></div><EventStatusBadge status={event.status} /></div>)}
+        </OperationsList>
+        <OperationsList title="Runner feed" eyebrow="Latest entries" href="/admin/registrations" linkLabel="Open roster">
+          {loading ? <ListSkeleton /> : recentRegistrations.length === 0 ? <Empty icon={<UsersRound />} text="New registrations will appear here." /> : recentRegistrations.slice(0, 5).map((reg) => <div key={reg.id} className="grid grid-cols-[38px_minmax(0,1fr)_auto] items-center gap-3 border-t border-black/10 px-5 py-4 first:border-t-0 sm:px-6"><span className="grid h-9 w-9 place-items-center rounded-full bg-[#151515] font-mono text-[10px] font-black text-white">{(reg.full_name || "R").charAt(0)}</span><div className="min-w-0"><p className="truncate text-xs font-black">{reg.full_name || "Unnamed runner"}</p><p className="mt-1 truncate font-mono text-[8px] font-bold uppercase tracking-[0.1em] text-black/35">{reg.registration_number || reg.id.slice(0, 8)} · Tee {reg.tshirt_size || "—"}</p></div><RegistrationStatusBadge status={reg.status} /></div>)}
+        </OperationsList>
+      </section>
     </AdminLayout>
   );
 }
+
+function OperationsList({ title, eyebrow, href, linkLabel, children }: { title: string; eyebrow: string; href: string; linkLabel: string; children: React.ReactNode }) {
+  return <article className="overflow-hidden rounded-[22px] border border-black/10 bg-white"><header className="flex items-end justify-between gap-4 border-b border-black/10 px-5 py-5 sm:px-6"><div><p className="font-mono text-[8px] font-black uppercase tracking-[0.2em] text-[#3155ff]">{eyebrow}</p><h3 className="mt-1 text-base font-black tracking-[-0.02em]">{title}</h3></div><Link href={href} className="inline-flex items-center gap-1 font-mono text-[8px] font-black uppercase tracking-[0.12em] text-black/45 hover:text-black">{linkLabel}<ArrowUpRight className="h-3 w-3" /></Link></header><div>{children}</div></article>;
+}
+function ListSkeleton() { return <div className="space-y-px">{[0,1,2,3].map((item) => <div key={item} className="border-t border-black/10 p-5 first:border-t-0"><Skeleton tone="light" className="h-9 w-full rounded-lg" /></div>)}</div>; }
+function Empty({ icon, text }: { icon: React.ReactNode; text: string }) { return <div className="grid place-items-center px-6 py-16 text-center text-black/25"><span className="[&_svg]:h-8 [&_svg]:w-8">{icon}</span><p className="mt-3 text-xs font-bold text-black/40">{text}</p></div>; }

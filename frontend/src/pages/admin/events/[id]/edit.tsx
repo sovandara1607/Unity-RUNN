@@ -1,13 +1,10 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/router";
 import Link from "next/link";
 import {
   ArrowLeft,
   Save,
-  Trash2,
-  Calendar,
   Clock,
-  MapPin,
   ExternalLink,
   CheckCircle,
   AlertTriangle,
@@ -16,16 +13,18 @@ import {
   Archive,
   Ban,
   Layers,
-  HelpCircle,
-  ShieldCheck,
-  Plus,
+  type LucideIcon,
 } from "lucide-react";
 import { AdminLayout } from "../../../../components/admin/AdminLayout";
+import { EventPosterField } from "../../../../components/admin/EventPosterField";
+import { Skeleton, SkeletonText } from "../../../../components/Skeleton";
+import { withMinSkeleton } from "../../../../lib/withMinSkeleton";
 import { EventStatusBadge } from "../../../../components/admin/EventStatusBadge";
+import { AlertBanner } from "../../../../components/alerts/AlertSystem";
 import { api } from "../../../../lib/api";
 import type { Event, EventDetail, EventStatus } from "../../../../types";
 
-const statusTransitions: Record<EventStatus, { next: EventStatus; label: string; icon: any; color: string }[]> = {
+const statusTransitions: Record<EventStatus, { next: EventStatus; label: string; icon: LucideIcon; color: string }[]> = {
   DRAFT: [
     { next: "PUBLISHED", label: "Publish Event", icon: Play, color: "bg-blue-600 hover:bg-blue-700 text-white" },
     { next: "CANCELLED", label: "Cancel Event", icon: Ban, color: "bg-rose-600 hover:bg-rose-700 text-white" },
@@ -59,6 +58,9 @@ export default function AdminEditEventPage() {
   const [detail, setDetail] = useState<EventDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [posterUploading, setPosterUploading] = useState(false);
+  const [posterError, setPosterError] = useState<string | null>(null);
+  const coverImageRef = useRef("");
   const [statusUpdating, setStatusUpdating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -76,48 +78,42 @@ export default function AdminEditEventPage() {
     registration_close_at: "",
   });
 
-  const loadEvent = async () => {
+  const loadEvent = useCallback(async () => {
     if (!id || typeof id !== "string") return;
     try {
       setLoading(true);
-      // Fetch event from list by ID
-      const listRes = await api.listEvents({ limit: 100 });
-      const found = listRes.events?.find((e) => e.id === id);
-      if (found) {
-        setEvent(found);
-        setFormData({
-          name: found.name || "",
-          slug: found.slug || "",
-          description: found.description || "",
-          cover_image: found.cover_image || "",
-          event_date: found.event_date ? found.event_date.slice(0, 10) : "",
-          start_time: found.start_time ? found.start_time.slice(11, 16) : "06:00",
-          location: found.location || "",
-          registration_open_at: found.registration_open_at ? found.registration_open_at.slice(0, 16) : "",
-          registration_close_at: found.registration_close_at ? found.registration_close_at.slice(0, 16) : "",
-        });
+      const found = await withMinSkeleton(() => api.getEventById(id));
+      setEvent(found);
+      coverImageRef.current = found.cover_image || "";
+      setFormData({
+        name: found.name || "",
+        slug: found.slug || "",
+        description: found.description || "",
+        cover_image: found.cover_image || "",
+        event_date: found.event_date ? found.event_date.slice(0, 10) : "",
+        start_time: found.start_time ? found.start_time.slice(11, 16) : "06:00",
+        location: found.location || "",
+        registration_open_at: found.registration_open_at ? found.registration_open_at.slice(0, 16) : "",
+        registration_close_at: found.registration_close_at ? found.registration_close_at.slice(0, 16) : "",
+      });
 
-        // Try to fetch child detail
-        try {
-          const detailRes = await api.getEvent(found.slug);
-          setDetail(detailRes);
-        } catch {
-          // child detail optional
-        }
-      } else {
-        setError("Event not found");
+      // Try to fetch child detail
+      try {
+        const detailRes = await api.getEvent(found.slug);
+        setDetail(detailRes);
+      } catch {
+        // child detail optional
       }
-    } catch (err: any) {
-      console.error("Load event error:", err);
-      setError(err?.message || "Failed to load event");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load event");
     } finally {
       setLoading(false);
     }
-  };
+  }, [id]);
 
   useEffect(() => {
     loadEvent();
-  }, [id]);
+  }, [loadEvent]);
 
   const handleStatusChange = async (nextStatus: EventStatus) => {
     if (!event) return;
@@ -135,9 +131,8 @@ export default function AdminEditEventPage() {
       setEvent(updated);
       setSuccessMessage(`Event status successfully moved to ${nextStatus}`);
       setTimeout(() => setSuccessMessage(null), 4000);
-    } catch (err: any) {
-      console.error("Status transition error:", err);
-      setError(err?.message || "Failed to update event status");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update event status");
     } finally {
       setStatusUpdating(false);
     }
@@ -150,11 +145,18 @@ export default function AdminEditEventPage() {
       setSaving(true);
       setError(null);
 
-      const payload: any = {
+      if (posterUploading) {
+        throw new Error("Wait for the event poster to finish uploading before saving.");
+      }
+      if (posterError) {
+        throw new Error(`Fix the event poster before saving: ${posterError}`);
+      }
+
+      const payload: Partial<Event> = {
         name: formData.name,
         slug: formData.slug,
         description: formData.description,
-        cover_image: formData.cover_image,
+        cover_image: coverImageRef.current.trim(),
         event_date: formData.event_date,
         start_time: formData.start_time,
         location: formData.location,
@@ -168,12 +170,16 @@ export default function AdminEditEventPage() {
       }
 
       const updated = await api.updateEvent(event.id, payload);
+      if (payload.cover_image && updated.cover_image !== payload.cover_image) {
+        throw new Error("The event details were saved, but its poster was not attached. Please save again.");
+      }
+      coverImageRef.current = updated.cover_image || "";
       setEvent(updated);
+      setFormData((current) => ({ ...current, cover_image: coverImageRef.current }));
       setSuccessMessage("Event details updated successfully");
       setTimeout(() => setSuccessMessage(null), 4000);
-    } catch (err: any) {
-      console.error("Save event error:", err);
-      setError(err?.message || "Failed to save event details");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save event details");
     } finally {
       setSaving(false);
     }
@@ -181,10 +187,24 @@ export default function AdminEditEventPage() {
 
   if (loading) {
     return (
-      <AdminLayout title="Edit Event">
-        <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center text-slate-400">
-          <div className="w-8 h-8 border-4 border-orange-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-          <p className="text-sm">Loading event details...</p>
+      <AdminLayout title="Edit Event" minRole="ADMIN">
+        <div className="max-w-3xl space-y-6">
+          <div className="rounded-2xl border border-slate-200 bg-white p-6 sm:p-8 space-y-5">
+            <Skeleton tone="light" className="h-3 w-40" />
+            <Skeleton tone="light" className="h-10 w-full max-w-xl rounded-lg" />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+              {[0, 1, 2, 3].map((i) => (
+                <div key={i}>
+                  <Skeleton tone="light" className="h-3 w-20" />
+                  <Skeleton tone="light" className="mt-1.5 h-[38px] w-full rounded-lg" />
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="rounded-2xl border border-slate-200 bg-white p-6 sm:p-8 space-y-4">
+            <Skeleton tone="light" className="h-3 w-32" />
+            <SkeletonText tone="light" lines={3} />
+          </div>
         </div>
       </AdminLayout>
     );
@@ -192,7 +212,7 @@ export default function AdminEditEventPage() {
 
   if (!event) {
     return (
-      <AdminLayout title="Edit Event">
+      <AdminLayout title="Edit Event" minRole="ADMIN">
         <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center">
           <AlertTriangle className="w-10 h-10 text-amber-500 mx-auto mb-3" />
           <h3 className="text-base font-bold text-slate-900">Event Not Found</h3>
@@ -237,15 +257,10 @@ export default function AdminEditEventPage() {
     >
       {/* Notifications */}
       {successMessage && (
-        <div className="mb-6 p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold flex items-center gap-2">
-          <CheckCircle className="w-4 h-4 text-emerald-600" />
-          <span>{successMessage}</span>
-        </div>
+        <AlertBanner tone="success" title="Event updated" className="mb-6" onDismiss={() => setSuccessMessage(null)}>{successMessage}</AlertBanner>
       )}
       {error && (
-        <div className="mb-6 p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-medium">
-          {error}
-        </div>
+        <AlertBanner tone="error" title="Event needs attention" className="mb-6" onDismiss={() => setError(null)}>{error}</AlertBanner>
       )}
 
       {/* Lifecycle Status & Transitions Bar */}
@@ -402,14 +417,15 @@ export default function AdminEditEventPage() {
             </div>
 
             <div className="sm:col-span-2">
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Cover Image URL
-              </label>
-              <input
-                type="url"
+              <EventPosterField
                 value={formData.cover_image}
-                onChange={(e) => setFormData({ ...formData, cover_image: e.target.value })}
-                className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500"
+                onChange={(cover_image) => {
+                  coverImageRef.current = cover_image;
+                  setFormData((current) => ({ ...current, cover_image }));
+                }}
+                disabled={saving}
+                onUploadStateChange={setPosterUploading}
+                onUploadError={setPosterError}
               />
             </div>
 
@@ -441,11 +457,11 @@ export default function AdminEditEventPage() {
           <div className="pt-4 border-t border-slate-100 flex items-center justify-end">
             <button
               type="submit"
-              disabled={saving}
+              disabled={saving || posterUploading}
               className="inline-flex items-center gap-2 px-5 py-2 bg-orange-600 hover:bg-orange-700 disabled:opacity-50 text-white text-xs font-semibold rounded-xl shadow-sm transition-colors"
             >
               <Save className="w-4 h-4" />
-              <span>{saving ? "Saving Changes..." : "Save Changes"}</span>
+              <span>{posterUploading ? "Uploading poster..." : saving ? "Saving Changes..." : "Save Changes"}</span>
             </button>
           </div>
         </form>
@@ -498,7 +514,7 @@ export default function AdminEditEventPage() {
               {detail.schedule.map((item) => (
                 <div key={item.id} className="flex items-start gap-4 p-3.5 rounded-xl border border-slate-100 bg-slate-50/50">
                   <div className="text-xs font-bold text-orange-600 bg-orange-50 px-2 py-1 rounded">
-                    {item.time ? new Date(item.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "Time"}
+                    {item.time ? item.time.slice(11, 16) : "Time"}
                   </div>
                   <div>
                     <h4 className="font-semibold text-sm text-slate-900">{item.title}</h4>

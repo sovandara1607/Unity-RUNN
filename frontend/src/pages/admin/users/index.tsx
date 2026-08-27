@@ -1,17 +1,9 @@
 import React, { useState, useEffect } from "react";
-import {
-  Shield,
-  Search,
-  UserCheck,
-  ShieldAlert,
-  Mail,
-  Calendar,
-  AlertCircle,
-  CheckCircle,
-  ChevronDown,
-} from "lucide-react";
+import { Search } from "lucide-react";
 import { AdminLayout } from "../../../components/admin/AdminLayout";
-import { api } from "../../../lib/api";
+import { AlertBanner } from "../../../components/alerts/AlertSystem";
+import { Skeleton } from "../../../components/Skeleton";
+import { api, type ApiError } from "../../../lib/api";
 import type { Role, User } from "../../../types";
 
 const roleDescriptions: Record<Role, { label: string; badge: string; desc: string }> = {
@@ -45,51 +37,19 @@ export default function AdminUsersPage() {
   const [updatingUserId, setUpdatingUserId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
-  // Initial mock/loaded users list
   useEffect(() => {
     async function loadUsers() {
       try {
         setLoading(true);
-        // Try fetching current user profile and fallback demo users
-        const me = await api.getMe().catch(() => null);
-        const demoUsers: User[] = [
-          {
-            id: me?.id || "u-001",
-            email: me?.email || "admin@unityrunclub.com",
-            role: (me?.role as Role) || "SUPER_ADMIN",
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          },
-          {
-            id: "u-002",
-            email: "staff.sarah@unityrunclub.com",
-            role: "STAFF",
-            created_at: new Date(Date.now() - 86400000 * 5).toISOString(),
-            updated_at: new Date().toISOString(),
-          },
-          {
-            id: "u-003",
-            email: "director.alex@unityrunclub.com",
-            role: "ADMIN",
-            created_at: new Date(Date.now() - 86400000 * 12).toISOString(),
-            updated_at: new Date().toISOString(),
-          },
-          {
-            id: "u-004",
-            email: "runner.chann@gmail.com",
-            role: "USER",
-            created_at: new Date(Date.now() - 86400000 * 20).toISOString(),
-            updated_at: new Date().toISOString(),
-          },
-          {
-            id: "u-005",
-            email: "volunteer.sokha@unityrunclub.com",
-            role: "STAFF",
-            created_at: new Date(Date.now() - 86400000 * 3).toISOString(),
-            updated_at: new Date().toISOString(),
-          },
-        ];
-        setUsers(demoUsers);
+        const result = await api.adminListUsers({ limit: 500 });
+        setUsers(result.users);
+      } catch (caught: unknown) {
+        const err = caught as ApiError;
+        const endpoint = err.method && err.path ? ` (${err.method} ${err.path})` : "";
+        setFeedback({
+          type: "error",
+          text: `${err.message || "Failed to load users"}${endpoint}`,
+        });
       } finally {
         setLoading(false);
       }
@@ -106,17 +66,12 @@ export default function AdminUsersPage() {
       setUpdatingUserId(userId);
       setFeedback(null);
 
-      // Update in state
-      setUsers((prev) =>
-        prev.map((u) => (u.id === userId ? { ...u, role: newRole } : u))
-      );
-
-      setFeedback({
-        type: "success",
-        text: `Role for ${targetUserEmail} updated to ${newRole}.`,
-      });
+      const updated = await api.adminUpdateUserRole(userId, newRole);
+      setUsers((current) => current.map((user) => user.id === userId ? updated : user));
+      setFeedback({ type: "success", text: `${targetUserEmail} is now ${newRole}.` });
       setTimeout(() => setFeedback(null), 4000);
-    } catch (err: any) {
+    } catch (caught: unknown) {
+      const err = caught instanceof Error ? caught : null;
       setFeedback({
         type: "error",
         text: err?.message || "Failed to update user role",
@@ -139,38 +94,25 @@ export default function AdminUsersPage() {
 
   return (
     <AdminLayout
-      title="User & Staff RBAC Management"
+      title="Team access"
       subtitle="Super Admin permissions: assign roles, manage staff access, and oversee privileges"
       minRole="SUPER_ADMIN"
     >
       {feedback && (
-        <div
-          className={`mb-6 p-4 rounded-xl text-xs font-semibold flex items-center gap-2 ${
-            feedback.type === "success"
-              ? "bg-emerald-50 border border-emerald-200 text-emerald-800"
-              : "bg-rose-50 border border-rose-200 text-rose-800"
-          }`}
-        >
-          {feedback.type === "success" ? (
-            <CheckCircle className="w-4 h-4 text-emerald-600" />
-          ) : (
-            <AlertCircle className="w-4 h-4 text-rose-600" />
-          )}
-          <span>{feedback.text}</span>
-        </div>
+        <AlertBanner tone={feedback.type} title={feedback.type === "success" ? "Access updated" : "Access update failed"} className="mb-6" onDismiss={() => setFeedback(null)}>{feedback.text}</AlertBanner>
       )}
 
       {/* Role Hierarchy Explainer Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+      <div className="mb-6 grid grid-cols-2 gap-3 lg:mb-8 lg:grid-cols-4 lg:gap-4">
         {(Object.keys(roleDescriptions) as Role[]).map((r) => {
           const info = roleDescriptions[r];
           return (
-            <div key={r} className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+            <div key={r} className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
               <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full border ${info.badge}`}>
                 {r}
               </span>
-              <p className="text-xs font-medium text-slate-800 mt-2">{info.label}</p>
-              <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">{info.desc}</p>
+              <p className="mt-2 text-[11px] font-bold text-slate-800 sm:text-xs">{info.label}</p>
+              <p className="mt-1 line-clamp-3 text-[10px] leading-4 text-slate-500 sm:text-[11px] sm:leading-relaxed">{info.desc}</p>
             </div>
           );
         })}
@@ -206,7 +148,22 @@ export default function AdminUsersPage() {
 
       {/* Users Table */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
+        <div className="divide-y divide-slate-100 md:hidden">
+          {loading && [0, 1, 2].map((index) => <div key={index} className="space-y-3 p-4"><Skeleton tone="light" className="h-4 w-48" /><Skeleton tone="light" className="h-9 w-full rounded-xl" /></div>)}
+          {!loading && filteredUsers.map((user) => (
+            <div key={user.id} className="p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0"><p className="truncate text-sm font-bold text-slate-900">{user.email}</p><p className="mt-1 font-mono text-[9px] text-slate-400">Joined {new Date(user.created_at).toLocaleDateString()}</p></div>
+                <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[9px] font-bold ${roleDescriptions[user.role]?.badge || "bg-slate-100"}`}>{user.role}</span>
+              </div>
+              <label className="mt-3 block text-[9px] font-bold uppercase tracking-[0.12em] text-slate-400" htmlFor={`mobile-role-${user.id}`}>Access level</label>
+              <select id={`mobile-role-${user.id}`} value={user.role} disabled={updatingUserId === user.id} onChange={(event) => handleRoleChange(user.id, user.email, event.target.value as Role)} className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-[#3155ff]">
+                <option value="USER">USER</option><option value="STAFF">STAFF</option><option value="ADMIN">ADMIN</option><option value="SUPER_ADMIN">SUPER_ADMIN</option>
+              </select>
+            </div>
+          ))}
+        </div>
+        <div className="hidden overflow-x-auto md:block">
           <table className="w-full text-left text-xs text-slate-600">
             <thead className="bg-slate-50 border-b border-slate-200 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
               <tr>
@@ -217,7 +174,22 @@ export default function AdminUsersPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {filteredUsers.map((u) => (
+              {loading && [0, 1, 2, 3, 4].map((i) => (
+                <tr key={i}>
+                  <td colSpan={4} className="px-4 py-4">
+                    <div className="flex items-center gap-3">
+                      <Skeleton tone="light" className="h-8 w-8 rounded-full" />
+                      <div className="flex-1 space-y-1.5">
+                        <Skeleton tone="light" className="h-3.5 w-48" />
+                        <Skeleton tone="light" className="h-3 w-32" />
+                      </div>
+                      <Skeleton tone="light" className="h-6 w-20 rounded-full" />
+                      <Skeleton tone="light" className="h-7 w-24 rounded-lg ml-auto" />
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {!loading && filteredUsers.map((u) => (
                 <tr key={u.id} className="hover:bg-slate-50/75 transition-colors">
                   <td className="py-4 px-4">
                     <div className="flex items-center gap-3">

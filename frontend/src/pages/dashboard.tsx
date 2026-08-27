@@ -1,187 +1,541 @@
-import React, { useState, useEffect } from "react";
+import React, { useMemo, useRef, useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/router";
-import {
-  Calendar,
-  QrCode,
-  Shield,
-  ArrowRight,
-  LogOut,
-  User,
-  Ticket,
-  Clock,
-  CheckCircle2,
-} from "lucide-react";
+import { ArrowUpRight, Download, LogOut, QrCode, Shield, MapPin } from "lucide-react";
+import QRCode from "qrcode";
 import { api } from "../lib/api";
-import type { MeResponse, Registration } from "../types";
+import { withMinSkeleton } from "../lib/withMinSkeleton";
+import { SportHeader, SportFooter } from "../components/SportHeader";
+import { Skeleton } from "../components/Skeleton";
+import { BakongPayment } from "../components/BakongPayment";
+import { AlertBanner } from "../components/alerts/AlertSystem";
+import type { Event, MeResponse, PaymentCheckout, Registration } from "../types";
+
+const acid = "#d9ff00";
+
+const statusStyles: Record<string, string> = {
+  CONFIRMED: "text-black",
+  PENDING: "text-amber-300 border-amber-300/30",
+  CANCELLED: "text-white/40 border-white/15",
+  REFUNDED: "text-white/40 border-white/15",
+};
+
+function formatDate(value?: string | null) {
+  if (!value) return "Date TBD";
+  return new Intl.DateTimeFormat(undefined, { weekday: "short", day: "numeric", month: "short" }).format(new Date(value));
+}
 
 export default function DashboardPage() {
   const [user, setUser] = useState<MeResponse | null>(null);
   const [registrations, setRegistrations] = useState<Registration[]>([]);
+  const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [openTicketId, setOpenTicketId] = useState<string | null>(null);
+  const [qrByRegId, setQrByRegId] = useState<Record<string, string>>({});
+  const [qrLoadingId, setQrLoadingId] = useState<string | null>(null);
+  const [ticketDownloadingId, setTicketDownloadingId] = useState<string | null>(null);
+	const [payment, setPayment] = useState<PaymentCheckout | null>(null);
+	const [paymentEventName, setPaymentEventName] = useState("Your race entry");
+	const [paymentLoadingId, setPaymentLoadingId] = useState<string | null>(null);
+  const ticketRefs = useRef<Record<string, HTMLElement | null>>({});
   const router = useRouter();
 
   useEffect(() => {
-    async function loadData() {
+    async function load() {
       try {
-        setLoading(true);
-        const [me, regs] = await Promise.all([
-          api.getMe().catch(() => null),
-          api.listMyRegistrations().catch(() => []),
-        ]);
-
-        if (me) {
-          setUser(me);
-        } else {
-          // Fallback mock profile if not authenticated
-          setUser({
-            id: "u-1",
-            email: "runner@unityrunclub.com",
-            role: "ADMIN",
-            name: "Unity Runner",
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          });
+        const me = await withMinSkeleton(() => api.getMe().catch(() => null));
+        if (!me) {
+          router.push("/auth/login?redirect=/dashboard");
+          return;
         }
+        setUser(me);
+        const [regs, evts] = await withMinSkeleton(() => Promise.all([
+          api.listMyRegistrations(),
+          api.listEvents({ limit: 50 }),
+        ]));
         setRegistrations(regs || []);
-      } catch (err: any) {
-        setError(err?.message || "Failed to load dashboard data");
+        setEvents(evts.events || []);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to load your races");
       } finally {
         setLoading(false);
       }
     }
-    loadData();
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const eventById = useMemo(() => new Map(events.map((e) => [e.id, e])), [events]);
+
+  // Next race = earliest upcoming confirmed registration with a known event.
+  const nextRace = useMemo(() => {
+    const confirmed = registrations.filter((r) => r.status === "CONFIRMED");
+    const dated = confirmed
+      .map((r) => ({ reg: r, event: eventById.get(r.event_id) }))
+      .filter((x): x is { reg: Registration; event: Event } => !!x.event?.event_date)
+      .sort((a, b) => +new Date(a.event.event_date) - +new Date(b.event.event_date));
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    const upcoming = dated.find((entry) => new Date(entry.event.event_date) >= startOfToday);
+    return upcoming?.reg ?? dated.at(-1)?.reg ?? confirmed[0] ?? null;
+  }, [registrations, eventById]);
+
+  const others = useMemo(
+    () => registrations.filter((r) => r.id !== nextRace?.id),
+    [registrations, nextRace]
+  );
 
   const handleLogout = async () => {
     await api.logout();
     router.push("/auth/login");
   };
 
+	const resumePayment = async (reg: Registration) => {
+		setPaymentLoadingId(reg.id);
+		setError(null);
+		try {
+			const checkout = await api.getRegistrationPayment(reg.id);
+			setPaymentEventName(eventById.get(reg.event_id)?.name || "Your race entry");
+			setPayment(checkout);
+		} catch (caught: unknown) {
+			setError(caught instanceof Error ? caught.message : "Could not reopen this payment");
+		} finally { setPaymentLoadingId(null); }
+	};
+
+	const finishPayment = async () => {
+		if (typeof window !== "undefined") localStorage.removeItem("unity_pending_payment");
+		setPayment(null);
+		const regs = await api.listMyRegistrations().catch(() => null);
+		if (regs) setRegistrations(regs);
+	};
+
+  const toggleQr = async (reg: Registration) => {
+    if (openTicketId === reg.id) {
+      setOpenTicketId(null);
+      return;
+    }
+    setOpenTicketId(reg.id);
+    setQrLoadingId(reg.id);
+    try {
+      // Registration numbers are stable, staff-authenticated check-in codes.
+      // They keep working across screenshots/devices and remain safe because
+      // only STAFF+ can submit a check-in and the DB permits it exactly once.
+      // Keep the QR inline as SVG. DOM-to-image exporters can clone an <img>
+      // before its data-URL pixels finish decoding, producing a blank white
+      // square. Inline SVG has no separate loading lifecycle, so the on-screen
+      // code and downloaded ticket always contain the same QR geometry.
+      const qrSvg = await QRCode.toString(reg.registration_number, {
+        type: "svg",
+        width: 480,
+        margin: 2,
+        errorCorrectionLevel: "H",
+      });
+      setQrByRegId((prev) => ({ ...prev, [reg.id]: qrSvg }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not load this ticket");
+      setOpenTicketId(null);
+    } finally {
+      setQrLoadingId(null);
+    }
+  };
+
+  const downloadTicket = async (reg: Registration) => {
+    const ticket = ticketRefs.current[reg.id];
+    if (!ticket || !qrByRegId[reg.id] || ticketDownloadingId) return;
+
+    setTicketDownloadingId(reg.id);
+    setError(null);
+    try {
+      // Fonts must be settled before cloning the node, otherwise the exported
+      // event title can use fallback metrics and wrap differently from screen.
+      await document.fonts?.ready;
+      const { toPng } = await import("html-to-image");
+      const dataUrl = await toPng(ticket, {
+        cacheBust: true,
+        pixelRatio: Math.min(3, Math.max(2, window.devicePixelRatio || 1)),
+        style: { boxShadow: "none" },
+        filter: (node) =>
+          !(node instanceof HTMLElement && node.dataset.ticketExportHide === "true"),
+      });
+
+      const event = eventById.get(reg.event_id);
+      const fileBase = `${event?.slug || "unity-run"}-${reg.registration_number || "ticket"}`
+        .toLowerCase()
+        .replace(/[^a-z0-9-]+/g, "-")
+        .replace(/^-+|-+$/g, "");
+      const link = document.createElement("a");
+      link.href = dataUrl;
+      link.download = `${fileBase || "unity-run-ticket"}.png`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    } catch (caught: unknown) {
+      const message = caught instanceof Error ? caught.message : "Unknown export error";
+      setError(`Could not save the full ticket: ${message}`);
+    } finally {
+      setTicketDownloadingId(null);
+    }
+  };
+
   const isStaffOrAdmin = user && ["STAFF", "ADMIN", "SUPER_ADMIN"].includes(user.role);
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50">
-        <div className="w-8 h-8 border-4 border-orange-500 border-t-transparent rounded-full animate-spin" />
+      <div className="min-h-screen bg-[#111] text-white">
+        <SportHeader active="account" accountHref="/dashboard" accountLabel="Account" />
+        <section className="border-b border-white/10">
+          <div className="mx-auto max-w-[1440px] px-5 pb-12 pt-14 sm:px-8 sm:pb-16 sm:pt-20">
+            <Skeleton className="h-3 w-56" />
+            <Skeleton className="mt-10 h-[15vw] max-h-[120px] w-80 rounded-xl" />
+            <div className="mt-6 flex gap-4">
+              <Skeleton className="h-3 w-32" />
+              <Skeleton className="h-3 w-24" />
+            </div>
+          </div>
+        </section>
+        <section className="mx-auto grid max-w-[1440px] gap-10 px-5 py-12 sm:px-8 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] lg:gap-14 lg:py-16">
+          {/* Next-race ticket placeholder */}
+          <div>
+            <Skeleton className="h-3 w-16" />
+            <div className="mt-4 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04] p-6 sm:p-8">
+              <div className="flex justify-between">
+                <Skeleton className="h-3 w-40" />
+                <Skeleton className="h-5 w-24 rounded-full" />
+              </div>
+              <Skeleton className="mt-5 h-10 w-3/4 rounded-lg" />
+              <div className="mt-6 grid grid-cols-2 gap-4 border-t border-dashed border-white/10 pt-5 sm:grid-cols-4">
+                {[0, 1, 2, 3].map((i) => (
+                  <div key={i}>
+                    <Skeleton className="h-2.5 w-14" />
+                    <Skeleton className="mt-2 h-4 w-20" />
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+          {/* Entries list placeholder */}
+          <div>
+            <Skeleton className="h-3 w-28" />
+            <div className="mt-4 space-y-3">
+              {[0, 1, 2].map((i) => (
+                <Skeleton key={i} className="h-[72px] rounded-xl" />
+              ))}
+            </div>
+          </div>
+        </section>
       </div>
     );
   }
 
+  const firstName = (user?.name || user?.email || "Runner").split(/[\s@]/)[0];
+
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900">
-      {/* Header */}
-      <header className="bg-white border-b border-slate-200">
-        <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
-          <Link href="/" className="font-extrabold text-lg text-slate-900 tracking-tight flex items-center gap-2">
-            <span className="w-3 h-3 rounded-full bg-orange-500" />
-            <span>UNITY RUN CLUB</span>
-          </Link>
+    <div className="min-h-screen bg-[#111] text-white">
+		{payment && <BakongPayment checkout={payment} eventName={paymentEventName} onPaid={finishPayment} onClose={() => setPayment(null)} />}
+      <SportHeader active="account" accountHref="/dashboard" accountLabel="Account" />
 
-          <div className="flex items-center gap-4">
-            {isStaffOrAdmin && (
-              <Link
-                href="/admin"
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-orange-50 text-orange-700 border border-orange-200 hover:bg-orange-100 rounded-lg text-xs font-bold transition-colors shadow-sm"
-              >
-                <Shield className="w-3.5 h-3.5" />
-                <span>Admin Panel</span>
-              </Link>
-            )}
-
-            <button
-              onClick={handleLogout}
-              className="text-xs text-slate-500 hover:text-red-600 flex items-center gap-1 font-medium"
-            >
-              <LogOut className="w-3.5 h-3.5" />
-              <span>Logout</span>
-            </button>
-          </div>
-        </div>
-      </header>
-
-      <main className="max-w-6xl mx-auto px-4 py-8">
-        {/* Admin Callout Banner for Staff & Admins */}
-        {isStaffOrAdmin && (
-          <div className="mb-8 p-6 rounded-2xl bg-gradient-to-r from-slate-900 to-slate-800 text-white shadow-md flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-            <div>
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-orange-500/30 text-orange-300 border border-orange-500/40 uppercase tracking-wider">
-                {user.role} Access Enabled
-              </span>
-              <h2 className="text-lg font-bold mt-2">Organizer & Check-in Tools</h2>
-              <p className="text-xs text-slate-300 mt-0.5">
-                Access the event manager, ticket scanner, and attendee lists.
+      <main>
+        {/* Hero */}
+        <section className="relative overflow-hidden border-b border-white/10">
+          <div className="topo-surface absolute inset-0 opacity-90" />
+          <div className="relative mx-auto max-w-[1440px] px-5 pb-12 pt-14 sm:px-8 sm:pb-16 sm:pt-20">
+            <div className="flex items-start justify-between gap-6">
+              <p className="max-w-xs text-xs font-bold uppercase leading-5 tracking-[0.14em]" style={{ color: acid }}>
+                Race wallet — tickets, bibs and check-in codes live here.
               </p>
+              {isStaffOrAdmin && (
+                <Link
+                  href="/admin"
+                  className="inline-flex shrink-0 items-center gap-1.5 rounded-full px-4 py-2.5 text-xs font-bold uppercase tracking-[0.08em] text-black transition hover:opacity-90"
+                  style={{ backgroundColor: acid }}
+                >
+                  <Shield className="h-3.5 w-3.5" /> Admin
+                </Link>
+              )}
             </div>
-            <Link
-              href="/admin"
-              className="inline-flex items-center gap-2 px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold rounded-xl shadow transition-all"
-            >
-              <span>Go to Admin Panel</span>
-              <ArrowRight className="w-4 h-4" />
-            </Link>
+
+            <h1 className="sport-display mt-10 text-[18vw] uppercase leading-[0.82] tracking-[-0.04em] sm:text-[10vw] lg:text-[120px]">
+              {firstName}&rsquo;s runs
+            </h1>
+
+            <p className="mt-6 flex flex-wrap items-center gap-x-5 gap-y-1 text-xs font-bold uppercase tracking-[0.16em] text-white/50">
+              <span>
+                {registrations.length} registration{registrations.length === 1 ? "" : "s"}
+              </span>
+              <span aria-hidden className="text-white/20">·</span>
+              <span>
+                {registrations.filter((r) => r.status === "CONFIRMED").length} confirmed
+              </span>
+              <button
+                onClick={handleLogout}
+                className="inline-flex items-center gap-1.5 text-white/40 transition hover:text-white"
+              >
+                <LogOut className="h-3.5 w-3.5" /> Log out
+              </button>
+            </p>
+          </div>
+        </section>
+
+        {error && (
+          <div className="mx-auto max-w-[1440px] px-5 pt-8 sm:px-8">
+            <AlertBanner tone="error" title="Race wallet needs attention" appearance="dark" onDismiss={() => setError(null)}>{error}</AlertBanner>
           </div>
         )}
 
-        {/* User Info Header */}
-        <div className="bg-white rounded-2xl border border-slate-200 p-6 mb-8 shadow-sm flex items-center gap-4">
-          <div className="w-14 h-14 rounded-2xl bg-orange-100 text-orange-600 flex items-center justify-center font-bold text-xl">
-            {user?.name ? user.name.charAt(0) : user?.email?.charAt(0).toUpperCase() || "U"}
-          </div>
-          <div>
-            <h1 className="text-xl font-bold text-slate-900">{user?.name || "Runner"}</h1>
-            <p className="text-xs text-slate-500">{user?.email}</p>
-          </div>
-        </div>
-
-        {/* My Event Registrations */}
-        <div>
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h2 className="text-lg font-bold text-slate-900">My Race Registrations</h2>
-              <p className="text-xs text-slate-500">Upcoming runs and digital QR tickets</p>
-            </div>
+        {/* Tickets */}
+        {registrations.length === 0 ? (
+          <section className="mx-auto max-w-[1440px] px-5 py-20 text-center sm:px-8">
+            <p className="sport-display text-4xl uppercase leading-none text-white/10 sm:text-6xl">No races yet</p>
+            <p className="mx-auto mt-4 max-w-sm text-xs font-bold uppercase leading-5 tracking-[0.14em] text-white/40">
+              Sign up for an event and your race ticket appears here.
+            </p>
             <Link
               href="/events"
-              className="text-xs font-semibold text-orange-600 hover:text-orange-700 flex items-center gap-1"
+              className="mt-8 inline-flex items-center gap-2 rounded-full px-5 py-3 text-sm font-bold uppercase tracking-[0.06em] text-black transition hover:opacity-90"
+              style={{ backgroundColor: acid }}
             >
-              Browse Events <ArrowRight className="w-3.5 h-3.5" />
+              Browse events <ArrowUpRight className="h-4 w-4" />
             </Link>
-          </div>
+          </section>
+        ) : (
+          <section className="mx-auto grid max-w-[1440px] gap-10 px-5 py-12 sm:px-8 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] lg:gap-14 lg:py-16">
+            {/* Next race — the ticket */}
+            {nextRace && (() => {
+              const event = eventById.get(nextRace.event_id);
+              const isOpen = openTicketId === nextRace.id;
+              return (
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-[0.18em] text-white/40">Next up</p>
 
-          {registrations.length === 0 ? (
-            <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center">
-              <Ticket className="w-10 h-10 text-slate-300 mx-auto mb-3" />
-              <h3 className="text-sm font-bold text-slate-800">No active registrations</h3>
-              <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
-                Sign up for an upcoming running event to get your race ticket and QR code.
+                  <article
+                    ref={(node) => { ticketRefs.current[nextRace.id] = node; }}
+                    className="relative mt-4 select-none overflow-hidden rounded-2xl bg-white text-black shadow-[0_24px_80px_-24px_rgba(217,255,0,0.25)]"
+                  >
+                    {/* punched notches */}
+                    <span aria-hidden className="absolute -left-3 top-1/2 h-6 w-6 -translate-y-1/2 rounded-full bg-[#111]" />
+                    <span aria-hidden className="absolute -right-3 top-1/2 h-6 w-6 -translate-y-1/2 rounded-full bg-[#111]" />
+
+                    <div className="p-6 sm:p-8">
+                      <div className="flex items-center justify-between gap-4">
+                        <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-black/50">
+                          Unity Runn Club · Official Entry
+                        </span>
+                        <span
+                          className={`rounded-full border px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] ${
+                            statusStyles[nextRace.status] ?? ""
+                          }`}
+                          style={nextRace.status === "CONFIRMED" ? { backgroundColor: acid, borderColor: acid } : undefined}
+                        >
+                          {nextRace.checked_in_at ? "CHECKED IN" : nextRace.status}
+                        </span>
+                      </div>
+
+                      <h2 className="sport-display mt-5 uppercase leading-[0.9] tracking-[-0.02em]" style={{ fontSize: "clamp(28px, 4vw, 44px)" }}>
+                        {event?.name ?? "Your race"}
+                      </h2>
+
+                      <dl className="mt-6 grid grid-cols-2 gap-x-6 gap-y-4 border-t border-dashed border-black/15 pt-5 text-xs sm:grid-cols-4">
+                        <div>
+                          <dt className="font-bold uppercase tracking-[0.14em] text-black/40">Bib no.</dt>
+                          <dd className="mt-1 whitespace-nowrap font-mono text-sm font-semibold">{nextRace.registration_number ?? "—"}</dd>
+                        </div>
+                        <div>
+                          <dt className="font-bold uppercase tracking-[0.14em] text-black/40">Date</dt>
+                          <dd className="mt-1 font-semibold">{formatDate(event?.event_date)}</dd>
+                        </div>
+                        <div>
+                          <dt className="font-bold uppercase tracking-[0.14em] text-black/40">Runner</dt>
+                          <dd className="mt-1 truncate font-semibold">{nextRace.full_name}</dd>
+                        </div>
+                        <div>
+                          <dt className="font-bold uppercase tracking-[0.14em] text-black/40">Tee</dt>
+                          <dd className="mt-1 font-semibold">{nextRace.tshirt_size || "—"}</dd>
+                        </div>
+                      </dl>
+                    </div>
+
+                    {/* perforated stub */}
+                    <div className="border-t-2 border-dashed border-black/15 p-6 sm:p-8" style={{ backgroundColor: nextRace.status === "CONFIRMED" ? acid : "#f4f4f4" }}>
+                      {nextRace.checked_in_at ? (
+                        <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.14em] text-black/65">
+                          <span className="flex h-6 w-6 items-center justify-center rounded-full bg-black text-[#d9ff00]">✓</span>
+                          Checked in {new Date(nextRace.checked_in_at).toLocaleString()}
+                        </div>
+                      ) : nextRace.status !== "CONFIRMED" ? (
+                        <p className="text-xs font-bold uppercase tracking-[0.14em] text-black/50">
+                          Complete payment to unlock your check-in QR.
+                        </p>
+                      ) : isOpen ? (
+                        <div className="flex flex-col items-center gap-3 sm:flex-row sm:items-center sm:gap-6">
+                          <div
+                            role="img"
+                            aria-label={`Check-in QR for ${nextRace.registration_number}`}
+                            className="h-36 w-36 rounded-lg bg-white p-2 shadow-sm motion-safe:animate-[qrIn_.35s_ease-out] [&_svg]:block [&_svg]:h-full [&_svg]:w-full"
+                            dangerouslySetInnerHTML={{ __html: qrByRegId[nextRace.id] }}
+                          />
+                          <div className="text-center sm:text-left">
+                            <p className="text-xs font-bold uppercase tracking-[0.14em]">Scan at the check-in desk</p>
+                            <p className="mt-1 max-w-xs text-[11px] font-medium leading-4 text-black/55">
+                              This code stays valid. Save it to your phone or take a screenshot for race day.
+                            </p>
+                            <div data-ticket-export-hide="true" className="mt-3 flex flex-wrap justify-center gap-4 sm:justify-start">
+                              <button
+                                onClick={() => downloadTicket(nextRace)}
+                                disabled={ticketDownloadingId === nextRace.id}
+                                className="inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-[0.12em] underline underline-offset-4 hover:opacity-70 disabled:opacity-50"
+                              >
+                                {ticketDownloadingId === nextRace.id ? (
+                                  <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-black/25 border-t-black" />
+                                ) : (
+                                  <Download className="h-3.5 w-3.5" />
+                                )}
+                                {ticketDownloadingId === nextRace.id ? "Saving ticket" : "Save ticket"}
+                              </button>
+                              <button onClick={() => toggleQr(nextRace)} className="text-[11px] font-bold uppercase tracking-[0.12em] underline underline-offset-4 hover:opacity-70">
+                                Hide code
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => toggleQr(nextRace)}
+                          disabled={qrLoadingId === nextRace.id}
+                          className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-black py-3.5 text-xs font-bold uppercase tracking-[0.1em] text-white transition hover:opacity-85 disabled:opacity-60 sm:w-auto sm:px-8"
+                        >
+                          {qrLoadingId === nextRace.id ? (
+                            <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                          ) : (
+                            <QrCode className="h-4 w-4" />
+                          )}
+                          Show check-in QR
+                        </button>
+                      )}
+                    </div>
+                  </article>
+                </div>
+              );
+            })()}
+
+            {/* Everything else */}
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-white/40">
+                All entries {others.length > 0 && `(${others.length})`}
               </p>
+
+              {others.length === 0 ? (
+                <div className="mt-4 rounded-2xl border border-dashed border-white/15 p-8 text-center">
+                  <p className="text-xs font-bold uppercase leading-5 tracking-[0.14em] text-white/40">
+                    One race on the books. Add another?
+                  </p>
+                  <Link href="/events" className="mt-4 inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-[0.12em] transition hover:opacity-80" style={{ color: acid }}>
+                    Find events <ArrowUpRight className="h-3.5 w-3.5" />
+                  </Link>
+                </div>
+              ) : (
+                <ul className="mt-4 space-y-3">
+                  {others.map((reg) => {
+                    const event = eventById.get(reg.event_id);
+                    const isOpen = openTicketId === reg.id;
+                    const canQr = reg.status === "CONFIRMED" && !reg.checked_in_at;
+                    return (
+                      <li key={reg.id}>
+                        <article
+                          ref={(node) => { ticketRefs.current[reg.id] = node; }}
+                          className="overflow-hidden rounded-xl border border-white/10 bg-white/[0.04] transition-colors hover:border-white/20"
+                        >
+                          <div className="flex flex-wrap items-center gap-x-5 gap-y-2 p-4 sm:p-5">
+                            <span
+                              className={`shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] ${statusStyles[reg.status] ?? ""}`}
+                              style={reg.status === "CONFIRMED" ? { backgroundColor: acid, borderColor: acid, color: "#000" } : undefined}
+                            >
+                              {reg.checked_in_at ? "CHECKED IN" : reg.status}
+                            </span>
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate text-sm font-bold">{event?.name ?? "Registration"}</p>
+                              <p className="mt-0.5 flex items-center gap-3 text-[11px] font-medium text-white/40">
+                                <span className="font-mono">{reg.registration_number ?? reg.id.slice(0, 8)}</span>
+                                <span className="inline-flex items-center gap-1">
+                                  <MapPin className="h-3 w-3" /> {formatDate(event?.event_date)}
+                                </span>
+                              </p>
+                            </div>
+                            {canQr && (
+                              <button
+                                onClick={() => toggleQr(reg)}
+                                disabled={qrLoadingId === reg.id}
+                                className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-white/20 px-3.5 py-2 text-[11px] font-bold uppercase tracking-[0.1em] transition hover:border-white/50 disabled:opacity-60"
+                              >
+                                {qrLoadingId === reg.id ? (
+                                  <span className="h-3 w-3 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                                ) : (
+                                  <QrCode className="h-3.5 w-3.5" />
+                                )}
+                                {isOpen ? "Hide" : "QR"}
+                              </button>
+                            )}
+							{reg.status === "PENDING" && (
+								<button onClick={() => resumePayment(reg)} disabled={paymentLoadingId === reg.id} className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-[#d9ff00] px-3.5 py-2 text-[11px] font-bold uppercase tracking-[0.1em] text-black transition hover:opacity-85 disabled:opacity-60">
+									{paymentLoadingId === reg.id ? <span className="h-3 w-3 animate-spin rounded-full border-2 border-black/20 border-t-black" /> : <QrCode className="h-3.5 w-3.5" />} Pay now
+								</button>
+							)}
+                          </div>
+                          {isOpen && canQr && qrByRegId[reg.id] && (
+                            <div className="flex items-center gap-4 border-t border-white/10 p-4 sm:p-5">
+                              <div
+                                role="img"
+                                aria-label={`Check-in QR for ${reg.registration_number}`}
+                                className="h-24 w-24 rounded-lg bg-white p-1.5 motion-safe:animate-[qrIn_.35s_ease-out] [&_svg]:block [&_svg]:h-full [&_svg]:w-full"
+                                dangerouslySetInnerHTML={{ __html: qrByRegId[reg.id] }}
+                              />
+                              <p className="max-w-xs text-[11px] font-medium leading-4 text-white/50">
+                                Show at the check-in desk. This code stays valid, so screenshots work offline.
+                              </p>
+                              <button
+                                data-ticket-export-hide="true"
+                                onClick={() => downloadTicket(reg)}
+                                disabled={ticketDownloadingId === reg.id}
+                                className="ml-auto inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-[0.1em] text-white/70 hover:text-white disabled:opacity-50"
+                              >
+                                {ticketDownloadingId === reg.id ? (
+                                  <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/25 border-t-white" />
+                                ) : (
+                                  <Download className="h-3.5 w-3.5" />
+                                )}
+                                {ticketDownloadingId === reg.id ? "Saving" : "Save ticket"}
+                              </button>
+                            </div>
+                          )}
+                        </article>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+
               <Link
                 href="/events"
-                className="inline-flex items-center gap-1.5 mt-4 px-4 py-2 bg-orange-600 text-white rounded-xl text-xs font-semibold hover:bg-orange-700"
+                className="mt-6 inline-flex items-center gap-2 rounded-full border border-white/20 px-5 py-3 text-xs font-bold uppercase tracking-[0.08em] transition hover:border-white/50"
               >
-                <span>Find an Event</span>
+                Join another run <ArrowUpRight className="h-3.5 w-3.5" />
               </Link>
             </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {registrations.map((reg) => (
-                <div key={reg.id} className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
-                  <div className="flex justify-between items-start mb-3">
-                    <span className="text-xs font-bold text-orange-600 bg-orange-50 px-2.5 py-1 rounded-lg">
-                      {reg.status}
-                    </span>
-                    <span className="text-xs text-slate-400 font-mono">#{reg.registration_number || reg.id.slice(0, 8)}</span>
-                  </div>
-                  <h4 className="font-bold text-sm text-slate-900">{reg.full_name}</h4>
-                  <p className="text-xs text-slate-500 mt-1">T-Shirt: {reg.tshirt_size || "Standard"}</p>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+          </section>
+        )}
       </main>
+
+      <SportFooter />
+
+      <style jsx global>{`
+        @keyframes qrIn {
+          from { opacity: 0; transform: translateY(6px) scale(0.96); }
+          to { opacity: 1; transform: none; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .motion-safe\\:animate-\\[qrIn_\\.35s_ease-out\\] { animation: none; }
+        }
+      `}</style>
     </div>
   );
 }

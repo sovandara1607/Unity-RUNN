@@ -49,8 +49,14 @@ type TemplateData struct {
 	CategoryName       string
 	RegistrationNumber string
 	EventDate          string
+	StartTime          string
 	Location           string
+	TshirtSize         string
 	AmountFormatted    string
+	PaymentProvider    string
+	PaymentReference   string
+	PaymentVerifiedAt  string
+	DashboardURL       string
 	ChangedFields      string
 }
 
@@ -97,12 +103,12 @@ func renderText(tmplSrc string, data TemplateData) (string, error) {
 }
 
 func renderHTMLFile(name string, data TemplateData) (string, error) {
-	tmpl, err := template.ParseFS(templateFS, "templates/"+name)
+	tmpl, err := template.ParseFS(templateFS, "templates/base.html.tmpl", "templates/"+name)
 	if err != nil {
 		return "", err
 	}
 	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, data); err != nil {
+	if err := tmpl.ExecuteTemplate(&buf, "base", data); err != nil {
 		return "", err
 	}
 	return buf.String(), nil

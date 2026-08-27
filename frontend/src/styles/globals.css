@@ -4,4 +4,124 @@
 
 :root {
   --primary: #f97316;
+  --font-secondary: "TT Norms Pro", "TT Norms", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "TT Norms Pro", "TT Norms", "Helvetica Neue", Arial, sans-serif;
+}
+
+.admin-shell,
+.public-shell,
+.auth-shell {
+  font-family: var(--font-secondary);
+}
+
+.admin-shell button,
+.admin-shell input,
+.admin-shell select,
+.admin-shell textarea,
+.public-shell button,
+.public-shell input,
+.public-shell select,
+.public-shell textarea {
+  font-family: inherit;
+}
+
+.auth-shell button,
+.auth-shell input,
+.auth-shell select,
+.auth-shell textarea {
+  font-family: inherit;
+}
+
+/* Keep the admin's race-poster display face intact. TT Norms Pro is reserved
+   for the supporting interface and data roles inside race control. */
+.admin-shell .font-sans,
+.admin-shell .font-secondary,
+.admin-shell .font-mono {
+  font-family: var(--font-secondary) !important;
+}
+
+.admin-shell .font-mono {
+  font-family: var(--font-mono) !important;
+  font-variant-numeric: tabular-nums slashed-zero;
+}
+
+/* Public club pages use TT Norms Pro as their geometric supporting face.
+   The explicit .sport-display declaration below continues to own headlines. */
+.public-shell .font-sans,
+.public-shell .font-secondary,
+.public-shell .font-mono {
+  font-family: var(--font-secondary) !important;
+}
+
+.public-shell .font-mono {
+  font-family: var(--font-mono) !important;
+  font-variant-numeric: tabular-nums slashed-zero;
+}
+
+.topo-surface {
+  background-color: #171717;
+  background-image:
+    radial-gradient(ellipse at 18% 32%, transparent 0 19%, rgba(255,255,255,.09) 19.3% 19.8%, transparent 20.1%),
+    radial-gradient(ellipse at 72% 68%, transparent 0 23%, rgba(255,255,255,.07) 23.3% 23.8%, transparent 24.1%),
+    radial-gradient(ellipse at 62% 18%, transparent 0 12%, rgba(255,255,255,.06) 12.3% 12.8%, transparent 13.1%);
+  background-size: 280px 230px, 340px 280px, 220px 190px;
+}
+
+.announcement-strip__track {
+  animation: announcement-scroll var(--announcement-duration, 24s) linear infinite;
+  will-change: transform;
+}
+
+.announcement-strip__viewport {
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 22px, #000 calc(100% - 22px), transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 22px, #000 calc(100% - 22px), transparent);
+}
+
+.announcement-strip:hover .announcement-strip__track,
+.announcement-strip:focus-visible .announcement-strip__track,
+.announcement-strip:focus-within .announcement-strip__track {
+  animation-play-state: paused;
+}
+
+@keyframes announcement-scroll {
+  from { transform: translate3d(0, 0, 0); }
+  to { transform: translate3d(-50%, 0, 0); }
+}
+
+.sport-display {
+  font-family: Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif;
+  font-stretch: condensed;
+}
+
+.admin-track-surface {
+  background-image:
+    linear-gradient(90deg, rgba(49, 85, 255, 0.045) 1px, transparent 1px),
+    linear-gradient(rgba(21, 21, 21, 0.025) 1px, transparent 1px);
+  background-size: 72px 100%, 100% 72px;
+  background-position: 28px 0, 0 16px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .admin-track-surface * {
+    scroll-behavior: auto !important;
+  }
+
+  .announcement-strip__track {
+    width: 100%;
+    justify-content: center;
+    animation: none;
+    transform: none;
+  }
+
+  .announcement-strip__group {
+    display: none;
+  }
+
+  .announcement-strip__group:first-child {
+    display: flex;
+  }
+
+  .announcement-strip__group:first-child > :not(:first-child) {
+    display: none;
+  }
 }

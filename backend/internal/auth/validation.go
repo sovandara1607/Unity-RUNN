@@ -7,14 +7,14 @@ var validate = validator.New(validator.WithRequiredStructEnabled())
 // RegisterRequest is the payload for POST /api/v1/auth/register.
 type RegisterRequest struct {
 	Email    string `json:"email" validate:"required,email"`
-	Password string `json:"password" validate:"required,min=8"`
+	Password string `json:"password" validate:"required,min=8,max=72"`
 	FullName string `json:"full_name" validate:"required,max=200"`
 }
 
 // LoginRequest is the payload for POST /api/v1/auth/login.
 type LoginRequest struct {
 	Email    string `json:"email" validate:"required,email"`
-	Password string `json:"password" validate:"required"`
+	Password string `json:"password" validate:"required,max=72"`
 }
 
 // UpdateProfileRequest is the payload for PATCH /api/v1/me. All

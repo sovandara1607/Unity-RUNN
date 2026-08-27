@@ -8,7 +8,10 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-const queueKey = "notifications:queue"
+const (
+	queueKey     = "notifications:queue"
+	heartbeatKey = "notifications:worker:heartbeat"
+)
 
 // Queue is a thin Redis list wrapper: push enqueues a notification
 // ID, pop blocks (with timeout) for the next one. push/pop are

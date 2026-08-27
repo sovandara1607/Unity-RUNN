@@ -1,15 +1,15 @@
-<!DOCTYPE html>
-<html>
-<body style="font-family: sans-serif; color: #1a1a1a;">
-  <h1>You're registered! 🏃</h1>
-  <p>Hi {{.FullName}},</p>
-  <p>Your registration for <strong>{{.EventName}}</strong> ({{.CategoryName}}) is confirmed.</p>
-  <ul>
-    <li>Registration number: <strong>{{.RegistrationNumber}}</strong></li>
-    <li>Event date: {{.EventDate}}</li>
-    <li>Location: {{.Location}}</li>
-  </ul>
-  <p>See you at the start line!</p>
-  <p>— Unity Run Club</p>
-</body>
-</html>
+{{define "emailTitle"}}Entry confirmed{{end}}
+{{define "preheader"}}Your race ticket is attached and ready for check-in.{{end}}
+{{define "emailContent"}}
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+  <tr><td style="padding:38px 34px 18px;color:#3155ff;font-size:11px;font-weight:800;letter-spacing:2px;text-transform:uppercase;">Entry confirmed / {{.RegistrationNumber}}</td></tr>
+  <tr><td style="padding:0 34px 24px;color:#111111;font-size:42px;line-height:1.02;font-weight:900;letter-spacing:-1.8px;text-transform:uppercase;">You’re on the start list.</td></tr>
+  <tr><td style="padding:0 34px 30px;color:#5c5c58;font-size:16px;line-height:1.65;">Hi {{.FullName}}, your entry for <strong style="color:#111111;">{{.EventName}}</strong> is confirmed. Your official ticket is attached—save it to your phone before race day.</td></tr>
+  <tr><td style="padding:0 34px 30px;"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border-top:1px solid #d7d7d2;border-bottom:1px solid #d7d7d2;">
+    <tr><td style="padding:18px 0;color:#8a8a84;font-size:10px;font-weight:800;letter-spacing:1.5px;text-transform:uppercase;">Race</td><td align="right" style="padding:18px 0;color:#111;font-size:14px;font-weight:800;">{{.CategoryName}}</td></tr>
+    <tr><td style="padding:0 0 18px;color:#8a8a84;font-size:10px;font-weight:800;letter-spacing:1.5px;text-transform:uppercase;">Date / start</td><td align="right" style="padding:0 0 18px;color:#111;font-size:14px;font-weight:800;">{{.EventDate}} / {{.StartTime}}</td></tr>
+    <tr><td style="padding:0 0 18px;color:#8a8a84;font-size:10px;font-weight:800;letter-spacing:1.5px;text-transform:uppercase;">Venue</td><td align="right" style="padding:0 0 18px;color:#111;font-size:14px;font-weight:800;">{{.Location}}</td></tr>
+  </table></td></tr>
+  <tr><td style="padding:0 34px 36px;"><a href="{{.DashboardURL}}" style="display:inline-block;background:#d9ff00;color:#111111;text-decoration:none;padding:15px 21px;font-size:12px;font-weight:900;letter-spacing:1.2px;text-transform:uppercase;border:2px solid #111111;">Open race wallet →</a></td></tr>
+  <tr><td style="background:#3155ff;padding:17px 34px;color:#ffffff;font-size:11px;font-weight:800;letter-spacing:1.1px;text-transform:uppercase;">Attachment: official ticket PDF / QR included</td></tr>
+</table>{{end}}

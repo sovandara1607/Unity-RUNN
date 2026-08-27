@@ -16,7 +16,9 @@ func TestRender_AllTypesRenderWithoutError(t *testing.T) {
 	data := TemplateData{
 		FullName: "Test Runner", EventName: "Founders Run", CategoryName: "5K",
 		RegistrationNumber: "URC-2026-000001", EventDate: "Saturday, January 10, 2026",
-		Location: "Diamond Island", AmountFormatted: "$50.00", ChangedFields: "event date, location",
+		StartTime: "6:00 AM", Location: "Diamond Island", AmountFormatted: "$50.00",
+		PaymentProvider: "Bakong", PaymentReference: "KHQR-001",
+		DashboardURL: "http://localhost:3000/dashboard", ChangedFields: "event date, location",
 	}
 
 	for _, typ := range allTypes() {

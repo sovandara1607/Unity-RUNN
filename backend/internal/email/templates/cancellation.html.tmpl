@@ -1,10 +1,9 @@
-<!DOCTYPE html>
-<html>
-<body style="font-family: sans-serif; color: #1a1a1a;">
-  <h1>Registration cancelled</h1>
-  <p>Hi {{.FullName}},</p>
-  <p>Your registration for <strong>{{.EventName}}</strong> ({{.CategoryName}}), number {{.RegistrationNumber}}, has been cancelled.</p>
-  <p>If this wasn't you, please contact us.</p>
-  <p>— Unity Run Club</p>
-</body>
-</html>
+{{define "emailTitle"}}Registration cancelled{{end}}
+{{define "preheader"}}Your entry for {{.EventName}} has been cancelled.{{end}}
+{{define "emailContent"}}
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+  <tr><td style="padding:38px 34px 18px;color:#3155ff;font-size:11px;font-weight:800;letter-spacing:2px;text-transform:uppercase;">Entry status / cancelled</td></tr>
+  <tr><td style="padding:0 34px 22px;color:#111;font-size:42px;line-height:1.02;font-weight:900;letter-spacing:-1.8px;text-transform:uppercase;">You’re off the start list.</td></tr>
+  <tr><td style="padding:0 34px 28px;color:#5c5c58;font-size:16px;line-height:1.65;">Hi {{.FullName}}, registration <strong style="color:#111;">{{.RegistrationNumber}}</strong> for {{.EventName}} / {{.CategoryName}} has been cancelled.</td></tr>
+  <tr><td style="padding:0 34px 38px;color:#5c5c58;font-size:14px;line-height:1.7;border-left:6px solid #3155ff;">The ticket from your earlier confirmation is no longer valid. If you did not request this change, contact the club team.</td></tr>
+</table>{{end}}

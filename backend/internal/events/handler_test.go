@@ -4,8 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"image"
+	"image/color"
+	"image/png"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -33,13 +40,86 @@ func bearerToken(t *testing.T, tokens *auth.TokenIssuer, role auth.Role) string 
 func newTestRouter(h *Handler, tokens *auth.TokenIssuer) http.Handler {
 	r := chi.NewRouter()
 	r.Route("/api/v1/events", func(ev chi.Router) {
+		ev.With(auth.RequireAuth(tokens, auth.RoleAdmin)).Post("/posters", h.UploadPoster)
 		ev.With(auth.OptionalAuth(tokens)).Get("/", h.List)
-		ev.With(auth.OptionalAuth(tokens)).Get("/{slug}", h.GetBySlug)
+		ev.With(auth.OptionalAuth(tokens)).Get("/{id}", h.GetBySlug)
 		ev.With(auth.RequireAuth(tokens, auth.RoleAdmin)).Post("/", h.Create)
 		ev.With(auth.RequireAuth(tokens, auth.RoleAdmin)).Patch("/{id}", h.Update)
 		ev.With(auth.RequireAuth(tokens, auth.RoleAdmin)).Delete("/{id}", h.Delete)
 	})
 	return r
+}
+
+func newPosterRequest(t *testing.T, content []byte, filename string) *http.Request {
+	t.Helper()
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("poster", filename)
+	if err != nil {
+		t.Fatalf("CreateFormFile() error = %v", err)
+	}
+	if _, err := part.Write(content); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/events/posters", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	return req
+}
+
+func TestHandler_UploadPoster_SavesImage(t *testing.T) {
+	root := t.TempDir()
+	tokens := newTestTokens()
+	router := newTestRouter(NewHandler(NewService(newFakeRepo(), nil), root), tokens)
+
+	var imageData bytes.Buffer
+	img := image.NewRGBA(image.Rect(0, 0, 2, 2))
+	img.Set(0, 0, color.RGBA{R: 217, G: 255, A: 255})
+	if err := png.Encode(&imageData, img); err != nil {
+		t.Fatalf("png.Encode() error = %v", err)
+	}
+
+	req := newPosterRequest(t, imageData.Bytes(), "race-poster.png")
+	req.Host = "attacker.example"
+	req.Header.Set("X-Forwarded-Host", "attacker.example")
+	req.Header.Set("Authorization", "Bearer "+bearerToken(t, tokens, auth.RoleAdmin))
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusCreated, rec.Body.String())
+	}
+	files, err := filepath.Glob(filepath.Join(root, "events", "*.png"))
+	if err != nil || len(files) != 1 {
+		t.Fatalf("saved files = %v, error = %v", files, err)
+	}
+	if info, err := os.Stat(files[0]); err != nil || info.Size() == 0 {
+		t.Fatalf("saved poster stat error = %v, info = %v", err, info)
+	}
+	var response struct {
+		Data map[string]string `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode upload response: %v", err)
+	}
+	if got := response.Data["url"]; !strings.HasPrefix(got, "/uploads/events/") || strings.Contains(got, "attacker.example") {
+		t.Fatalf("upload URL = %q, want origin-neutral event path", got)
+	}
+}
+
+func TestHandler_UploadPoster_RejectsNonImage(t *testing.T) {
+	tokens := newTestTokens()
+	router := newTestRouter(NewHandler(NewService(newFakeRepo(), nil), t.TempDir()), tokens)
+	req := newPosterRequest(t, []byte("this is not an image"), "poster.txt")
+	req.Header.Set("Authorization", "Bearer "+bearerToken(t, tokens, auth.RoleAdmin))
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnsupportedMediaType {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusUnsupportedMediaType, rec.Body.String())
+	}
 }
 
 func TestHandler_GetBySlug_HiddenForPublicWhenDraft(t *testing.T) {

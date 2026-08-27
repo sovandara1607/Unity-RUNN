@@ -11,14 +11,22 @@ import (
 
 // fakeRepo is an in-memory eventRepository for service unit tests.
 type fakeRepo struct {
-	events map[uuid.UUID]*Event
+	events     map[uuid.UUID]*Event
+	categories map[uuid.UUID]*EventCategory
+	schedule   map[uuid.UUID]*EventSchedule
+	lastFilter ListFilter
 }
 
 func newFakeRepo() *fakeRepo {
-	return &fakeRepo{events: map[uuid.UUID]*Event{}}
+	return &fakeRepo{
+		events:     map[uuid.UUID]*Event{},
+		categories: map[uuid.UUID]*EventCategory{},
+		schedule:   map[uuid.UUID]*EventSchedule{},
+	}
 }
 
 func (f *fakeRepo) List(ctx context.Context, filter ListFilter) ([]Event, int, error) {
+	f.lastFilter = filter
 	var out []Event
 	for _, e := range f.events {
 		out = append(out, *e)
@@ -75,6 +83,106 @@ func (f *fakeRepo) Delete(ctx context.Context, id uuid.UUID) error {
 		return ErrNotFound
 	}
 	delete(f.events, id)
+	return nil
+}
+
+func (f *fakeRepo) GetCategoryByID(ctx context.Context, id uuid.UUID) (*EventCategory, error) {
+	c, ok := f.categories[id]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	cp := *c
+	return &cp, nil
+}
+
+func (f *fakeRepo) listCategories(ctx context.Context, eventID uuid.UUID) ([]EventCategory, error) {
+	var out []EventCategory
+	for _, c := range f.categories {
+		if c.EventID == eventID {
+			out = append(out, *c)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeRepo) listSchedule(ctx context.Context, eventID uuid.UUID) ([]EventSchedule, error) {
+	return nil, nil
+}
+
+func (f *fakeRepo) CreateCategory(ctx context.Context, c *EventCategory) error {
+	if _, ok := f.events[c.EventID]; !ok {
+		return ErrNotFound
+	}
+	c.ID = uuid.New()
+	c.Status = "OPEN"
+	f.categories[c.ID] = c
+	return nil
+}
+
+func (f *fakeRepo) UpdateCategory(ctx context.Context, id uuid.UUID, p *UpdateCategoryRequest) (*EventCategory, error) {
+	c, ok := f.categories[id]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	if p.Name != nil {
+		c.Name = *p.Name
+	}
+	if p.Distance != nil {
+		c.Distance = *p.Distance
+	}
+	if p.PriceCents != nil {
+		c.PriceCents = *p.PriceCents
+	}
+	if p.Capacity != nil {
+		c.Capacity = *p.Capacity
+	}
+	if p.Status != nil {
+		c.Status = *p.Status
+	}
+	if p.RegistrationDeadline != nil {
+		c.RegistrationDeadline = p.RegistrationDeadline
+	}
+	cp := *c
+	return &cp, nil
+}
+
+func (f *fakeRepo) DeleteCategory(ctx context.Context, id uuid.UUID) error {
+	if _, ok := f.categories[id]; !ok {
+		return ErrNotFound
+	}
+	delete(f.categories, id)
+	return nil
+}
+
+func (f *fakeRepo) CreateScheduleItem(ctx context.Context, s *EventSchedule) error {
+	s.ID = uuid.New()
+	f.schedule[s.ID] = s
+	return nil
+}
+
+func (f *fakeRepo) UpdateScheduleItem(ctx context.Context, id uuid.UUID, p *UpdateScheduleRequest) (*EventSchedule, error) {
+	s, ok := f.schedule[id]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	if p.Title != nil {
+		s.Title = *p.Title
+	}
+	if p.Description != nil {
+		s.Description = *p.Description
+	}
+	if p.SortOrder != nil {
+		s.SortOrder = *p.SortOrder
+	}
+	cp := *s
+	return &cp, nil
+}
+
+func (f *fakeRepo) DeleteScheduleItem(ctx context.Context, id uuid.UUID) error {
+	if _, ok := f.schedule[id]; !ok {
+		return ErrNotFound
+	}
+	delete(f.schedule, id)
 	return nil
 }
 
@@ -210,6 +318,37 @@ func TestService_GetDetailBySlug_HidesNonPublicStatusFromPublic(t *testing.T) {
 
 	if _, err := svc.GetDetailBySlug(ctx, e.Slug, true); err != nil {
 		t.Fatalf("admin GetDetailBySlug() error = %v, want nil", err)
+	}
+}
+
+func TestService_List_PublicFilterCannotIncludeDraft(t *testing.T) {
+	repo := newFakeRepo()
+	svc := NewService(repo, nil)
+	filter := &ListFilter{Statuses: []Status{StatusDraft, StatusRegistrationOpen}}
+
+	if _, _, err := svc.List(context.Background(), filter, false); err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(repo.lastFilter.Statuses) != 1 || repo.lastFilter.Statuses[0] != StatusRegistrationOpen {
+		t.Fatalf("effective statuses = %v, want only REGISTRATION_OPEN", repo.lastFilter.Statuses)
+	}
+}
+
+func TestService_CreateCategory_PersistsRegistrationDeadline(t *testing.T) {
+	repo := newFakeRepo()
+	event := &Event{ID: uuid.New()}
+	repo.events[event.ID] = event
+	svc := NewService(repo, nil)
+	deadline := time.Now().Add(24 * time.Hour).UTC().Truncate(time.Second)
+
+	category, err := svc.CreateCategory(context.Background(), event.ID, CreateCategoryRequest{
+		Name: "10K", Distance: "10K", Capacity: 50, RegistrationDeadline: &deadline,
+	})
+	if err != nil {
+		t.Fatalf("CreateCategory() error = %v", err)
+	}
+	if category.RegistrationDeadline == nil || !category.RegistrationDeadline.Equal(deadline) {
+		t.Fatalf("RegistrationDeadline = %v, want %v", category.RegistrationDeadline, deadline)
 	}
 }
 

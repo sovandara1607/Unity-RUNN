@@ -1,36 +1,44 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Unity Runn Club frontend
 
-## Getting Started
+Next.js 16 Pages Router application for runners and race-control staff.
 
-First, run the development server:
+## Local development
+
+Start PostgreSQL, Redis, the Go API, and the Socket.IO gateway from the repository root:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+docker compose up -d --build
+make migrate
+make seed
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Then start the frontend:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+cd frontend
+npm install
+npm run dev
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- Frontend: http://localhost:3000
+- API: http://localhost:8080
+- Socket.IO health: http://localhost:8081/health
+- Override the API URL with `NEXT_PUBLIC_BASE_URL` when needed.
+- Override the realtime URL with `NEXT_PUBLIC_REALTIME_URL` when needed. Copy
+  `.env.example` to `.env.local` to persist frontend overrides.
 
-## Learn More
+## Checks
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+npm run lint
+npm run build
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+The app uses client-side API calls, a short-lived JWT access token, and an
+HttpOnly rotating refresh-token cookie. Participant QR codes contain the stable
+registration number; STAFF+ authentication, event matching, confirmed status,
+and a database uniqueness constraint protect check-in.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Super Admins can inspect sanitized runtime configuration and dependency health
+at `/admin/system`. The page never receives credential values; it only shows
+whether protected settings are configured.

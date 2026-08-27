@@ -4,7 +4,16 @@
 // wired in later without touching internal/registrations.
 package payments
 
-import "context"
+import (
+	"context"
+	"errors"
+	"time"
+)
+
+var (
+	ErrPaymentNotFound = errors.New("payments: transaction not found")
+	ErrUnsupported     = errors.New("payments: operation is not supported by provider")
+)
 
 // Status is a payment's lifecycle state, mirroring the payments
 // table's CHECK constraint.
@@ -22,6 +31,24 @@ const (
 type Payment struct {
 	ProviderReference string
 	Status            Status
+	Checkout          *Checkout
+	Verification      *Verification
+}
+
+// Checkout contains the provider-generated instructions shown to the payer.
+// QRString is the EMV KHQR payload; it is not a ticket/check-in code.
+type Checkout struct {
+	QRString  string    `json:"qr_string"`
+	DeepLink  string    `json:"deep_link,omitempty"`
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
+// Verification is trusted settlement data returned by the provider API.
+type Verification struct {
+	AmountCents     int    `json:"amount_cents"`
+	Currency        string `json:"currency"`
+	ReceiverAccount string `json:"receiver_account"`
+	TransactionHash string `json:"transaction_hash,omitempty"`
 }
 
 // WebhookEvent is a provider-agnostic representation of a payment
@@ -44,7 +71,7 @@ type Provider interface {
 	CreatePayment(ctx context.Context, registrationID, currency string, amountCents int) (Payment, error)
 
 	// GetPaymentStatus polls the provider for a payment's current status.
-	GetPaymentStatus(ctx context.Context, providerReference string) (Status, error)
+	GetPaymentStatus(ctx context.Context, providerReference string) (Payment, error)
 
 	// HandleWebhook verifies and parses an incoming webhook payload.
 	HandleWebhook(ctx context.Context, payload []byte, signature string) (WebhookEvent, error)

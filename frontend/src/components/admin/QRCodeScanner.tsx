@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Camera, CameraOff, RefreshCw } from "lucide-react";
+import type { Html5Qrcode } from "html5-qrcode";
 
 interface QRCodeScannerProps {
   onScan: (decodedText: string) => void;
@@ -7,21 +8,49 @@ interface QRCodeScannerProps {
   paused?: boolean;
 }
 
+function showCameraPreviewNormally(regionId: string) {
+  // html5-qrcode can mirror the preview for selfie cameras. The scanner can
+  // still decode that feed, but mirrored text makes the station feel inverted.
+  // Force the operator's preview to match the real-world orientation.
+  const video = document.querySelector<HTMLVideoElement>(`#${regionId} video`);
+  if (!video) return;
+  video.style.setProperty("transform", "none", "important");
+  video.style.setProperty("-webkit-transform", "none", "important");
+}
+
 export function QRCodeScanner({ onScan, onError, paused = false }: QRCodeScannerProps) {
-  const scannerRef = useRef<any>(null);
+  const scannerRef = useRef<Html5Qrcode | null>(null);
   const regionId = "unity-qr-reader";
   const [cameraActive, setCameraActive] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
+  const [retryKey, setRetryKey] = useState(0);
   const lastScannedRef = useRef<string>("");
   const lastScannedTimeRef = useRef<number>(0);
+  const onScanRef = useRef(onScan);
+  const onErrorRef = useRef(onError);
+  const pausedRef = useRef(paused);
 
   useEffect(() => {
-    let html5QrCode: any = null;
+    onScanRef.current = onScan;
+  }, [onScan]);
+
+  useEffect(() => {
+    onErrorRef.current = onError;
+  }, [onError]);
+
+  useEffect(() => {
+    pausedRef.current = paused;
+  }, [paused]);
+
+  useEffect(() => {
+    let html5QrCode: Html5Qrcode | null = null;
+    let disposed = false;
 
     async function startScanner() {
       try {
         const { Html5Qrcode } = await import("html5-qrcode");
-        html5QrCode = new Html5Qrcode(regionId);
+        if (disposed) return;
+        html5QrCode = new Html5Qrcode(regionId, { verbose: false });
         scannerRef.current = html5QrCode;
 
         const config = {
@@ -31,86 +60,117 @@ export function QRCodeScanner({ onScan, onError, paused = false }: QRCodeScanner
         };
 
         await html5QrCode.start(
+          // Request the rear camera in the same single operation that starts
+          // scanning. Enumerating devices first can make Safari release and
+          // immediately reacquire the camera, which intermittently fails.
           { facingMode: "environment" },
           config,
           (decodedText: string) => {
+            if (pausedRef.current) return;
             const now = Date.now();
-            // Prevent spamming the exact same scan within 2 seconds
+            // Give staff time to move the ticket away before accepting the
+            // same code again. Different runners still scan immediately.
             if (
               decodedText !== lastScannedRef.current ||
-              now - lastScannedTimeRef.current > 2000
+              now - lastScannedTimeRef.current > 5000
             ) {
               lastScannedRef.current = decodedText;
               lastScannedTimeRef.current = now;
-              onScan(decodedText);
+              onScanRef.current(decodedText);
             }
           },
-          (err: any) => {
+          () => {
             // Ignored individual frame errors during continuous video feed
           }
         );
 
+        showCameraPreviewNormally(regionId);
+        requestAnimationFrame(() => showCameraPreviewNormally(regionId));
+
+        if (disposed) {
+          await html5QrCode.stop();
+          return;
+        }
         setCameraActive(true);
         setCameraError(null);
-      } catch (err: any) {
-        console.error("Camera scanner error:", err);
+      } catch (err: unknown) {
+        if (disposed) return;
+        // Permission denial is an expected station fallback, not an app crash.
+        console.warn("Camera scanner unavailable:", err);
+        const message = err instanceof Error
+          ? err.message
+          : typeof err === "string" && err.trim()
+            ? err
+            : "Could not start camera. Check permission or use the registration number below.";
         setCameraError(
-          err?.message || "Could not start camera. Please ensure camera permissions are granted."
+          message
         );
         setCameraActive(false);
-        if (onError) onError(err?.message || "Camera start failed");
+        onErrorRef.current?.(message);
       }
     }
 
     startScanner();
 
     return () => {
-      if (scannerRef.current) {
+      disposed = true;
+      const scanner = scannerRef.current;
+      scannerRef.current = null;
+      if (!scanner) return;
+      const cleanup = async () => {
         try {
-          if (scannerRef.current.isScanning) {
-            scannerRef.current.stop().then(() => {
-              scannerRef.current.clear();
-            });
-          }
-        } catch (e) {
-          // ignore cleanup errors
+          if (scanner.isScanning) await scanner.stop();
+          scanner.clear();
+        } catch {
+          // The camera may already have stopped during navigation.
         }
-      }
+      };
+      void cleanup();
     };
-  }, [onScan, onError]);
+  }, [retryKey]);
 
   return (
-    <div className="relative rounded-2xl overflow-hidden bg-slate-950 border border-slate-800 shadow-xl flex flex-col items-center justify-center min-h-[320px]">
-      <div id={regionId} className="w-full max-w-sm overflow-hidden" />
+    <div className="relative flex min-h-[390px] flex-col items-center justify-center overflow-hidden rounded-[22px] border border-white/10 bg-black shadow-[inset_0_0_80px_rgba(0,0,0,.65)]">
+      <div id={regionId} className="w-full max-w-lg overflow-hidden" />
 
       {!cameraActive && !cameraError && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center bg-slate-900/90 backdrop-blur-sm text-slate-300">
-          <Camera className="w-10 h-10 text-orange-500 animate-pulse mb-3" />
-          <p className="text-sm font-medium">Requesting camera access...</p>
-          <p className="text-xs text-slate-500 mt-1">Point your camera at a runner's ticket QR code</p>
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/90 p-6 text-center text-white/70 backdrop-blur-sm">
+          <span className="grid h-14 w-14 place-items-center rounded-full bg-[#d9ff00] text-black"><Camera className="h-6 w-6 animate-pulse" /></span>
+          <p className="mt-4 text-sm font-black uppercase tracking-[0.08em] text-white">Starting camera</p>
+          <p className="mt-1 text-xs text-white/35">Allow camera access to scan runner tickets.</p>
         </div>
       )}
 
       {cameraError && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center bg-slate-900 text-slate-300">
-          <CameraOff className="w-10 h-10 text-rose-500 mb-3" />
-          <p className="text-sm font-semibold text-rose-400">Camera Unavailable</p>
-          <p className="text-xs text-slate-400 mt-1 max-w-xs">{cameraError}</p>
-          <p className="text-xs text-slate-500 mt-3">You can still type or paste the QR token manually below.</p>
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-black p-6 text-center text-white/70">
+          <CameraOff className="mb-3 h-10 w-10 text-rose-500" />
+          <p className="text-sm font-black uppercase tracking-[0.08em] text-rose-400">Camera unavailable</p>
+          <p className="mt-1 max-w-xs text-xs text-white/45">{cameraError}</p>
+          <button
+            type="button"
+            onClick={() => { setCameraError(null); setRetryKey((key) => key + 1); }}
+            className="mt-4 inline-flex items-center gap-2 rounded-full bg-[#d9ff00] px-4 py-2.5 text-xs font-black text-black transition hover:bg-white"
+          >
+            <RefreshCw className="h-3.5 w-3.5" /> Try camera again
+          </button>
+          <p className="mt-3 text-xs text-white/35">Use the desk lookup below while the camera is unavailable.</p>
         </div>
       )}
 
       {/* Targeting Overlay Frame */}
       {cameraActive && (
         <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-          <div className="w-56 h-56 border-2 border-orange-500/80 rounded-2xl relative">
-            <div className="absolute top-0 left-0 w-4 h-4 border-t-4 border-l-4 border-orange-500 -mt-1 -ml-1 rounded-tl" />
-            <div className="absolute top-0 right-0 w-4 h-4 border-t-4 border-r-4 border-orange-500 -mt-1 -mr-1 rounded-tr" />
-            <div className="absolute bottom-0 left-0 w-4 h-4 border-b-4 border-l-4 border-orange-500 -mb-1 -ml-1 rounded-bl" />
-            <div className="absolute bottom-0 right-0 w-4 h-4 border-b-4 border-r-4 border-orange-500 -mb-1 -mr-1 rounded-br" />
+          <div className="relative h-60 w-60 rounded-[28px] border border-[#d9ff00]/35 shadow-[0_0_60px_rgba(217,255,0,.12)]">
+            <div className="absolute -left-1 -top-1 h-7 w-7 rounded-tl-xl border-l-4 border-t-4 border-[#d9ff00]" />
+            <div className="absolute -right-1 -top-1 h-7 w-7 rounded-tr-xl border-r-4 border-t-4 border-[#d9ff00]" />
+            <div className="absolute -bottom-1 -left-1 h-7 w-7 rounded-bl-xl border-b-4 border-l-4 border-[#d9ff00]" />
+            <div className="absolute -bottom-1 -right-1 h-7 w-7 rounded-br-xl border-b-4 border-r-4 border-[#d9ff00]" />
+            <div className="absolute inset-x-5 top-1/2 h-px bg-[#d9ff00] shadow-[0_0_14px_#d9ff00] animate-pulse" />
           </div>
         </div>
       )}
+
+      {cameraActive && <div className="pointer-events-none absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full bg-black/65 px-3 py-1.5 font-mono text-[8px] font-black uppercase tracking-[0.16em] text-white/55 backdrop-blur">Hold QR inside the frame</div>}
     </div>
   );
 }
