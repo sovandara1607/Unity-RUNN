@@ -70,7 +70,7 @@ func TestReminderScheduler_SecondPollDoesNotDuplicate(t *testing.T) {
 		ev.ID: {{ID: regID, UserID: uuid.New(), EventID: ev.ID, Email: "runner@unityrunclub.com", Status: registrations.StatusConfirmed}},
 	}}
 	eventLister := &fakeEventLister{events: []events.Event{ev}}
-	// dedupCreator 
+	// dedupCreator
 	repo := &dedupCreator{seen: map[string]bool{}}
 	queue := &fakePusher{}
 	svc := NewService(repo, queue, discardLogger())

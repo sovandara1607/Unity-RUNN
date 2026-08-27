@@ -9,7 +9,7 @@ import (
 	"github.com/unity-run-club/api/internal/registrations"
 )
 
-// reminderEventLister is the read-only slice this package needs to find events due for a reminder. 
+// reminderEventLister is the read-only slice this package needs to find events due for a reminder.
 type reminderEventLister interface {
 	List(ctx context.Context, filter events.ListFilter) ([]events.Event, int, error)
 }
@@ -18,7 +18,7 @@ var remindableStatuses = []events.Status{
 	events.StatusPublished, events.StatusRegistrationOpen, events.StatusRegistrationClosed,
 }
 
-// ReminderScheduler periodically finds events happening soon and enqueues an EVENT_REMINDER 
+// ReminderScheduler periodically finds events happening soon and enqueues an EVENT_REMINDER
 type ReminderScheduler struct {
 	svc          *Service
 	events       reminderEventLister

@@ -42,7 +42,7 @@ func run() error {
 	}
 	defer tx.Rollback(ctx)
 
-	// Dates are relative 
+	// Dates are relative
 	now := time.Now().UTC()
 	eventDate := now.AddDate(0, 0, 90).Format("2006-01-02")
 	registrationOpenAt := now.AddDate(0, 0, -7)

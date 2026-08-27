@@ -114,7 +114,7 @@ func NewRouter(deps Deps) http.Handler {
 
 		api.Route("/events", func(ev chi.Router) {
 			ev.With(auth.RequireAuth(deps.Tokens, auth.RoleAdmin)).Post("/posters", deps.EventsHandler.UploadPoster)
-			// Public reads: OptionalAuth doesn't reject, it only attaches the caller's role when a valid bearer token is present, so STAFF+ can preview non-public events 
+			// Public reads: OptionalAuth doesn't reject, it only attaches the caller's role when a valid bearer token is present, so STAFF+ can preview non-public events
 			ev.With(auth.OptionalAuth(deps.Tokens)).Get("/", deps.EventsHandler.List)
 			ev.With(auth.OptionalAuth(deps.Tokens)).Get("/{id}", deps.EventsHandler.GetBySlug)
 			ev.With(auth.RequireAuth(deps.Tokens, auth.RoleAdmin)).Get("/by-id/{id}", deps.EventsHandler.GetByID)
@@ -139,7 +139,7 @@ func NewRouter(deps Deps) http.Handler {
 			ev.With(auth.RequireAuth(deps.Tokens, auth.RoleUser)).
 				Post("/{id}/registrations", deps.RegistrationsHandler.Register)
 		})
-		// Registrations & admin sub-resources, everything under /registrations must live in ONE Route() mount each — registering a deeper path separately (e.g. availability) makes chi unable to route an endpoint mounted directly at /registrations	
+		// Registrations & admin sub-resources, everything under /registrations must live in ONE Route() mount each — registering a deeper path separately (e.g. availability) makes chi unable to route an endpoint mounted directly at /registrations
 
 		api.Route("/registrations", func(reg chi.Router) {
 			reg.Use(auth.RequireAuth(deps.Tokens, auth.RoleUser))
@@ -151,7 +151,7 @@ func NewRouter(deps Deps) http.Handler {
 		})
 
 		api.With(auth.RequireAuth(deps.Tokens, auth.RoleStaff)).Post("/check-in", deps.CheckinHandler.CheckIn)
-		// Check-in & admin sub-resources, everything under /admin must live in ONE Route() mount each 
+		// Check-in & admin sub-resources, everything under /admin must live in ONE Route() mount each
 		api.Route("/admin", func(a chi.Router) {
 			a.Use(auth.RequireAuth(deps.Tokens, auth.RoleStaff))
 			a.Get("/stats", deps.StatsHandler.AdminSummary)

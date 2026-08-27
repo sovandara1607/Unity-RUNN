@@ -61,10 +61,10 @@ type RegistrationNotifier interface {
 
 // Service implements registration business rules.
 type Service struct {
-	repo       regRepository
-	eventsRepo eventsReader
-	provider   payments.Provider
-	notifier   RegistrationNotifier
+	repo        regRepository
+	eventsRepo  eventsReader
+	provider    payments.Provider
+	notifier    RegistrationNotifier
 	locker      *Locker
 	availCache  *AvailabilityCache
 	rateLimiter *RateLimiter
@@ -536,6 +536,7 @@ func (s *Service) FindRegistrationIDByTicketToken(ctx context.Context, rawToken 
 }
 
 var ErrNotConfirmed = errors.New("registrations: registration is not confirmed")
+
 func (s *Service) IssueTicketToken(ctx context.Context, callerID uuid.UUID, callerRole auth.Role, id uuid.UUID) (string, error) {
 	reg, err := s.repo.GetByID(ctx, id)
 	if err != nil {

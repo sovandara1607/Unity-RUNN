@@ -196,7 +196,6 @@ func (h *Handler) ListMine(w http.ResponseWriter, r *http.Request) {
 	httpresponse.WriteData(w, http.StatusOK, map[string]any{"registrations": regs})
 }
 
-
 func (h *Handler) Ticket(w http.ResponseWriter, r *http.Request) {
 	caller, ok := auth.UserFromContext(r.Context())
 	if !ok {

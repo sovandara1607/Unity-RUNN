@@ -15,7 +15,6 @@ var ErrNotFound = errors.New("registrations: not found")
 
 var ErrDuplicateRegistration = errors.New("registrations: user already has an active registration for this event")
 
-
 var ErrCapacityFull = errors.New("registrations: category is at capacity")
 
 type Repository struct {
@@ -54,7 +53,7 @@ type CreateParams struct {
 	EventCategoryID uuid.UUID
 	Capacity        int // the category's capacity, for the in-transaction check
 	Participant     ParticipantInfo
-	Confirm bool
+	Confirm         bool
 	// TicketTokenHash, when Confirm is true, is the SHA-256 hash of the
 	// raw QR token to persist (the raw token itself is never stored).
 	TicketTokenHash string
