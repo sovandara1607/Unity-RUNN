@@ -11,6 +11,7 @@ import (
 	qrcode "github.com/skip2/go-qrcode"
 )
 
+//go:embed assets/*.ttf
 var documentFonts embed.FS
 
 const (

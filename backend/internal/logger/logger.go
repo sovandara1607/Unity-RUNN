@@ -1,4 +1,4 @@
-// Loggers provides log reports for the system 
+// Loggers provides log reports for the system
 package logger
 
 import (
@@ -11,7 +11,7 @@ type ctxKey string
 
 const requestIDKey ctxKey = "request_id"
 
-// logger shows level like (debug, warn, error) 
+// logger shows level like (debug, warn, error)
 func New(level string) *slog.Logger {
 	handler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		Level: parseLevel(level),

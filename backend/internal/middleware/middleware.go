@@ -13,7 +13,7 @@ import (
 	applogger "github.com/unity-run-club/api/internal/logger"
 )
 
-// SecurityHeaders applies conservative response headers to every API 
+// SecurityHeaders applies conservative response headers to every API
 func SecurityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'; base-uri 'none'")
@@ -43,7 +43,7 @@ func LimitJSONBody(maxBytes int64) func(http.Handler) http.Handler {
 	}
 }
 
-// RequireAllowedOrigin blocks browser cross-site requests 
+// RequireAllowedOrigin blocks browser cross-site requests
 func RequireAllowedOrigin(allowedOrigins []string) func(http.Handler) http.Handler {
 	allowed := make(map[string]struct{}, len(allowedOrigins))
 	for _, origin := range allowedOrigins {
@@ -69,7 +69,7 @@ func RequireAllowedOrigin(allowedOrigins []string) func(http.Handler) http.Handl
 	}
 }
 
-// RequestID assigns/propagates an X-Request-ID header 
+// RequestID assigns/propagates an X-Request-ID header
 func RequestID(next http.Handler) http.Handler {
 	return chimiddleware.RequestID(next)
 }

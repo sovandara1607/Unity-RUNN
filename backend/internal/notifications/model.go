@@ -26,7 +26,7 @@ const (
 	StatusFailed  Status = "FAILED"
 )
 
-// Notification is one queued/sent email. 
+// Notification is one queued/sent email.
 type Notification struct {
 	ID             uuid.UUID
 	UserID         *uuid.UUID
