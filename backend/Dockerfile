@@ -10,7 +10,8 @@ RUN go mod download
 
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w -buildid=" -o /out/server ./cmd/server && \
-    CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w -buildid=" -o /out/migrate ./cmd/migrate
+    CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w -buildid=" -o /out/migrate ./cmd/migrate && \
+    CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w -buildid=" -o /out/seed ./cmd/seed
 
 FROM alpine:3.20 AS runtime
 RUN apk add --no-cache ca-certificates && \
@@ -18,9 +19,11 @@ RUN apk add --no-cache ca-certificates && \
 WORKDIR /app
 COPY --from=builder /out/server ./server
 COPY --from=builder /out/migrate ./migrate
+COPY --from=builder /out/seed ./seed
 COPY --from=builder /src/migrations ./migrations
 RUN mkdir -p /app/uploads && chown -R app:app /app/uploads
 USER app
+
 
 EXPOSE 8080
 ENTRYPOINT ["./server"]
