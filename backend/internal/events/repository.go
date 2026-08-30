@@ -162,6 +162,53 @@ func (r *Repository) Create(ctx context.Context, e *Event) error {
 	).Scan(&e.ID, &e.CreatedAt, &e.UpdatedAt)
 }
 
+// Duplicate inserts a new draft and copies its reusable child resources in one
+// transaction. Registrations, payments, tickets, check-ins, registration windows,
+// and per-category deadlines are deliberately not copied.
+func (r *Repository) Duplicate(ctx context.Context, sourceID uuid.UUID, clone *Event) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("events: duplicate begin: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	const insertEvent = `
+		INSERT INTO events (name, slug, description, cover_image, event_date, start_time,
+		                     location, latitude, longitude, registration_open_at,
+		                     registration_close_at, status)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NULL,NULL,'DRAFT')
+		RETURNING id, created_at, updated_at`
+	err = tx.QueryRow(ctx, insertEvent, clone.Name, clone.Slug, clone.Description, clone.CoverImage,
+		clone.EventDate, clone.StartTime, clone.Location, clone.Latitude, clone.Longitude).
+		Scan(&clone.ID, &clone.CreatedAt, &clone.UpdatedAt)
+	if sqlState(err) == "23505" {
+		return ErrSlugTaken
+	}
+	if err != nil {
+		return fmt.Errorf("events: duplicate event: %w", err)
+	}
+
+	copyQueries := []string{
+		`INSERT INTO event_categories (event_id, name, distance, price_cents, currency, capacity, registration_deadline, status)
+		 SELECT $2, name, distance, price_cents, currency, capacity, NULL, 'OPEN' FROM event_categories WHERE event_id = $1`,
+		`INSERT INTO event_schedules (event_id, time, title, description, sort_order)
+		 SELECT $2, time, title, description, sort_order FROM event_schedules WHERE event_id = $1`,
+		`INSERT INTO event_faqs (event_id, question, answer, sort_order)
+		 SELECT $2, question, answer, sort_order FROM event_faqs WHERE event_id = $1`,
+		`INSERT INTO event_rules (event_id, rule, sort_order)
+		 SELECT $2, rule, sort_order FROM event_rules WHERE event_id = $1`,
+	}
+	for _, query := range copyQueries {
+		if _, err := tx.Exec(ctx, query, sourceID, clone.ID); err != nil {
+			return fmt.Errorf("events: duplicate child resources: %w", err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("events: duplicate commit: %w", err)
+	}
+	return nil
+}
+
 // Update overwrites all mutable columns of the event identified by
 // e.ID, refreshing UpdatedAt. Callers (the service layer) are responsible for fetch-modify-save semantics
 func (r *Repository) Update(ctx context.Context, e *Event) error {
@@ -279,14 +326,14 @@ func (r *Repository) UpdateCategory(ctx context.Context, id uuid.UUID, p *Update
 			currency = COALESCE($5, currency),
 			capacity = COALESCE($6, capacity),
 			status = COALESCE($7, status),
-			registration_deadline = COALESCE($8, registration_deadline),
+			registration_deadline = CASE WHEN $9 THEN NULL ELSE COALESCE($8, registration_deadline) END,
 			updated_at = now()
 		WHERE id = $1
 		RETURNING id, event_id, name, distance, price_cents, currency, capacity,
 		          registration_deadline, status, created_at, updated_at`
 
 	var c EventCategory
-	err := r.pool.QueryRow(ctx, query, id, p.Name, p.Distance, p.PriceCents, p.Currency, p.Capacity, p.Status, p.RegistrationDeadline).
+	err := r.pool.QueryRow(ctx, query, id, p.Name, p.Distance, p.PriceCents, p.Currency, p.Capacity, p.Status, p.RegistrationDeadline, p.ClearRegistrationDeadline).
 		Scan(&c.ID, &c.EventID, &c.Name, &c.Distance, &c.PriceCents, &c.Currency, &c.Capacity,
 			&c.RegistrationDeadline, &c.Status, &c.CreatedAt, &c.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -441,4 +488,91 @@ func (r *Repository) listRules(ctx context.Context, eventID uuid.UUID) ([]EventR
 		out = append(out, ru)
 	}
 	return out, rows.Err()
+}
+
+// CreateFAQ inserts one public question and answer for an event.
+func (r *Repository) CreateFAQ(ctx context.Context, faq *EventFAQ) error {
+	const query = `
+		INSERT INTO event_faqs (event_id, question, answer, sort_order)
+		VALUES ($1,$2,$3,$4)
+		RETURNING id, created_at, updated_at`
+	return r.pool.QueryRow(ctx, query, faq.EventID, faq.Question, faq.Answer, faq.SortOrder).
+		Scan(&faq.ID, &faq.CreatedAt, &faq.UpdatedAt)
+}
+
+// UpdateFAQ applies non-nil fields to an FAQ.
+func (r *Repository) UpdateFAQ(ctx context.Context, id uuid.UUID, p *UpdateFAQRequest) (*EventFAQ, error) {
+	const query = `
+		UPDATE event_faqs SET
+			question = COALESCE($2, question),
+			answer = COALESCE($3, answer),
+			sort_order = COALESCE($4, sort_order),
+			updated_at = now()
+		WHERE id = $1
+		RETURNING id, event_id, question, answer, sort_order, created_at, updated_at`
+	var faq EventFAQ
+	err := r.pool.QueryRow(ctx, query, id, p.Question, p.Answer, p.SortOrder).
+		Scan(&faq.ID, &faq.EventID, &faq.Question, &faq.Answer, &faq.SortOrder, &faq.CreatedAt, &faq.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("events: update FAQ: %w", err)
+	}
+	return &faq, nil
+}
+
+// DeleteFAQ removes one FAQ.
+func (r *Repository) DeleteFAQ(ctx context.Context, id uuid.UUID) error {
+	ct, err := r.pool.Exec(ctx, `DELETE FROM event_faqs WHERE id = $1`, id)
+	if err != nil {
+		return fmt.Errorf("events: delete FAQ: %w", err)
+	}
+	if ct.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// CreateRule inserts one public participation rule for an event.
+func (r *Repository) CreateRule(ctx context.Context, rule *EventRule) error {
+	const query = `
+		INSERT INTO event_rules (event_id, rule, sort_order)
+		VALUES ($1,$2,$3)
+		RETURNING id, created_at, updated_at`
+	return r.pool.QueryRow(ctx, query, rule.EventID, rule.Rule, rule.SortOrder).
+		Scan(&rule.ID, &rule.CreatedAt, &rule.UpdatedAt)
+}
+
+// UpdateRule applies non-nil fields to a rule.
+func (r *Repository) UpdateRule(ctx context.Context, id uuid.UUID, p *UpdateRuleRequest) (*EventRule, error) {
+	const query = `
+		UPDATE event_rules SET
+			rule = COALESCE($2, rule),
+			sort_order = COALESCE($3, sort_order),
+			updated_at = now()
+		WHERE id = $1
+		RETURNING id, event_id, rule, sort_order, created_at, updated_at`
+	var rule EventRule
+	err := r.pool.QueryRow(ctx, query, id, p.Rule, p.SortOrder).
+		Scan(&rule.ID, &rule.EventID, &rule.Rule, &rule.SortOrder, &rule.CreatedAt, &rule.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("events: update rule: %w", err)
+	}
+	return &rule, nil
+}
+
+// DeleteRule removes one participation rule.
+func (r *Repository) DeleteRule(ctx context.Context, id uuid.UUID) error {
+	ct, err := r.pool.Exec(ctx, `DELETE FROM event_rules WHERE id = $1`, id)
+	if err != nil {
+		return fmt.Errorf("events: delete rule: %w", err)
+	}
+	if ct.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }

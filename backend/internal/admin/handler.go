@@ -1,12 +1,17 @@
 package admin
 
 import (
+	"bytes"
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
+	"unicode"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -124,21 +129,12 @@ func (h *Handler) UpdateUserRole(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) ListRegistrations(w http.ResponseWriter, r *http.Request) {
+	filter, err := registrationFilter(r)
+	if err != nil {
+		httpresponse.WriteError(w, http.StatusBadRequest, "invalid_filter", err.Error())
+		return
+	}
 	q := r.URL.Query()
-	filter := registrations.AdminListFilter{}
-
-	if v := q.Get("event_id"); v != "" {
-		id, err := uuid.Parse(v)
-		if err != nil {
-			httpresponse.WriteError(w, http.StatusBadRequest, "invalid_event_id", "event_id must be a UUID")
-			return
-		}
-		filter.EventID = &id
-	}
-	if v := q.Get("status"); v != "" {
-		status := registrations.Status(v)
-		filter.Status = &status
-	}
 	if v := q.Get("limit"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			filter.Limit = n
@@ -162,6 +158,99 @@ func (h *Handler) ListRegistrations(w http.ResponseWriter, r *http.Request) {
 		"limit":         filter.Limit,
 		"offset":        filter.Offset,
 	})
+}
+
+const maxRosterExportRows = 50000
+
+func registrationFilter(r *http.Request) (registrations.AdminListFilter, error) {
+	q := r.URL.Query()
+	filter := registrations.AdminListFilter{Search: strings.TrimSpace(q.Get("search"))}
+	if v := q.Get("event_id"); v != "" {
+		id, err := uuid.Parse(v)
+		if err != nil {
+			return filter, errors.New("event_id must be a UUID")
+		}
+		filter.EventID = &id
+	}
+	if v := q.Get("status"); v != "" {
+		status := registrations.Status(v)
+		switch status {
+		case registrations.StatusPending, registrations.StatusConfirmed, registrations.StatusCancelled, registrations.StatusRefunded:
+		default:
+			return filter, errors.New("status is invalid")
+		}
+		filter.Status = &status
+	}
+	return filter, nil
+}
+
+// ExportRegistrations returns the complete filtered roster, rather than only the current UI page.
+func (h *Handler) ExportRegistrations(w http.ResponseWriter, r *http.Request) {
+	filter, err := registrationFilter(r)
+	if err != nil {
+		httpresponse.WriteError(w, http.StatusBadRequest, "invalid_filter", err.Error())
+		return
+	}
+	filter.Limit = 1000
+	filter.Offset = 0
+	all, total, err := h.regs.ListAll(r.Context(), filter)
+	if err != nil {
+		httpresponse.WriteError(w, http.StatusInternalServerError, "export_failed", "failed to build roster export")
+		return
+	}
+	if total > maxRosterExportRows {
+		httpresponse.WriteError(w, http.StatusUnprocessableEntity, "export_too_large", "narrow the roster filters before exporting")
+		return
+	}
+	for len(all) < total {
+		filter.Offset = len(all)
+		page, _, pageErr := h.regs.ListAll(r.Context(), filter)
+		if pageErr != nil {
+			httpresponse.WriteError(w, http.StatusInternalServerError, "export_failed", "failed to build roster export")
+			return
+		}
+		if len(page) == 0 {
+			break
+		}
+		all = append(all, page...)
+	}
+
+	var buffer bytes.Buffer
+	buffer.WriteString("\xEF\xBB\xBF")
+	writer := csv.NewWriter(&buffer)
+	_ = writer.Write([]string{"Registration Number", "Full Name", "Email", "Phone", "Event", "Category", "Status", "Date of Birth", "Gender", "T-shirt Size", "Emergency Contact Name", "Emergency Contact Phone", "Registered At", "Checked In At"})
+	for _, reg := range all {
+		dob, checkedIn := "", ""
+		if reg.DateOfBirth != nil {
+			dob = reg.DateOfBirth.Format("2006-01-02")
+		}
+		if reg.CheckedInAt != nil {
+			checkedIn = reg.CheckedInAt.UTC().Format(time.RFC3339)
+		}
+		_ = writer.Write([]string{csvSafe(reg.RegistrationNumber), csvSafe(reg.FullName), csvSafe(reg.Email), csvSafe(reg.Phone), csvSafe(reg.EventName), csvSafe(reg.CategoryName), string(reg.Status), dob, csvSafe(reg.Gender), csvSafe(reg.TshirtSize), csvSafe(reg.EmergencyContactName), csvSafe(reg.EmergencyContactPhone), reg.CreatedAt.UTC().Format(time.RFC3339), checkedIn})
+	}
+	writer.Flush()
+	if err := writer.Error(); err != nil {
+		httpresponse.WriteError(w, http.StatusInternalServerError, "export_failed", "failed to encode roster export")
+		return
+	}
+	if actor, ok := auth.UserFromContext(r.Context()); ok && h.recorder != nil {
+		h.recorder.Record(r.Context(), &actor.ID, "registration_roster_exported", "registration_export", nil, map[string]any{"event_id": r.URL.Query().Get("event_id"), "status": r.URL.Query().Get("status"), "search_applied": filter.Search != "", "rows": len(all)})
+	}
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="unity-roster-%s.csv"`, time.Now().UTC().Format("2006-01-02")))
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(buffer.Bytes())
+}
+
+func csvSafe(value string) string {
+	value = strings.ReplaceAll(value, "\x00", "")
+	trimmed := strings.TrimLeftFunc(value, unicode.IsSpace)
+	if trimmed != "" && strings.ContainsRune("=+-@", rune(trimmed[0])) {
+		return "'" + value
+	}
+	return value
 }
 
 func (h *Handler) GetRegistration(w http.ResponseWriter, r *http.Request) {

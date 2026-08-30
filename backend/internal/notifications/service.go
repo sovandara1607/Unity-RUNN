@@ -36,20 +36,23 @@ func NewService(repo creator, q pusher, log *slog.Logger) *Service {
 	return &Service{repo: repo, queue: q, log: log}
 }
 
-func (s *Service) enqueue(ctx context.Context, p enqueueParams) {
+func (s *Service) enqueue(ctx context.Context, p enqueueParams) error {
 	n := &Notification{
 		UserID: p.UserID, RecipientEmail: p.RecipientEmail, Type: p.Type,
 		EntityType: p.EntityType, EntityID: p.EntityID, Payload: p.Payload,
 	}
 
 	if err := s.repo.Create(ctx, n); err != nil {
-		if err != ErrAlreadyExists {
+		if err == ErrAlreadyExists {
+			return nil
+		} else {
 			s.log.Error("notification_create_failed", "error", err, "type", p.Type, "entity_id", p.EntityID)
 		}
-		return
+		return err
 	}
 
 	if err := s.queue.push(ctx, n.ID.String()); err != nil {
 		s.log.Warn("notification_queue_push_failed", "error", err, "notification_id", n.ID)
 	}
+	return nil
 }

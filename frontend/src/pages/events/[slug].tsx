@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { ArrowUpRight, CalendarDays, Check, Clock3, MapPin, Ticket } from "lucide-react";
+import { ArrowUpRight, CalendarDays, CalendarPlus, Check, Clock3, MapPin, Share2, Ticket } from "lucide-react";
 import { api } from "../../lib/api";
 import { withMinSkeleton } from "../../lib/withMinSkeleton";
 import { SportFooter, SportHeader } from "../../components/SportHeader";
@@ -11,6 +11,11 @@ import { useSiteConfig } from "../../components/site/SiteConfigProvider";
 import type { EventCategory, EventDetail } from "../../types";
 import { formatMoney } from "../../lib/money";
 import { eventMapURL } from "../../lib/eventLocation";
+import { buildEventCalendar, eventCalendarFilename } from "../../lib/eventCalendar";
+import { useAlerts } from "../../components/alerts/AlertSystem";
+import { EntryAvailability } from "../../components/EntryAvailability";
+import { useCategoryAvailability } from "../../lib/useCategoryAvailability";
+import { formatRegistrationDeadline, registrationDeadlineClosed } from "../../lib/registrationDeadline";
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat(undefined, { weekday: "long", day: "numeric", month: "long", year: "numeric" }).format(new Date(value));
@@ -26,10 +31,13 @@ const statusMeta: Record<string, { label: string; tone: string }> = {
 
 export default function EventDetailPage() {
   const { config } = useSiteConfig();
+  const alerts = useAlerts();
   const acid = config.primary_color;
   const { slug } = useParams() || {};
   const [event, setEvent] = useState<EventDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const categoryIds = event?.categories?.filter((category) => category.status === "OPEN" && !registrationDeadlineClosed(category.registration_deadline)).map((category) => category.id) || [];
+  const { availability } = useCategoryAvailability(event?.id, categoryIds);
 
   useEffect(() => {
     if (typeof slug !== "string") return;
@@ -39,6 +47,40 @@ export default function EventDetailPage() {
         setError(err instanceof Error ? err.message : "Failed to load event");
       });
   }, [slug]);
+
+  const addToCalendar = () => {
+    if (!event || typeof window === "undefined") return;
+    try {
+      const calendar = buildEventCalendar(event, window.location.href);
+      const url = URL.createObjectURL(new Blob([calendar], { type: "text/calendar;charset=utf-8" }));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = eventCalendarFilename(event);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 0);
+      alerts.notify({ tone: "success", title: "Calendar file ready", message: "Open the download to add this race to your calendar." });
+    } catch (caught) {
+      alerts.notify({ tone: "error", title: "Calendar unavailable", message: caught instanceof Error ? caught.message : "Could not create this calendar reminder." });
+    }
+  };
+
+  const shareEvent = async () => {
+    if (!event || typeof window === "undefined") return;
+    const shareData = { title: event.name, text: `${event.name} · ${formatDate(event.event_date)} · ${event.location}`, url: window.location.href };
+    try {
+      if (navigator.share) {
+        await navigator.share(shareData);
+        return;
+      }
+      await navigator.clipboard.writeText(shareData.url);
+      alerts.notify({ tone: "success", title: "Race link copied", message: "Share it with the people you want on the start line." });
+    } catch (caught) {
+      if (caught instanceof DOMException && caught.name === "AbortError") return;
+      alerts.notify({ tone: "error", title: "Could not share race", message: "Copy the address from your browser and send it manually." });
+    }
+  };
 
   if (error) {
     return <NotFound />;
@@ -87,6 +129,7 @@ export default function EventDetailPage() {
 
   const canRegister = event.status === "REGISTRATION_OPEN";
   const categories = event.categories?.filter((category) => category.status === "OPEN") || [];
+  const registerableCategories = categories.filter((category) => !registrationDeadlineClosed(category.registration_deadline) && availability[category.id]?.available !== 0);
   const status = statusMeta[event.status] || { label: event.status, tone: "bg-white/10 text-white/65" };
 
   return (
@@ -115,11 +158,15 @@ export default function EventDetailPage() {
               <h1 className="sport-display mt-6 max-w-4xl text-[clamp(3.5rem,7vw,7.5rem)] uppercase leading-[0.78] tracking-[-0.045em] text-white">{event.name}</h1>
               {event.description && <p className="mt-7 max-w-2xl text-base font-medium leading-7 text-white/62 sm:text-lg sm:leading-8">{event.description}</p>}
 
-              {canRegister && categories.length > 0 && (
-                <Link href={`/events/${event.slug}/register?category=${categories[0].id}`} className="mt-8 inline-flex items-center gap-3 px-5 py-3.5 text-[11px] font-black uppercase tracking-[0.12em] text-black transition hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-white" style={{ backgroundColor: acid }}>
-                  <Ticket className="h-4 w-4" />Choose your entry<ArrowUpRight className="h-4 w-4" />
-                </Link>
-              )}
+              <div className="mt-8 flex flex-wrap items-center gap-2.5">
+                {canRegister && registerableCategories.length > 0 && (
+                  <Link href={`/events/${event.slug}/register?category=${registerableCategories[0].id}`} className="inline-flex h-12 items-center gap-3 px-5 text-[11px] font-black uppercase tracking-[0.12em] text-black transition hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-white" style={{ backgroundColor: acid }}>
+                    <Ticket className="h-4 w-4" />Choose your entry<ArrowUpRight className="h-4 w-4" />
+                  </Link>
+                )}
+                <button type="button" onClick={addToCalendar} className="inline-flex h-12 items-center gap-2 border border-white/20 px-4 text-[10px] font-black uppercase tracking-[0.1em] text-white/70 transition hover:border-white/50 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white"><CalendarPlus className="h-4 w-4" />Add to calendar</button>
+                <button type="button" onClick={shareEvent} className="inline-flex h-12 items-center gap-2 border border-white/20 px-4 text-[10px] font-black uppercase tracking-[0.1em] text-white/70 transition hover:border-white/50 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white"><Share2 className="h-4 w-4" />Share race</button>
+              </div>
             </div>
 
             <div className="relative mt-10 grid gap-px border border-white/10 bg-white/10 sm:grid-cols-3 lg:mt-auto">
@@ -144,7 +191,7 @@ export default function EventDetailPage() {
             <p className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.16em] text-white/50"><Ticket className="h-4 w-4" style={{ color: acid }} />Join the run</p>
             {canRegister && categories.length > 0 ? (
               <div className="mt-5 space-y-3">
-                {categories.map((category) => <Category key={category.id} category={category} slug={event.slug} primary={acid} />)}
+                {categories.map((category) => <Category key={category.id} category={category} slug={event.slug} primary={acid} availability={availability[category.id]} />)}
               </div>
             ) : (
               <p className="mt-4 text-sm leading-6 text-white/60">
@@ -173,24 +220,26 @@ function Fact({ icon, label, value, href }: { icon: React.ReactNode; label: stri
   );
 }
 
-function Category({ category, slug, primary }: { category: EventCategory; slug: string; primary: string }) {
-  return (
-    <Link
-      href={`/events/${slug}/register?category=${category.id}`}
-      className="group block border border-white/10 bg-white/[0.03] p-4 transition hover:border-[#d9ff00]/60 hover:bg-white/[0.06]"
-    >
+function Category({ category, slug, primary, availability }: { category: EventCategory; slug: string; primary: string; availability?: import("../../types").Availability }) {
+  const full = availability?.available === 0;
+  const deadlineClosed = registrationDeadlineClosed(category.registration_deadline);
+  const unavailable = full || deadlineClosed;
+  const content = <>
       <div className="flex items-baseline justify-between gap-3">
         <p className="font-semibold text-white">{category.name}</p>
         <p className="text-sm font-semibold" style={{ color: primary }}>{formatMoney(category.price_cents, category.currency)}</p>
       </div>
-      <div className="mt-1.5 flex items-center gap-3 text-xs text-white/50">
+      <div className="mt-1.5 flex items-center justify-between gap-3 text-xs text-white/50">
         <span>{category.distance}</span>
+        <EntryAvailability availability={availability} registrationDeadline={category.registration_deadline} />
       </div>
-      <span className="mt-3 inline-flex items-center gap-1 text-xs font-bold uppercase tracking-[0.06em] text-white/70 group-hover:text-[#d9ff00]">
-        Register <ArrowUpRight className="h-3.5 w-3.5" />
+      {category.registration_deadline && <p className="mt-2 font-mono text-[8px] font-bold uppercase tracking-[0.09em] text-white/35">{deadlineClosed ? "Category cutoff passed" : `Closes ${formatRegistrationDeadline(category.registration_deadline)}`}</p>}
+      <span className={`mt-3 inline-flex items-center gap-1 text-xs font-bold uppercase tracking-[0.06em] ${unavailable ? "text-white/25" : "text-white/70 group-hover:text-[#d9ff00]"}`}>
+        {unavailable ? "Join another distance" : "Register"} {!unavailable && <ArrowUpRight className="h-3.5 w-3.5" />}
       </span>
-    </Link>
-  );
+  </>;
+  if (unavailable) return <div className="block border border-white/10 bg-white/[0.02] p-4 opacity-75" aria-label={`${category.name} ${deadlineClosed ? "entry closed" : "entry full"}`}>{content}</div>;
+  return <Link href={`/events/${slug}/register?category=${category.id}`} className="group block border border-white/10 bg-white/[0.03] p-4 transition hover:border-[#d9ff00]/60 hover:bg-white/[0.06]">{content}</Link>;
 }
 
 function Schedule({ event }: { event: EventDetail }) {

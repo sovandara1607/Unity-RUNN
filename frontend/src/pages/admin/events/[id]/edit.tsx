@@ -13,18 +13,23 @@ import {
   Archive,
   Ban,
   Layers,
+  BookOpenCheck,
+  Radio,
   type LucideIcon,
 } from "lucide-react";
 import { AdminLayout } from "../../../../components/admin/AdminLayout";
 import { EventPosterField } from "../../../../components/admin/EventPosterField";
 import { EventLocationField } from "../../../../components/admin/EventLocationField";
+import { EventCategoriesEditor } from "../../../../components/admin/EventCategoriesEditor";
+import { EventScheduleEditor } from "../../../../components/admin/EventScheduleEditor";
+import { EventRunnerGuideEditor } from "../../../../components/admin/EventRunnerGuideEditor";
+import { EventAutomationEditor } from "../../../../components/admin/EventAutomationEditor";
 import { Skeleton, SkeletonText } from "../../../../components/Skeleton";
 import { withMinSkeleton } from "../../../../lib/withMinSkeleton";
 import { EventStatusBadge } from "../../../../components/admin/EventStatusBadge";
 import { AlertBanner } from "../../../../components/alerts/AlertSystem";
 import { api } from "../../../../lib/api";
 import type { Event, EventDetail, EventStatus } from "../../../../types";
-import { formatMoney } from "../../../../lib/money";
 import { parseEventCoordinates } from "../../../../lib/eventLocation";
 
 const statusTransitions: Record<EventStatus, { next: EventStatus; label: string; icon: LucideIcon; color: string }[]> = {
@@ -67,7 +72,7 @@ export default function AdminEditEventPage() {
   const [statusUpdating, setStatusUpdating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"details" | "categories" | "schedule" | "faqs">("details");
+  const [activeTab, setActiveTab] = useState<"details" | "categories" | "schedule" | "guide" | "automations">("details");
 
   const [formData, setFormData] = useState({
     name: "",
@@ -89,6 +94,7 @@ export default function AdminEditEventPage() {
       setLoading(true);
       const found = await withMinSkeleton(() => api.getEventById(id));
       setEvent(found);
+      setDetail({ ...found, categories: [], schedule: [], faqs: [], rules: [] });
       coverImageRef.current = found.cover_image || "";
       setFormData({
         name: found.name || "",
@@ -109,7 +115,7 @@ export default function AdminEditEventPage() {
         const detailRes = await api.getEvent(found.slug);
         setDetail(detailRes);
       } catch {
-        // child detail optional
+        // Keep the empty child-resource editor available for a brand-new draft.
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load event");
@@ -307,7 +313,7 @@ export default function AdminEditEventPage() {
       </div>
 
       {/* Navigation Tabs */}
-      <div className="flex items-center gap-2 mb-6 border-b border-slate-200 pb-2">
+      <div className="mb-6 flex items-center gap-2 overflow-x-auto border-b border-slate-200 pb-2">
         <button
           onClick={() => setActiveTab("details")}
           className={`px-4 py-2 text-xs font-semibold rounded-lg transition-colors ${
@@ -339,6 +345,26 @@ export default function AdminEditEventPage() {
         >
           <Clock className="w-3.5 h-3.5" />
           <span>Race Schedule ({detail?.schedule?.length ?? 0})</span>
+        </button>
+        <button
+          onClick={() => setActiveTab("guide")}
+          className={`flex shrink-0 items-center gap-1.5 rounded-lg px-4 py-2 text-xs font-semibold transition-colors ${
+            activeTab === "guide"
+              ? "bg-orange-50 text-orange-700"
+              : "text-slate-600 hover:text-slate-900"
+          }`}
+        >
+          <BookOpenCheck className="h-3.5 w-3.5" />
+          <span>Runner Guide ({(detail?.faqs?.length ?? 0) + (detail?.rules?.length ?? 0)})</span>
+        </button>
+        <button
+          onClick={() => setActiveTab("automations")}
+          className={`flex shrink-0 items-center gap-1.5 rounded-lg px-4 py-2 text-xs font-semibold transition-colors ${
+            activeTab === "automations" ? "bg-orange-50 text-orange-700" : "text-slate-600 hover:text-slate-900"
+          }`}
+        >
+          <Radio className="h-3.5 w-3.5" />
+          <span>Transmissions</span>
         </button>
       </div>
 
@@ -477,67 +503,25 @@ export default function AdminEditEventPage() {
 
       {/* Tab: Categories */}
       {activeTab === "categories" && (
-        <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h3 className="font-bold text-slate-900">Race Categories & Capacities</h3>
-              <p className="text-xs text-slate-500">Configured distances, pricing, and slots</p>
-            </div>
-          </div>
-
-          {detail?.categories && detail.categories.length > 0 ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {detail.categories.map((cat) => (
-                <div key={cat.id} className="p-4 rounded-xl border border-slate-200 bg-slate-50/50">
-                  <div className="flex items-center justify-between">
-                    <h4 className="font-bold text-sm text-slate-900">{cat.name}</h4>
-                    <span className="text-xs px-2 py-0.5 rounded bg-orange-100 text-orange-800 font-semibold">
-                      {cat.distance}
-                    </span>
-                  </div>
-                  <div className="mt-3 space-y-1 text-xs text-slate-600">
-                    <p>Price: <span className="font-semibold text-slate-900">{formatMoney(cat.price_cents, cat.currency)}</span></p>
-                    <p>Capacity: <span className="font-semibold text-slate-900">{cat.capacity} runners</span></p>
-                    <p>Status: <span className="capitalize">{cat.status}</span></p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="text-center py-8 text-slate-400 text-xs">
-              No categories configured for this event.
-            </div>
-          )}
-        </div>
+        <EventCategoriesEditor eventId={event.id} categories={detail?.categories || []} onChange={(categories) => setDetail((current) => current ? { ...current, categories } : current)} />
       )}
 
       {/* Tab: Schedule */}
       {activeTab === "schedule" && (
-        <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
-          <h3 className="font-bold text-slate-900 mb-1">Event Timeline</h3>
-          <p className="text-xs text-slate-500 mb-4">Day-of schedule for participants</p>
-
-          {detail?.schedule && detail.schedule.length > 0 ? (
-            <div className="space-y-3">
-              {detail.schedule.map((item) => (
-                <div key={item.id} className="flex items-start gap-4 p-3.5 rounded-xl border border-slate-100 bg-slate-50/50">
-                  <div className="text-xs font-bold text-orange-600 bg-orange-50 px-2 py-1 rounded">
-                    {item.time ? item.time.slice(11, 16) : "Time"}
-                  </div>
-                  <div>
-                    <h4 className="font-semibold text-sm text-slate-900">{item.title}</h4>
-                    {item.description && <p className="text-xs text-slate-500 mt-0.5">{item.description}</p>}
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="text-center py-8 text-slate-400 text-xs">
-              No schedule items configured.
-            </div>
-          )}
-        </div>
+        <EventScheduleEditor eventId={event.id} schedule={detail?.schedule || []} onChange={(schedule) => setDetail((current) => current ? { ...current, schedule } : current)} />
       )}
+
+      {/* Tab: Runner guide */}
+      {activeTab === "guide" && (
+        <EventRunnerGuideEditor
+          eventId={event.id}
+          faqs={detail?.faqs || []}
+          rules={detail?.rules || []}
+          onFAQsChange={(faqs) => setDetail((current) => current ? { ...current, faqs } : current)}
+          onRulesChange={(rules) => setDetail((current) => current ? { ...current, rules } : current)}
+        />
+      )}
+      {activeTab === "automations" && <EventAutomationEditor eventId={event.id} />}
     </AdminLayout>
   );
 }

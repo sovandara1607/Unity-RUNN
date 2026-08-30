@@ -46,9 +46,18 @@ func (n *EventNotifier) fanOut(ctx context.Context, ev events.Event, typ Type, e
 		for k, v := range extraPayload {
 			payload[k] = v
 		}
-		n.svc.enqueue(ctx, enqueueParams{
+		_ = n.svc.enqueue(ctx, enqueueParams{
 			UserID: &reg.UserID, RecipientEmail: reg.Email, Type: typ,
 			EntityType: "registration", EntityID: reg.ID, Payload: payload,
 		})
 	}
+}
+
+// EnqueueAnnouncement durably creates one email and Telegram delivery for a confirmed runner.
+func (n *EventNotifier) EnqueueAnnouncement(ctx context.Context, automationID string, reg registrations.Registration, title, message string) error {
+	return n.svc.enqueue(ctx, enqueueParams{
+		UserID: &reg.UserID, RecipientEmail: reg.Email, Type: TypeEventAnnouncement,
+		EntityType: "event_automation:" + automationID, EntityID: reg.ID,
+		Payload: map[string]any{"announcement_title": title, "announcement_message": message},
+	})
 }

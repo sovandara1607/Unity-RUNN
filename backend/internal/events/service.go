@@ -33,6 +33,7 @@ type eventRepository interface {
 	GetDetailBySlug(ctx context.Context, slug string) (*EventDetail, error)
 	SlugExists(ctx context.Context, slug string, excludeID *uuid.UUID) (bool, error)
 	Create(ctx context.Context, e *Event) error
+	Duplicate(ctx context.Context, sourceID uuid.UUID, clone *Event) error
 	Update(ctx context.Context, e *Event) error
 	Delete(ctx context.Context, id uuid.UUID) error
 	GetCategoryByID(ctx context.Context, id uuid.UUID) (*EventCategory, error)
@@ -44,6 +45,14 @@ type eventRepository interface {
 	CreateScheduleItem(ctx context.Context, s *EventSchedule) error
 	UpdateScheduleItem(ctx context.Context, id uuid.UUID, p *UpdateScheduleRequest) (*EventSchedule, error)
 	DeleteScheduleItem(ctx context.Context, id uuid.UUID) error
+	listFAQs(ctx context.Context, eventID uuid.UUID) ([]EventFAQ, error)
+	CreateFAQ(ctx context.Context, faq *EventFAQ) error
+	UpdateFAQ(ctx context.Context, id uuid.UUID, p *UpdateFAQRequest) (*EventFAQ, error)
+	DeleteFAQ(ctx context.Context, id uuid.UUID) error
+	listRules(ctx context.Context, eventID uuid.UUID) ([]EventRule, error)
+	CreateRule(ctx context.Context, rule *EventRule) error
+	UpdateRule(ctx context.Context, id uuid.UUID, p *UpdateRuleRequest) (*EventRule, error)
+	DeleteRule(ctx context.Context, id uuid.UUID) error
 }
 
 // EventNotifier is implemented by internal/notifications (wired in from main.go) to email confirmed registrants when an event's key details change or it's cancelled. The interface lives here, in the consumer package, so events never imports notifications or registrations — same pattern as RegistrationNotifier in internal/registrations/service.go. Nil-safe.
@@ -164,6 +173,61 @@ func (s *Service) Create(ctx context.Context, req CreateEventRequest) (*Event, e
 		return nil, err
 	}
 	return e, nil
+}
+
+// Duplicate creates a draft edition from an existing event. It carries reusable
+// event content and child collections, while repository-level copying resets all
+// registration windows and category deadlines in one transaction.
+func (s *Service) Duplicate(ctx context.Context, sourceID uuid.UUID, req DuplicateEventRequest) (*Event, error) {
+	if err := validate.Struct(req); err != nil {
+		return nil, err
+	}
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		return nil, errors.New("events: duplicate name cannot be empty")
+	}
+	source, err := s.repo.GetByID(ctx, sourceID)
+	if err != nil {
+		return nil, err
+	}
+	eventDate, err := time.Parse("2006-01-02", req.EventDate)
+	if err != nil {
+		return nil, fmt.Errorf("events: invalid event_date: %w", err)
+	}
+	slug, err := s.availableDuplicateSlug(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	clone := &Event{
+		Name: name, Slug: slug, Description: source.Description, CoverImage: source.CoverImage,
+		EventDate: eventDate, StartTime: source.StartTime, Location: source.Location,
+		Latitude: source.Latitude, Longitude: source.Longitude, Status: StatusDraft,
+	}
+	if err := s.repo.Duplicate(ctx, sourceID, clone); err != nil {
+		return nil, err
+	}
+	return clone, nil
+}
+
+func (s *Service) availableDuplicateSlug(ctx context.Context, name string) (string, error) {
+	base := slugify(name)
+	if base == "" {
+		return "", errors.New("events: duplicate name must contain letters or numbers")
+	}
+	for suffix := 1; suffix <= 1000; suffix++ {
+		candidate := base
+		if suffix > 1 {
+			candidate = fmt.Sprintf("%s-%d", base, suffix)
+		}
+		taken, err := s.repo.SlugExists(ctx, candidate, nil)
+		if err != nil {
+			return "", err
+		}
+		if !taken {
+			return candidate, nil
+		}
+	}
+	return "", ErrSlugTaken
 }
 
 // Update applies a partial update to the event identified by id, validating the slug (if changed) and any status transition
@@ -349,6 +413,9 @@ func (s *Service) UpdateCategory(ctx context.Context, eventID, categoryID uuid.U
 	if err := validate.Struct(req); err != nil {
 		return nil, err
 	}
+	if req.ClearRegistrationDeadline && req.RegistrationDeadline != nil {
+		return nil, errors.New("events: cannot set and clear the category registration deadline together")
+	}
 	c, err := s.repo.GetCategoryByID(ctx, categoryID)
 	if err != nil {
 		return nil, err
@@ -444,6 +511,133 @@ func (s *Service) getScheduleItem(ctx context.Context, eventID, scheduleID uuid.
 	}
 	for i := range items {
 		if items[i].ID == scheduleID {
+			return &items[i], nil
+		}
+	}
+	return nil, ErrNotFound
+}
+
+// CreateFAQ adds a public question and answer to an event.
+func (s *Service) CreateFAQ(ctx context.Context, eventID uuid.UUID, req CreateFAQRequest) (*EventFAQ, error) {
+	if err := validate.Struct(req); err != nil {
+		return nil, err
+	}
+	if _, err := s.repo.GetByID(ctx, eventID); err != nil {
+		return nil, err
+	}
+	question, answer := strings.TrimSpace(req.Question), strings.TrimSpace(req.Answer)
+	if question == "" || answer == "" {
+		return nil, errors.New("events: FAQ question and answer cannot be empty")
+	}
+	faq := &EventFAQ{EventID: eventID, Question: question, Answer: answer, SortOrder: req.SortOrder}
+	if err := s.repo.CreateFAQ(ctx, faq); err != nil {
+		return nil, err
+	}
+	return faq, nil
+}
+
+// UpdateFAQ patches an FAQ that belongs to eventID.
+func (s *Service) UpdateFAQ(ctx context.Context, eventID, faqID uuid.UUID, req UpdateFAQRequest) (*EventFAQ, error) {
+	if err := validate.Struct(req); err != nil {
+		return nil, err
+	}
+	faq, err := s.getFAQ(ctx, eventID, faqID)
+	if err != nil {
+		return nil, err
+	}
+	if req.Question != nil {
+		trimmed := strings.TrimSpace(*req.Question)
+		if trimmed == "" {
+			return nil, errors.New("events: FAQ question cannot be empty")
+		}
+		req.Question = &trimmed
+	}
+	if req.Answer != nil {
+		trimmed := strings.TrimSpace(*req.Answer)
+		if trimmed == "" {
+			return nil, errors.New("events: FAQ answer cannot be empty")
+		}
+		req.Answer = &trimmed
+	}
+	return s.repo.UpdateFAQ(ctx, faq.ID, &req)
+}
+
+// DeleteFAQ removes an FAQ that belongs to eventID.
+func (s *Service) DeleteFAQ(ctx context.Context, eventID, faqID uuid.UUID) error {
+	faq, err := s.getFAQ(ctx, eventID, faqID)
+	if err != nil {
+		return err
+	}
+	return s.repo.DeleteFAQ(ctx, faq.ID)
+}
+
+func (s *Service) getFAQ(ctx context.Context, eventID, faqID uuid.UUID) (*EventFAQ, error) {
+	items, err := s.repo.listFAQs(ctx, eventID)
+	if err != nil {
+		return nil, err
+	}
+	for i := range items {
+		if items[i].ID == faqID {
+			return &items[i], nil
+		}
+	}
+	return nil, ErrNotFound
+}
+
+// CreateRule adds a public participation rule to an event.
+func (s *Service) CreateRule(ctx context.Context, eventID uuid.UUID, req CreateRuleRequest) (*EventRule, error) {
+	if err := validate.Struct(req); err != nil {
+		return nil, err
+	}
+	if _, err := s.repo.GetByID(ctx, eventID); err != nil {
+		return nil, err
+	}
+	ruleText := strings.TrimSpace(req.Rule)
+	if ruleText == "" {
+		return nil, errors.New("events: rule cannot be empty")
+	}
+	rule := &EventRule{EventID: eventID, Rule: ruleText, SortOrder: req.SortOrder}
+	if err := s.repo.CreateRule(ctx, rule); err != nil {
+		return nil, err
+	}
+	return rule, nil
+}
+
+// UpdateRule patches a rule that belongs to eventID.
+func (s *Service) UpdateRule(ctx context.Context, eventID, ruleID uuid.UUID, req UpdateRuleRequest) (*EventRule, error) {
+	if err := validate.Struct(req); err != nil {
+		return nil, err
+	}
+	rule, err := s.getRule(ctx, eventID, ruleID)
+	if err != nil {
+		return nil, err
+	}
+	if req.Rule != nil {
+		trimmed := strings.TrimSpace(*req.Rule)
+		if trimmed == "" {
+			return nil, errors.New("events: rule cannot be empty")
+		}
+		req.Rule = &trimmed
+	}
+	return s.repo.UpdateRule(ctx, rule.ID, &req)
+}
+
+// DeleteRule removes a rule that belongs to eventID.
+func (s *Service) DeleteRule(ctx context.Context, eventID, ruleID uuid.UUID) error {
+	rule, err := s.getRule(ctx, eventID, ruleID)
+	if err != nil {
+		return err
+	}
+	return s.repo.DeleteRule(ctx, rule.ID)
+}
+
+func (s *Service) getRule(ctx context.Context, eventID, ruleID uuid.UUID) (*EventRule, error) {
+	items, err := s.repo.listRules(ctx, eventID)
+	if err != nil {
+		return nil, err
+	}
+	for i := range items {
+		if items[i].ID == ruleID {
 			return &items[i], nil
 		}
 	}

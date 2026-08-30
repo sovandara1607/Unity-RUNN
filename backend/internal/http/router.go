@@ -12,13 +12,16 @@ import (
 	"github.com/unity-run-club/api/internal/admin"
 	"github.com/unity-run-club/api/internal/auth"
 	"github.com/unity-run-club/api/internal/checkin"
+	"github.com/unity-run-club/api/internal/eventautomations"
 	"github.com/unity-run-club/api/internal/events"
 	"github.com/unity-run-club/api/internal/middleware"
+	"github.com/unity-run-club/api/internal/notifications"
 	"github.com/unity-run-club/api/internal/objectstore"
 	"github.com/unity-run-club/api/internal/registrations"
 	"github.com/unity-run-club/api/internal/siteconfig"
 	"github.com/unity-run-club/api/internal/stats"
 	"github.com/unity-run-club/api/internal/systemstatus"
+	"github.com/unity-run-club/api/internal/telegram"
 )
 
 // Pinger is implemented by any dependency whose health can be checked with a context-bound ping (satisfied by *database.DB and *redisclient.Client). Using an interface here keeps the router testable without a real Postgres/Redis connection
@@ -55,16 +58,19 @@ type Deps struct {
 	CORSAllowedOrigins []string
 	UploadDir          string
 
-	Tokens               *auth.TokenIssuer
-	AuthHandler          *auth.Handler
-	EventsHandler        *events.Handler
-	RegistrationsHandler *registrations.Handler
-	CheckinHandler       *checkin.Handler
-	AdminHandler         *admin.Handler
-	StatsHandler         *stats.Handler
-	SiteConfigHandler    *siteconfig.Handler
-	SystemStatusHandler  *systemstatus.Handler
-	MediaHandler         *objectstore.MediaHandler
+	Tokens                  *auth.TokenIssuer
+	AuthHandler             *auth.Handler
+	EventsHandler           *events.Handler
+	RegistrationsHandler    *registrations.Handler
+	CheckinHandler          *checkin.Handler
+	AdminHandler            *admin.Handler
+	StatsHandler            *stats.Handler
+	SiteConfigHandler       *siteconfig.Handler
+	SystemStatusHandler     *systemstatus.Handler
+	MediaHandler            *objectstore.MediaHandler
+	TelegramHandler         *telegram.Handler
+	AutomationHandler       *notifications.AdminHandler
+	EventAutomationsHandler *eventautomations.Handler
 
 	// ReadyTimeout bounds how long each dependency ping may take when handling /ready. Defaults to 2 seconds if zero
 	ReadyTimeout time.Duration
@@ -94,6 +100,9 @@ func NewRouter(deps Deps) http.Handler {
 		}
 		api.Get("/stats", deps.StatsHandler.Summary)
 		api.Get("/site-config", deps.SiteConfigHandler.Get)
+		if deps.TelegramHandler != nil {
+			api.Post("/integrations/telegram/webhook", deps.TelegramHandler.Webhook)
+		}
 
 		api.Route("/auth", func(a chi.Router) {
 			a.Get("/providers", deps.AuthHandler.Providers)
@@ -110,6 +119,14 @@ func NewRouter(deps Deps) http.Handler {
 			me.Get("/", deps.AuthHandler.Me)
 			me.Patch("/", deps.AuthHandler.UpdateMe)
 			me.Get("/registrations", deps.RegistrationsHandler.ListMine)
+			if deps.TelegramHandler != nil {
+				me.Get("/telegram", deps.TelegramHandler.Status)
+				me.Post("/telegram/link", deps.TelegramHandler.CreateLink)
+				me.Patch("/telegram/preferences", deps.TelegramHandler.UpdatePreferences)
+				me.Post("/telegram/test", deps.TelegramHandler.SendTest)
+				me.Get("/telegram/deliveries", deps.TelegramHandler.Deliveries)
+				me.Delete("/telegram", deps.TelegramHandler.Disconnect)
+			}
 		})
 
 		api.Route("/events", func(ev chi.Router) {
@@ -121,6 +138,7 @@ func NewRouter(deps Deps) http.Handler {
 
 			// Admin writes: Admin role or higher required
 			ev.With(auth.RequireAuth(deps.Tokens, auth.RoleAdmin)).Post("/", deps.EventsHandler.Create)
+			ev.With(auth.RequireAuth(deps.Tokens, auth.RoleAdmin)).Post("/{id}/duplicate", deps.EventsHandler.Duplicate)
 			ev.With(auth.RequireAuth(deps.Tokens, auth.RoleAdmin)).Patch("/{id}", deps.EventsHandler.Update)
 			ev.With(auth.RequireAuth(deps.Tokens, auth.RoleAdmin)).Delete("/{id}", deps.EventsHandler.Delete)
 
@@ -136,6 +154,25 @@ func NewRouter(deps Deps) http.Handler {
 				sch.With(auth.RequireAuth(deps.Tokens, auth.RoleAdmin)).Patch("/{scheduleId}", deps.EventsHandler.UpdateSchedule)
 				sch.With(auth.RequireAuth(deps.Tokens, auth.RoleAdmin)).Delete("/{scheduleId}", deps.EventsHandler.DeleteSchedule)
 			})
+			ev.Route("/{id}/faqs", func(faq chi.Router) {
+				faq.With(auth.RequireAuth(deps.Tokens, auth.RoleAdmin)).Post("/", deps.EventsHandler.CreateFAQ)
+				faq.With(auth.RequireAuth(deps.Tokens, auth.RoleAdmin)).Patch("/{faqId}", deps.EventsHandler.UpdateFAQ)
+				faq.With(auth.RequireAuth(deps.Tokens, auth.RoleAdmin)).Delete("/{faqId}", deps.EventsHandler.DeleteFAQ)
+			})
+			ev.Route("/{id}/rules", func(rule chi.Router) {
+				rule.With(auth.RequireAuth(deps.Tokens, auth.RoleAdmin)).Post("/", deps.EventsHandler.CreateRule)
+				rule.With(auth.RequireAuth(deps.Tokens, auth.RoleAdmin)).Patch("/{ruleId}", deps.EventsHandler.UpdateRule)
+				rule.With(auth.RequireAuth(deps.Tokens, auth.RoleAdmin)).Delete("/{ruleId}", deps.EventsHandler.DeleteRule)
+			})
+			if deps.EventAutomationsHandler != nil {
+				ev.Route("/{id}/automations", func(automation chi.Router) {
+					automation.Use(auth.RequireAuth(deps.Tokens, auth.RoleAdmin))
+					automation.Get("/", deps.EventAutomationsHandler.List)
+					automation.Post("/", deps.EventAutomationsHandler.Create)
+					automation.Patch("/{automationId}", deps.EventAutomationsHandler.Update)
+					automation.Delete("/{automationId}", deps.EventAutomationsHandler.Cancel)
+				})
+			}
 			ev.With(auth.RequireAuth(deps.Tokens, auth.RoleUser)).
 				Post("/{id}/registrations", deps.RegistrationsHandler.Register)
 		})
@@ -156,8 +193,13 @@ func NewRouter(deps Deps) http.Handler {
 			a.Use(auth.RequireAuth(deps.Tokens, auth.RoleStaff))
 			a.Get("/stats", deps.StatsHandler.AdminSummary)
 			a.Get("/registrations", deps.AdminHandler.ListRegistrations)
+			a.Get("/registrations/export.csv", deps.AdminHandler.ExportRegistrations)
 			a.Get("/registrations/{id}", deps.AdminHandler.GetRegistration)
 			a.With(auth.RequireAuth(deps.Tokens, auth.RoleAdmin)).Get("/audit-logs", deps.AdminHandler.ListAuditLogs)
+			if deps.AutomationHandler != nil {
+				a.With(auth.RequireAuth(deps.Tokens, auth.RoleAdmin)).Get("/automations", deps.AutomationHandler.Snapshot)
+				a.With(auth.RequireAuth(deps.Tokens, auth.RoleAdmin)).Post("/automations/deliveries/{id}/retry", deps.AutomationHandler.Retry)
+			}
 			a.With(auth.RequireAuth(deps.Tokens, auth.RoleSuperAdmin)).Get("/users", deps.AdminHandler.ListUsers)
 			a.With(auth.RequireAuth(deps.Tokens, auth.RoleSuperAdmin)).Patch("/users/{id}/role", deps.AdminHandler.UpdateUserRole)
 			a.With(auth.RequireAuth(deps.Tokens, auth.RoleSuperAdmin)).Get("/system", deps.SystemStatusHandler.Get)

@@ -48,6 +48,10 @@ type Config struct {
 	GoogleOAuthClientID     string
 	GoogleOAuthClientSecret string
 	GoogleOAuthRedirectURL  string
+	TelegramBotToken        string
+	TelegramBotUsername     string
+	TelegramWebhookSecret   string
+	TelegramAPIBaseURL      string
 
 	ReminderWindow            time.Duration
 	ReminderPollInterval      time.Duration
@@ -178,6 +182,10 @@ func Load() (*Config, error) {
 	cfg.GoogleOAuthClientID = strings.TrimSpace(os.Getenv("GOOGLE_OAUTH_CLIENT_ID"))
 	cfg.GoogleOAuthClientSecret = strings.TrimSpace(os.Getenv("GOOGLE_OAUTH_CLIENT_SECRET"))
 	cfg.GoogleOAuthRedirectURL = strings.TrimSpace(os.Getenv("GOOGLE_OAUTH_REDIRECT_URL"))
+	cfg.TelegramBotToken = strings.TrimSpace(os.Getenv("TELEGRAM_BOT_TOKEN"))
+	cfg.TelegramBotUsername = strings.TrimPrefix(strings.TrimSpace(os.Getenv("TELEGRAM_BOT_USERNAME")), "@")
+	cfg.TelegramWebhookSecret = strings.TrimSpace(os.Getenv("TELEGRAM_WEBHOOK_SECRET"))
+	cfg.TelegramAPIBaseURL = strings.TrimRight(strings.TrimSpace(getEnv("TELEGRAM_API_BASE_URL", "https://api.telegram.org")), "/")
 	cfg.PaymentProvider = strings.ToLower(getEnv("PAYMENT_PROVIDER", cfg.PaymentProvider))
 	cfg.BakongBaseURL = os.Getenv("BAKONG_BASE_URL")
 	cfg.BakongToken = os.Getenv("BAKONG_TOKEN")
@@ -338,6 +346,10 @@ func validateRuntimeSecurity(cfg *Config) error {
 		if cfg.AppEnv == "production" && redirectURL.Scheme != "https" {
 			return fmt.Errorf("config: production GOOGLE_OAUTH_REDIRECT_URL must use https")
 		}
+	}
+	telegramConfigured := cfg.TelegramBotToken != "" || cfg.TelegramBotUsername != "" || cfg.TelegramWebhookSecret != ""
+	if telegramConfigured && (cfg.TelegramBotToken == "" || cfg.TelegramBotUsername == "" || cfg.TelegramWebhookSecret == "") {
+		return fmt.Errorf("config: Telegram requires TELEGRAM_BOT_TOKEN, TELEGRAM_BOT_USERNAME, and TELEGRAM_WEBHOOK_SECRET")
 	}
 	publicURL, err := url.Parse(cfg.PublicAppURL)
 	if err != nil || (publicURL.Scheme != "http" && publicURL.Scheme != "https") || publicURL.Host == "" || publicURL.Path != "" || publicURL.RawQuery != "" || publicURL.Fragment != "" {

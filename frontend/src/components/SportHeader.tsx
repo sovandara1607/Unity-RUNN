@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/router";
 import { ArrowUpRight, Gauge, Menu, UserRound, X } from "lucide-react";
-import { api } from "../lib/api";
+import { api, resolveApiAssetUrl } from "../lib/api";
 import { useSiteConfig } from "./site/SiteConfigProvider";
 import { AnnouncementStrip } from "./site/AnnouncementStrip";
 import { openCookiePreferences } from "../lib/cookieConsent";
@@ -55,7 +55,7 @@ export function SportHeader({ active, accountHref, accountLabel }: SportHeaderPr
         <Link href="/" className="group flex shrink-0 items-center gap-3" aria-label="Unity Runn Club home">
           <span className="flex h-11 w-11 items-center justify-center overflow-hidden transition-transform group-hover:-rotate-3" style={{ backgroundColor: config.primary_color }}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={config.logo_url || "/Unity-Logos/logo%20UNTR-02.png"} alt="" className="h-full w-full object-cover" />
+            <img src={resolveApiAssetUrl(config.logo_url) || "/Unity-Logos/logo%20UNTR-02.png"} alt="" className="h-full w-full object-cover" />
           </span>
           <span>
             <span className="block text-[8px] font-black uppercase tracking-[0.25em]" style={{ color: config.primary_color }}>{config.location_label}</span>

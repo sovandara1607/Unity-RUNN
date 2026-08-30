@@ -23,6 +23,13 @@ type CreateEventRequest struct {
 	RegistrationCloseAt *time.Time `json:"registration_close_at"`
 }
 
+// DuplicateEventRequest describes the new edition created from an existing event.
+// Reusable race content is copied, while lifecycle and registration windows reset.
+type DuplicateEventRequest struct {
+	Name      string `json:"name" validate:"required,max=200"`
+	EventDate string `json:"event_date" validate:"required,datetime=2006-01-02"`
+}
+
 // UpdateEventRequest is the payload for PATCH /api/v1/events/:id
 type UpdateEventRequest struct {
 	Name                *string    `json:"name" validate:"omitempty,max=200"`
@@ -52,13 +59,14 @@ type CreateCategoryRequest struct {
 
 // UpdateCategoryRequest is the payload for PATCH /api/v1/events/:id/categories/:categoryId
 type UpdateCategoryRequest struct {
-	Name                 *string    `json:"name" validate:"omitempty,max=100"`
-	Distance             *string    `json:"distance" validate:"omitempty,max=50"`
-	PriceCents           *int       `json:"price_cents" validate:"omitempty,min=0"`
-	Currency             *string    `json:"currency" validate:"omitempty,oneof=USD KHR"`
-	Capacity             *int       `json:"capacity" validate:"omitempty,min=0"`
-	RegistrationDeadline *time.Time `json:"registration_deadline"`
-	Status               *string    `json:"status" validate:"omitempty,oneof=OPEN CLOSED SOLD_OUT"`
+	Name                      *string    `json:"name" validate:"omitempty,max=100"`
+	Distance                  *string    `json:"distance" validate:"omitempty,max=50"`
+	PriceCents                *int       `json:"price_cents" validate:"omitempty,min=0"`
+	Currency                  *string    `json:"currency" validate:"omitempty,oneof=USD KHR"`
+	Capacity                  *int       `json:"capacity" validate:"omitempty,min=0"`
+	RegistrationDeadline      *time.Time `json:"registration_deadline"`
+	ClearRegistrationDeadline bool       `json:"clear_registration_deadline"`
+	Status                    *string    `json:"status" validate:"omitempty,oneof=OPEN CLOSED SOLD_OUT"`
 }
 
 // CreateScheduleRequest is the payload for POST /api/v1/events/:id/schedules
@@ -75,6 +83,32 @@ type UpdateScheduleRequest struct {
 	Title       *string `json:"title" validate:"omitempty,max=200"`
 	Description *string `json:"description" validate:"omitempty,max=1000"`
 	SortOrder   *int    `json:"sort_order"`
+}
+
+// CreateFAQRequest is the payload for POST /api/v1/events/:id/faqs
+type CreateFAQRequest struct {
+	Question  string `json:"question" validate:"required,max=300"`
+	Answer    string `json:"answer" validate:"required,max=3000"`
+	SortOrder int    `json:"sort_order" validate:"min=0"`
+}
+
+// UpdateFAQRequest is the payload for PATCH /api/v1/events/:id/faqs/:faqId
+type UpdateFAQRequest struct {
+	Question  *string `json:"question" validate:"omitempty,max=300"`
+	Answer    *string `json:"answer" validate:"omitempty,max=3000"`
+	SortOrder *int    `json:"sort_order" validate:"omitempty,min=0"`
+}
+
+// CreateRuleRequest is the payload for POST /api/v1/events/:id/rules
+type CreateRuleRequest struct {
+	Rule      string `json:"rule" validate:"required,max=1000"`
+	SortOrder int    `json:"sort_order" validate:"min=0"`
+}
+
+// UpdateRuleRequest is the payload for PATCH /api/v1/events/:id/rules/:ruleId
+type UpdateRuleRequest struct {
+	Rule      *string `json:"rule" validate:"omitempty,max=1000"`
+	SortOrder *int    `json:"sort_order" validate:"omitempty,min=0"`
 }
 
 // init registers the slug validation

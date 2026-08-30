@@ -197,6 +197,50 @@ func TestRepository_GetDetailBySlug_IncludesChildren(t *testing.T) {
 	}
 }
 
+func TestRepository_Duplicate_CopiesChildrenAndResetsRegistrationState(t *testing.T) {
+	pool := testPool(t)
+	repo := NewRepository(pool)
+	ctx := context.Background()
+	openAt, closeAt := time.Now().Add(-time.Hour), time.Now().Add(time.Hour)
+	source := testEvent("Founders Run", "founders-run")
+	source.RegistrationOpenAt, source.RegistrationCloseAt = &openAt, &closeAt
+	if err := repo.Create(ctx, source); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	deadline := time.Now().Add(30 * time.Minute)
+	if _, err := pool.Exec(ctx, `INSERT INTO event_categories (event_id, name, distance, price_cents, currency, capacity, registration_deadline, status) VALUES ($1,'10K','10 km',1500,'USD',100,$2,'CLOSED')`, source.ID, deadline); err != nil {
+		t.Fatalf("insert category: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO event_schedules (event_id, time, title, sort_order) VALUES ($1,'06:00','Flag-off',1)`, source.ID); err != nil {
+		t.Fatalf("insert schedule: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO event_faqs (event_id, question, answer, sort_order) VALUES ($1,'Parking?','North lot.',1)`, source.ID); err != nil {
+		t.Fatalf("insert FAQ: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO event_rules (event_id, rule, sort_order) VALUES ($1,'Wear a bib.',1)`, source.ID); err != nil {
+		t.Fatalf("insert rule: %v", err)
+	}
+
+	clone := testEvent("Founders Run 2026", "founders-run-2026")
+	clone.EventDate = time.Date(2026, 12, 6, 0, 0, 0, 0, time.UTC)
+	if err := repo.Duplicate(ctx, source.ID, clone); err != nil {
+		t.Fatalf("Duplicate() error = %v", err)
+	}
+	detail, err := repo.GetDetailBySlug(ctx, clone.Slug)
+	if err != nil {
+		t.Fatalf("GetDetailBySlug() error = %v", err)
+	}
+	if detail.Status != StatusDraft || detail.RegistrationOpenAt != nil || detail.RegistrationCloseAt != nil {
+		t.Fatalf("clone lifecycle reset = %#v", detail.Event)
+	}
+	if len(detail.Categories) != 1 || len(detail.Schedule) != 1 || len(detail.FAQs) != 1 || len(detail.Rules) != 1 {
+		t.Fatalf("copied children = categories:%d schedule:%d FAQs:%d rules:%d", len(detail.Categories), len(detail.Schedule), len(detail.FAQs), len(detail.Rules))
+	}
+	if detail.Categories[0].RegistrationDeadline != nil || detail.Categories[0].Status != "OPEN" {
+		t.Fatalf("category reset = %#v", detail.Categories[0])
+	}
+}
+
 // TestRepository_List_FiltersByStatus tests the List method that filters by status
 func TestRepository_List_FiltersByStatus(t *testing.T) {
 	pool := testPool(t)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -247,6 +248,7 @@ func (r *Repository) HasCheckIn(ctx context.Context, registrationID uuid.UUID) (
 type AdminListFilter struct {
 	EventID *uuid.UUID
 	Status  *Status
+	Search  string
 	Limit   int
 	Offset  int
 }
@@ -266,6 +268,11 @@ func (r *Repository) ListAll(ctx context.Context, filter AdminListFilter) ([]Reg
 		args = append(args, *filter.Status)
 		argN++
 	}
+	if search := strings.TrimSpace(filter.Search); search != "" {
+		where += fmt.Sprintf(" AND (r.full_name ILIKE $%d OR r.email ILIKE $%d OR r.phone ILIKE $%d OR r.registration_number ILIKE $%d)", argN, argN, argN, argN)
+		args = append(args, "%"+search+"%")
+		argN++
+	}
 
 	var total int
 	countQuery := "SELECT count(*) FROM registrations r " + where
@@ -276,12 +283,14 @@ func (r *Repository) ListAll(ctx context.Context, filter AdminListFilter) ([]Reg
 	limit, offset := filter.Limit, filter.Offset
 	args = append(args, limit, offset)
 	query := fmt.Sprintf(`
-		SELECT r.id, r.registration_number, r.user_id, r.event_id, r.event_category_id, r.status,
+		SELECT r.id, r.registration_number, r.user_id, r.event_id, r.event_category_id, e.name, ec.name, r.status,
 		       r.full_name, r.email, r.phone, r.date_of_birth, r.gender,
 		       r.emergency_contact_name, r.emergency_contact_phone, r.tshirt_size,
 		       r.created_at, r.updated_at, ci.checked_in_at
 		FROM registrations r
 		LEFT JOIN check_ins ci ON ci.registration_id = r.id
+		JOIN events e ON e.id = r.event_id
+		JOIN event_categories ec ON ec.id = r.event_category_id
 		%s ORDER BY r.created_at DESC LIMIT $%d OFFSET $%d`, where, argN, argN+1)
 
 	rows, err := r.pool.Query(ctx, query, args...)
@@ -294,7 +303,7 @@ func (r *Repository) ListAll(ctx context.Context, filter AdminListFilter) ([]Reg
 	for rows.Next() {
 		var reg Registration
 		if err := rows.Scan(&reg.ID, &reg.RegistrationNumber, &reg.UserID, &reg.EventID,
-			&reg.EventCategoryID, &reg.Status, &reg.FullName, &reg.Email, &reg.Phone,
+			&reg.EventCategoryID, &reg.EventName, &reg.CategoryName, &reg.Status, &reg.FullName, &reg.Email, &reg.Phone,
 			&reg.DateOfBirth, &reg.Gender, &reg.EmergencyContactName, &reg.EmergencyContactPhone,
 			&reg.TshirtSize, &reg.CreatedAt, &reg.UpdatedAt, &reg.CheckedInAt); err != nil {
 			return nil, 0, fmt.Errorf("registrations: admin scan: %w", err)

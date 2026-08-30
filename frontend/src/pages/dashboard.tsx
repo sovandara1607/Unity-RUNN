@@ -1,7 +1,7 @@
 import React, { useMemo, useRef, useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/router";
-import { ArrowRight, ArrowUpRight, CalendarDays, Download, LogOut, QrCode, Shield, Ticket } from "lucide-react";
+import { ArrowRight, ArrowUpRight, CalendarDays, Download, LogOut, QrCode, Shield, Ticket, UserRound } from "lucide-react";
 import QRCode from "qrcode";
 import { api } from "../lib/api";
 import { withMinSkeleton } from "../lib/withMinSkeleton";
@@ -276,6 +276,7 @@ export default function DashboardPage() {
             <nav aria-label="Dashboard" className="mt-8 flex gap-1 overflow-x-auto border-t border-white/10 pt-4">
               {featuredRegistration && <a href="#ticket" className="inline-flex shrink-0 items-center gap-2 rounded-full px-4 py-2 text-[10px] font-black uppercase tracking-[0.1em] text-black" style={{ backgroundColor: acid }}><Ticket className="h-3.5 w-3.5" />{featuredRegistration.status === "PENDING" ? "Payment" : featuredRegistration.status === "CONFIRMED" ? "My ticket" : "Latest entry"}</a>}
               {others.length > 0 && <a href="#entries" className="inline-flex shrink-0 items-center gap-2 rounded-full px-4 py-2 text-[10px] font-black uppercase tracking-[0.1em] text-white/55 transition hover:bg-white/10 hover:text-white">Other entries</a>}
+              <Link href="/profile" className="inline-flex shrink-0 items-center gap-2 rounded-full px-4 py-2 text-[10px] font-black uppercase tracking-[0.1em] text-white/55 transition hover:bg-white/10 hover:text-white"><UserRound className="h-3.5 w-3.5" /> Runner details</Link>
               <Link href="/events" className="inline-flex shrink-0 items-center gap-2 rounded-full px-4 py-2 text-[10px] font-black uppercase tracking-[0.1em] text-white/55 transition hover:bg-white/10 hover:text-white">Find a race <ArrowUpRight className="h-3.5 w-3.5" /></Link>
             </nav>
           </div>

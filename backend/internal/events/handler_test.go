@@ -49,10 +49,49 @@ func newTestRouter(h *Handler, tokens *auth.TokenIssuer) http.Handler {
 		ev.With(auth.OptionalAuth(tokens)).Get("/", h.List)
 		ev.With(auth.OptionalAuth(tokens)).Get("/{id}", h.GetBySlug)
 		ev.With(auth.RequireAuth(tokens, auth.RoleAdmin)).Post("/", h.Create)
+		ev.With(auth.RequireAuth(tokens, auth.RoleAdmin)).Post("/{id}/duplicate", h.Duplicate)
 		ev.With(auth.RequireAuth(tokens, auth.RoleAdmin)).Patch("/{id}", h.Update)
 		ev.With(auth.RequireAuth(tokens, auth.RoleAdmin)).Delete("/{id}", h.Delete)
 	})
 	return r
+}
+
+func TestHandler_Duplicate_RequiresAdminAndCreatesDraft(t *testing.T) {
+	repo := newFakeRepo()
+	source := testEvent("Founders Run 2026", "founders-run-2026")
+	if err := repo.Create(context.Background(), source); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	tokens := newTestTokens()
+	router := newTestRouter(NewHandler(NewService(repo, nil)), tokens)
+	body := `{"name":"Founders Run 2027","event_date":"2027-12-06"}`
+
+	forbidden := httptest.NewRequest(http.MethodPost, "/api/v1/events/"+source.ID.String()+"/duplicate", strings.NewReader(body))
+	forbidden.Header.Set("Authorization", "Bearer "+bearerToken(t, tokens, auth.RoleUser))
+	forbidden.Header.Set("Content-Type", "application/json")
+	forbiddenRec := httptest.NewRecorder()
+	router.ServeHTTP(forbiddenRec, forbidden)
+	if forbiddenRec.Code != http.StatusForbidden {
+		t.Fatalf("user duplicate status = %d, want 403", forbiddenRec.Code)
+	}
+
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/events/"+source.ID.String()+"/duplicate", strings.NewReader(body))
+	request.Header.Set("Authorization", "Bearer "+bearerToken(t, tokens, auth.RoleAdmin))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("admin duplicate status = %d, want 201, body=%s", recorder.Code, recorder.Body.String())
+	}
+	var response struct {
+		Data Event `json:"data"`
+	}
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.Data.Status != StatusDraft || response.Data.Name != "Founders Run 2027" {
+		t.Fatalf("duplicate response = %#v", response.Data)
+	}
 }
 
 // newPosterRequest creates a new poster request

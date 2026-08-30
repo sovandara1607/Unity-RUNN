@@ -33,6 +33,8 @@ type Registration struct {
 	UserID                uuid.UUID  `json:"user_id"`
 	EventID               uuid.UUID  `json:"event_id"`
 	EventCategoryID       uuid.UUID  `json:"event_category_id"`
+	EventName             string     `json:"event_name,omitempty"`
+	CategoryName          string     `json:"category_name,omitempty"`
 	Status                Status     `json:"status"`
 	FullName              string     `json:"full_name"`
 	Email                 string     `json:"email"`

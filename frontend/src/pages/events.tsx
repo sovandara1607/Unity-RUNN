@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowUpRight, CalendarDays, MapPin, Search } from "lucide-react";
+import { ArrowUpRight, CalendarDays, MapPin, Search, SlidersHorizontal, X } from "lucide-react";
 import { api } from "../lib/api";
 import { withMinSkeleton } from "../lib/withMinSkeleton";
 import { SportFooter, SportHeader } from "../components/SportHeader";
@@ -33,6 +33,8 @@ export default function EventsPage() {
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [tab, setTab] = useState<"ALL" | EventStatus>("ALL");
+  const [month, setMonth] = useState("ALL");
+  const [location, setLocation] = useState("ALL");
 
   useEffect(() => {
     withMinSkeleton(() =>
@@ -46,17 +48,37 @@ export default function EventsPage() {
   const filtered = useMemo(() => {
     return events.filter((event) => {
       if (tab !== "ALL" && event.status !== tab) return false;
+      if (month !== "ALL" && event.event_date.slice(0, 7) !== month) return false;
+      if (location !== "ALL" && event.location !== location) return false;
       if (!query.trim()) return true;
       const q = query.trim().toLowerCase();
       return event.name.toLowerCase().includes(q) || (event.location || "").toLowerCase().includes(q);
     });
-  }, [events, tab, query]);
+  }, [events, tab, month, location, query]);
 
   const counts = useMemo(() => {
     const map: Record<string, number> = { ALL: events.length };
     for (const event of events) map[event.status] = (map[event.status] || 0) + 1;
     return map;
   }, [events]);
+
+  const monthOptions = useMemo(() => Array.from(new Set(events.map((event) => event.event_date.slice(0, 7))))
+    .filter(Boolean)
+    .sort()
+    .map((value) => ({
+      value,
+      label: new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(`${value}-01T00:00:00Z`)),
+    })), [events]);
+
+  const locationOptions = useMemo(() => Array.from(new Set(events.map((event) => event.location.trim()).filter(Boolean)))
+    .sort((a, b) => a.localeCompare(b)), [events]);
+  const hasFilters = tab !== "ALL" || month !== "ALL" || location !== "ALL" || Boolean(query.trim());
+  const clearFilters = () => {
+    setTab("ALL");
+    setMonth("ALL");
+    setLocation("ALL");
+    setQuery("");
+  };
 
   return (
     <div className="min-h-screen text-white" style={{ backgroundColor: config.background_color }}>
@@ -65,7 +87,7 @@ export default function EventsPage() {
         <div className="mb-8">
           <p className="text-xs font-bold uppercase tracking-[0.22em]" style={{ color: acid }}>Race calendar</p>
           <h1 className="sport-display mt-3 text-4xl uppercase leading-[0.9] tracking-[-0.04em] sm:text-5xl">Find your next race.</h1>
-          <p className="mt-3 max-w-lg text-sm leading-6 text-white/65">Browse every Unity Runn Club event — search by name or location, and filter by registration status.</p>
+          <p className="mt-3 max-w-lg text-sm leading-6 text-white/65">Browse every Unity Runn Club event — search by name, then narrow the board by entry status, month, or start location.</p>
         </div>
 
         {loading ? (
@@ -105,11 +127,40 @@ export default function EventsPage() {
               </div>
             </div>
 
+            <div className="flex flex-col gap-4 border-b border-white/15 py-4 lg:flex-row lg:items-center lg:justify-between">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                <p className="flex shrink-0 items-center gap-2 font-mono text-[9px] font-black uppercase tracking-[0.16em] text-white/35"><SlidersHorizontal className="h-3.5 w-3.5" /> Refine the board</p>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <label className="relative">
+                    <span className="sr-only">Race month</span>
+                    <select value={month} onChange={(event) => setMonth(event.target.value)} className="h-10 min-w-48 appearance-none rounded-full border border-white/15 bg-white/[0.06] pl-4 pr-10 text-[10px] font-black uppercase tracking-[0.09em] text-white outline-none transition hover:border-white/30 focus:border-white">
+                      <option value="ALL" className="text-black">Any month</option>
+                      {monthOptions.map((option) => <option key={option.value} value={option.value} className="text-black">{option.label}</option>)}
+                    </select>
+                    <CalendarDays className="pointer-events-none absolute right-3.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-white/35" />
+                  </label>
+                  <label className="relative">
+                    <span className="sr-only">Start location</span>
+                    <select value={location} onChange={(event) => setLocation(event.target.value)} className="h-10 min-w-48 appearance-none rounded-full border border-white/15 bg-white/[0.06] pl-4 pr-10 text-[10px] font-black uppercase tracking-[0.09em] text-white outline-none transition hover:border-white/30 focus:border-white">
+                      <option value="ALL" className="text-black">Any location</option>
+                      {locationOptions.map((option) => <option key={option} value={option} className="text-black">{option}</option>)}
+                    </select>
+                    <MapPin className="pointer-events-none absolute right-3.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-white/35" />
+                  </label>
+                </div>
+              </div>
+              <div className="flex items-center justify-between gap-4 lg:justify-end">
+                <p role="status" className="font-mono text-[9px] font-black uppercase tracking-[0.14em] text-white/35"><span className="text-white">{filtered.length}</span> {filtered.length === 1 ? "start" : "starts"} on the board</p>
+                {hasFilters && <button type="button" onClick={clearFilters} className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-white/15 px-3 py-2 text-[9px] font-black uppercase tracking-[0.1em] text-white/55 transition hover:border-white/40 hover:text-white"><X className="h-3 w-3" /> Clear all</button>}
+              </div>
+            </div>
+
             {/* Results */}
             {filtered.length === 0 ? (
-              <p className="border-b border-white/15 py-16 text-center text-sm text-white/50">
-                No events match {query ? `"${query}"` : "this filter"}. Try a different search or filter.
-              </p>
+              <div className="border-b border-white/15 py-16 text-center text-sm text-white/50">
+                <p>No events match {query ? `"${query}"` : "these filters"}. Try a different search or filter.</p>
+                {hasFilters && <button type="button" onClick={clearFilters} className="mx-auto mt-4 block border-b border-white/35 pb-1 text-[10px] font-black uppercase tracking-[0.12em] text-white">Show every race</button>}
+              </div>
             ) : (
               <div className="grid gap-4 py-8 sm:grid-cols-2 lg:grid-cols-3">
                 {filtered.map((event) => <EventCard key={event.id} event={event} primary={acid} />)}

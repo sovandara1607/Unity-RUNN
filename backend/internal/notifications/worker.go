@@ -169,7 +169,7 @@ func (w *Worker) process(ctx context.Context, notificationID string) {
 }
 
 func (w *Worker) send(ctx context.Context, n *Notification) error {
-	data, recipient, err := w.buildTemplateData(ctx, n)
+	data, recipient, err := buildTemplateData(ctx, n, w.regs, w.evts, w.publicAppURL)
 	if err != nil {
 		return fmt.Errorf("build template data: %w", err)
 	}
@@ -184,23 +184,27 @@ func (w *Worker) send(ctx context.Context, n *Notification) error {
 		return fmt.Errorf("build attachments: %w", err)
 	}
 
-	return w.sender.Send(ctx, email.Message{
+	if err := w.sender.Send(ctx, email.Message{
 		To: recipient, Subject: subject, HTML: html, Text: text, Attachments: attachments,
-	})
+	}); err != nil {
+		return err
+	}
+
+	return nil
 }
 
-func (w *Worker) buildTemplateData(ctx context.Context, n *Notification) (email.TemplateData, string, error) {
-	reg, err := w.regs.GetByID(ctx, n.EntityID)
+func buildTemplateData(ctx context.Context, n *Notification, regs registrationGetter, evts eventGetter, publicAppURL string) (email.TemplateData, string, error) {
+	reg, err := regs.GetByID(ctx, n.EntityID)
 	if err != nil {
 		return email.TemplateData{}, "", fmt.Errorf("load registration: %w", err)
 	}
 
-	ev, err := w.evts.GetByID(ctx, reg.EventID)
+	ev, err := evts.GetByID(ctx, reg.EventID)
 	if err != nil {
 		return email.TemplateData{}, "", fmt.Errorf("load event: %w", err)
 	}
 
-	category, err := w.evts.GetCategoryByID(ctx, reg.EventCategoryID)
+	category, err := evts.GetCategoryByID(ctx, reg.EventCategoryID)
 	if err != nil {
 		return email.TemplateData{}, "", fmt.Errorf("load category: %w", err)
 	}
@@ -214,7 +218,7 @@ func (w *Worker) buildTemplateData(ctx context.Context, n *Notification) (email.
 		StartTime:          ev.StartTime.Format("3:04 PM"),
 		Location:           ev.Location,
 		TshirtSize:         reg.TshirtSize,
-		DashboardURL:       strings.TrimRight(w.publicAppURL, "/") + "/dashboard",
+		DashboardURL:       strings.TrimRight(publicAppURL, "/") + "/dashboard",
 	}
 
 	if amountCents, ok := n.Payload["amount_cents"].(float64); ok {
@@ -223,9 +227,15 @@ func (w *Worker) buildTemplateData(ctx context.Context, n *Notification) (email.
 	if changed, ok := n.Payload["changed_fields"].([]any); ok {
 		data.ChangedFields = joinAny(changed)
 	}
+	if title, ok := n.Payload["announcement_title"].(string); ok {
+		data.AnnouncementTitle = title
+	}
+	if message, ok := n.Payload["announcement_message"].(string); ok {
+		data.AnnouncementMessage = message
+	}
 
 	if n.Type == TypePaymentConfirmation {
-		payments, ok := w.regs.(paymentGetter)
+		payments, ok := regs.(paymentGetter)
 		if !ok {
 			return email.TemplateData{}, "", errors.New("registration repository cannot load payment receipt")
 		}

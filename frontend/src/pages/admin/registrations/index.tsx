@@ -7,6 +7,9 @@ import {
   Phone,
   Mail,
   X,
+  FileSpreadsheet,
+  LoaderCircle,
+  ShieldCheck,
 } from "lucide-react";
 import { AdminLayout } from "../../../components/admin/AdminLayout";
 import { SkeletonTable } from "../../../components/Skeleton";
@@ -25,96 +28,68 @@ export default function AdminRegistrationsPage() {
   const [selectedStatus, setSelectedStatus] = useState<string>("ALL");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedReg, setSelectedReg] = useState<Registration | null>(null);
+  const [total, setTotal] = useState(0);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
-  const fetchData = async () => {
-    try {
-      setLoading(true);
-      const [regsRes, eventsRes] = await withMinSkeleton(() => Promise.all([
-        api.adminListRegistrations({ limit: 200 }),
-        api.listEvents({ limit: 100 }),
-      ]));
-      setRegistrations(regsRes.registrations || []);
-      setEvents(eventsRes.events || []);
-    } catch {
-    } finally {
-      setLoading(false);
-    }
-  };
+  const activeFilters = React.useMemo(() => ({
+    event_id: selectedEventId === "ALL" ? undefined : selectedEventId,
+    status: selectedStatus === "ALL" ? undefined : selectedStatus,
+    search: searchQuery.trim() || undefined,
+  }), [selectedEventId, selectedStatus, searchQuery]);
 
   useEffect(() => {
-    fetchData();
-  }, []);
+    void api.listEvents({ limit: 100 }).then((result) => setEvents(result.events || [])).catch(() => {
+      notify({ tone: "error", title: "Events unavailable", message: "The event filter could not be loaded." });
+    });
+  }, [notify]);
 
-  const filteredRegistrations = registrations.filter((reg) => {
-    if (selectedEventId !== "ALL" && reg.event_id !== selectedEventId) return false;
-    if (selectedStatus !== "ALL" && reg.status !== selectedStatus) return false;
+  useEffect(() => {
+    let active = true;
+    const timer = window.setTimeout(async () => {
+      setLoading(true);
+      try {
+        const result = await withMinSkeleton(() => api.adminListRegistrations({ ...activeFilters, limit: 200, offset: 0 }));
+        if (active) { setRegistrations(result.registrations || []); setTotal(result.total || 0); }
+      } catch (caught) {
+        if (active) notify({ tone: "error", title: "Roster unavailable", message: caught instanceof Error ? caught.message : "Could not load registrations." });
+      } finally { if (active) setLoading(false); }
+    }, activeFilters.search ? 250 : 0);
+    return () => { active = false; window.clearTimeout(timer); };
+  }, [activeFilters, notify]);
 
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase();
-      const match =
-        (reg.full_name && reg.full_name.toLowerCase().includes(q)) ||
-        (reg.email && reg.email.toLowerCase().includes(q)) ||
-        (reg.phone && reg.phone.includes(q)) ||
-        (reg.registration_number && reg.registration_number.toLowerCase().includes(q)) ||
-        (reg.id && reg.id.toLowerCase().includes(q));
-      if (!match) return false;
-    }
-
-    return true;
-  });
-
-  const exportToCSV = () => {
-    if (filteredRegistrations.length === 0) {
-      notify({ tone: "warning", title: "Nothing to export", message: "Adjust the filters or wait for registrations before downloading a roster." });
-      return;
-    }
-
-    const headers = [
-      "Registration Number",
-      "Full Name",
-      "Email",
-      "Phone",
-      "Gender",
-      "Date of Birth",
-      "T-shirt Size",
-      "Emergency Contact Name",
-      "Emergency Contact Phone",
-      "Status",
-      "Event ID",
-      "Registered At",
-    ];
-
-    const rows = filteredRegistrations.map((r) => [
-      `"${r.registration_number || r.id.slice(0, 8)}"`,
-      `"${r.full_name || ""}"`,
-      `"${r.email || ""}"`,
-      `"${r.phone || ""}"`,
-      `"${r.gender || ""}"`,
-      `"${r.date_of_birth ? r.date_of_birth.slice(0, 10) : ""}"`,
-      `"${r.tshirt_size || ""}"`,
-      `"${r.emergency_contact_name || ""}"`,
-      `"${r.emergency_contact_phone || ""}"`,
-      `"${r.status}"`,
-      `"${r.event_id}"`,
-      `"${new Date(r.created_at).toISOString()}"`,
-    ]);
-
-    const csvContent =
-      "data:text/csv;charset=utf-8," +
-      [headers.join(","), ...rows.map((e) => e.join(","))].join("\n");
-
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
-    link.setAttribute(
-      "download",
-      `unity_registrations_${new Date().toISOString().slice(0, 10)}.csv`
-    );
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    notify({ tone: "success", title: "Roster exported", message: `${filteredRegistrations.length} registration${filteredRegistrations.length === 1 ? "" : "s"} saved as CSV.` });
+  const loadMore = async () => {
+    setLoadingMore(true);
+    try {
+      const result = await api.adminListRegistrations({ ...activeFilters, limit: 200, offset: registrations.length });
+      setRegistrations((current) => [...current, ...(result.registrations || [])]);
+      setTotal(result.total || 0);
+    } catch (caught) {
+      notify({ tone: "error", title: "More runners not loaded", message: caught instanceof Error ? caught.message : "Try again." });
+    } finally { setLoadingMore(false); }
   };
+
+  const exportToCSV = async () => {
+    setExporting(true);
+    try {
+      const { blob, filename } = await api.adminExportRegistrations(activeFilters);
+      const href = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = href;
+      link.download = filename || "unity-roster.csv";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(href), 1000);
+      setExportOpen(false);
+      notify({ tone: "success", title: "Roster exported", message: `${total} filtered registration${total === 1 ? "" : "s"} saved as CSV.` });
+    } catch (caught) {
+      notify({ tone: "error", title: "Roster not exported", message: caught instanceof Error ? caught.message : "Could not download the roster." });
+    } finally { setExporting(false); }
+  };
+
+  const selectedEvent = events.find((event) => event.id === selectedEventId);
 
   return (
     <AdminLayout
@@ -122,11 +97,11 @@ export default function AdminRegistrationsPage() {
       subtitle="View, search, filter participants, and export attendee rosters"
       actions={
         <button
-          onClick={exportToCSV}
+          onClick={() => total > 0 ? setExportOpen(true) : notify({ tone: "warning", title: "Nothing to export", message: "Adjust the filters or wait for registrations before downloading a roster." })}
           className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded-lg shadow-sm transition-colors"
         >
           <Download className="w-3.5 h-3.5" />
-          <span>Export CSV</span>
+          <span>Review export</span>
         </button>
       }
     >
@@ -136,6 +111,7 @@ export default function AdminRegistrationsPage() {
           {/* Event Filter */}
           <div>
             <select
+              aria-label="Filter roster by event"
               value={selectedEventId}
               onChange={(e) => setSelectedEventId(e.target.value)}
               className="px-3 py-2 text-xs font-medium bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500"
@@ -152,6 +128,7 @@ export default function AdminRegistrationsPage() {
           {/* Status Filter */}
           <div>
             <select
+              aria-label="Filter roster by status"
               value={selectedStatus}
               onChange={(e) => setSelectedStatus(e.target.value)}
               className="px-3 py-2 text-xs font-medium bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500"
@@ -169,6 +146,7 @@ export default function AdminRegistrationsPage() {
         <div className="relative w-full md:w-72">
           <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
           <input
+            aria-label="Search runner roster"
             type="text"
             placeholder="Search by name, email, ref #..."
             value={searchQuery}
@@ -183,7 +161,7 @@ export default function AdminRegistrationsPage() {
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
           <SkeletonTable rows={8} cols={5} />
         </div>
-      ) : filteredRegistrations.length === 0 ? (
+      ) : registrations.length === 0 ? (
         <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center">
           <Users className="w-12 h-12 text-slate-300 mx-auto mb-3" />
           <h3 className="text-base font-semibold text-slate-800">No registrations found</h3>
@@ -196,11 +174,12 @@ export default function AdminRegistrationsPage() {
       ) : (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="divide-y divide-slate-100 md:hidden">
-            {filteredRegistrations.map((reg) => (
+            {registrations.map((reg) => (
               <button key={reg.id} type="button" onClick={() => setSelectedReg(reg)} className="grid w-full grid-cols-[minmax(0,1fr)_auto] gap-3 px-4 py-4 text-left transition hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#3155ff]">
                 <div className="min-w-0">
                   <p className="truncate text-sm font-bold text-slate-900">{reg.full_name || "Runner"}</p>
                   <p className="mt-0.5 truncate text-[10px] text-slate-400">{reg.email}</p>
+                  {(reg.event_name || reg.category_name) && <p className="mt-1 truncate text-[10px] font-semibold text-[#3155ff]">{[reg.event_name, reg.category_name].filter(Boolean).join(" · ")}</p>}
                   <p className="mt-2 font-mono text-[10px] font-bold text-slate-600">{reg.registration_number || `#${reg.id.slice(0, 8)}`}</p>
                 </div>
                 <div className="flex flex-col items-end justify-between gap-2">
@@ -223,7 +202,7 @@ export default function AdminRegistrationsPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filteredRegistrations.map((reg) => (
+                {registrations.map((reg) => (
                   <tr key={reg.id} className="hover:bg-slate-50/75 transition-colors">
                     <td className="py-3.5 px-4">
                       <div>
@@ -234,6 +213,7 @@ export default function AdminRegistrationsPage() {
                           {reg.full_name || "Runner"}
                         </button>
                         <p className="text-[11px] text-slate-400">{reg.email}</p>
+                        {(reg.event_name || reg.category_name) && <p className="mt-0.5 text-[10px] font-semibold text-[#3155ff]">{[reg.event_name, reg.category_name].filter(Boolean).join(" · ")}</p>}
                       </div>
                     </td>
                     <td className="py-3.5 px-4 font-mono font-medium text-slate-800">
@@ -272,9 +252,23 @@ export default function AdminRegistrationsPage() {
             </table>
           </div>
 
-          <div className="p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between text-xs text-slate-500">
-            <span>Showing {filteredRegistrations.length} of {registrations.length} registrations</span>
+          <div className="flex flex-col gap-3 border-t border-slate-200 bg-slate-50 p-4 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between">
+            <span>Showing {registrations.length} of {total} matching registrations</span>
+            {registrations.length < total && <button type="button" disabled={loadingMore} onClick={() => void loadMore()} className="inline-flex h-9 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-[10px] font-black uppercase tracking-[.08em] text-slate-700 hover:border-slate-400 disabled:opacity-50">{loadingMore && <LoaderCircle className="h-3.5 w-3.5 animate-spin" />}{loadingMore ? "Loading" : "Load more"}</button>}
           </div>
+        </div>
+      )}
+
+      {exportOpen && (
+        <div className="fixed inset-0 z-[80] grid place-items-center bg-black/55 p-4 backdrop-blur-sm" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !exporting) setExportOpen(false); }}>
+          <section role="dialog" aria-modal="true" aria-labelledby="roster-export-title" className="w-full max-w-md overflow-hidden rounded-2xl bg-[#151515] text-white shadow-2xl">
+            <div className="border-b border-white/10 p-5"><p className="font-mono text-[9px] font-black uppercase tracking-[.16em] text-[#d9ff00]">Roster manifest</p><h3 id="roster-export-title" className="mt-2 text-xl font-black">Review CSV export</h3><p className="mt-2 text-xs leading-5 text-white/45">This file contains runner contact and emergency information. Store it only where race staff can access it.</p></div>
+            <div className="p-5">
+              <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-xl bg-white/10"><ExportFact label="Rows" value={String(total)} /><ExportFact label="Event" value={selectedEvent?.name || "All events"} /><ExportFact label="Status" value={selectedStatus === "ALL" ? "All statuses" : selectedStatus.toLowerCase()} /><ExportFact label="Search" value={searchQuery.trim() || "No search filter"} /></dl>
+              <div className="mt-4 flex items-start gap-2 rounded-xl border border-[#d9ff00]/20 bg-[#d9ff00]/[.07] p-3"><ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-[#d9ff00]" /><p className="text-[10px] font-medium leading-4 text-white/55">The server exports every matching runner, including results not loaded on this screen, and neutralizes spreadsheet formulas.</p></div>
+            </div>
+            <div className="flex justify-end gap-2 border-t border-white/10 p-4"><button type="button" autoFocus disabled={exporting} onClick={() => setExportOpen(false)} className="h-10 rounded-xl border border-white/15 px-4 text-[10px] font-black uppercase tracking-[.08em] text-white/60">Keep browsing</button><button type="button" disabled={exporting} onClick={() => void exportToCSV()} className="inline-flex h-10 items-center gap-2 rounded-xl bg-[#d9ff00] px-4 text-[10px] font-black uppercase tracking-[.08em] text-black disabled:opacity-50">{exporting ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <FileSpreadsheet className="h-4 w-4" />}{exporting ? "Preparing" : `Download ${total} rows`}</button></div>
+          </section>
         </div>
       )}
 
@@ -359,4 +353,8 @@ export default function AdminRegistrationsPage() {
       )}
     </AdminLayout>
   );
+}
+
+function ExportFact({ label, value }: { label: string; value: string }) {
+  return <div className="min-w-0 bg-[#1d1d1d] p-3"><dt className="font-mono text-[8px] font-black uppercase tracking-[.12em] text-white/30">{label}</dt><dd className="mt-1 truncate text-[11px] font-bold capitalize text-white/75" title={value}>{value}</dd></div>;
 }

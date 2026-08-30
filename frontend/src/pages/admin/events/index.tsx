@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
-import { Plus, Search, Calendar, Edit2, Trash2, ExternalLink } from "lucide-react";
+import { useRouter } from "next/router";
+import { Plus, Search, Calendar, CopyPlus, Edit2, Trash2, ExternalLink } from "lucide-react";
 import { AdminLayout } from "../../../components/admin/AdminLayout";
 import { Skeleton } from "../../../components/Skeleton";
 import { withMinSkeleton } from "../../../lib/withMinSkeleton";
@@ -8,6 +9,7 @@ import { EventStatusBadge } from "../../../components/admin/EventStatusBadge";
 import { useAlerts } from "../../../components/alerts/AlertSystem";
 import { api } from "../../../lib/api";
 import type { Event } from "../../../types";
+import { EventDuplicateDialog } from "../../../components/admin/EventDuplicateDialog";
 
 const statusFilterTabs: { label: string; value: string }[] = [
   { label: "All", value: "ALL" },
@@ -19,10 +21,13 @@ const statusFilterTabs: { label: string; value: string }[] = [
 
 export default function AdminEventsPage() {
   const { notify } = useAlerts();
+  const router = useRouter();
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTab, setActiveTab] = useState("ALL");
+  const [duplicateSource, setDuplicateSource] = useState<Event | null>(null);
+  const [duplicating, setDuplicating] = useState(false);
 
   const fetchEvents = useCallback(async () => {
     try {
@@ -54,6 +59,21 @@ export default function AdminEventsPage() {
     }
   };
 
+  const handleDuplicate = async (input: { name: string; event_date: string }) => {
+    if (!duplicateSource) return;
+    setDuplicating(true);
+    try {
+      const clone = await api.duplicateEvent(duplicateSource.id, input);
+      notify({ tone: "success", title: "Next edition created", message: `${clone.name} is ready as a draft.` });
+      setDuplicateSource(null);
+      await router.push(`/admin/events/${clone.id}/edit`);
+    } catch (err) {
+      notify({ tone: "error", title: "Could not duplicate event", message: err instanceof Error ? err.message : "The new edition could not be created." });
+    } finally {
+      setDuplicating(false);
+    }
+  };
+
   const filteredEvents = events.filter((ev) => {
     const matchesSearch =
       ev.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -79,6 +99,7 @@ export default function AdminEventsPage() {
         </Link>
       }
     >
+      {duplicateSource && <EventDuplicateDialog key={duplicateSource.id} source={duplicateSource} busy={duplicating} onClose={() => setDuplicateSource(null)} onDuplicate={handleDuplicate} />}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
         <div className="flex items-center gap-1 overflow-x-auto">
           {statusFilterTabs.map((tab) => (
@@ -137,7 +158,7 @@ export default function AdminEventsPage() {
           )}
         </div>
       ) : (
-        <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
+        <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
           <table className="w-full text-left text-xs text-slate-600">
             <thead className="bg-slate-50 border-b border-slate-200 text-[10px] font-medium text-slate-500 uppercase tracking-wider">
               <tr>
@@ -179,6 +200,9 @@ export default function AdminEventsPage() {
                       <Link href={`/admin/events/${ev.id}/edit`} className="p-1.5 text-slate-500 hover:text-slate-700 hover:bg-slate-50 rounded transition-colors" title="Edit">
                         <Edit2 className="w-3.5 h-3.5" />
                       </Link>
+                      <button type="button" onClick={() => setDuplicateSource(ev)} className="rounded p-1.5 text-slate-500 transition-colors hover:bg-[#eef1ff] hover:text-[#3155ff]" title="Create next edition" aria-label={`Duplicate ${ev.name}`}>
+                        <CopyPlus className="h-3.5 w-3.5" />
+                      </button>
                       {ev.status === "DRAFT" && (
                         <button onClick={() => handleDeleteDraft(ev.id, ev.name)} className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded transition-colors" title="Delete draft">
                           <Trash2 className="w-3.5 h-3.5" />

@@ -1,0 +1,10 @@
+{{define "emailTitle"}}{{.AnnouncementTitle}}{{end}}
+{{define "preheader"}}A message from the {{.EventName}} organizers.{{end}}
+{{define "emailContent"}}
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+  <tr><td style="padding:38px 34px 18px;color:#3155ff;font-size:11px;font-weight:800;letter-spacing:2px;text-transform:uppercase;">Organizer transmission / {{.EventName}}</td></tr>
+  <tr><td style="padding:0 34px 22px;color:#111;font-size:38px;line-height:1.05;font-weight:900;letter-spacing:-1.5px;text-transform:uppercase;">{{.AnnouncementTitle}}</td></tr>
+  <tr><td style="padding:0 34px 26px;color:#5c5c58;font-size:16px;line-height:1.7;white-space:pre-line;">Hi {{.FullName}},<br><br>{{.AnnouncementMessage}}</td></tr>
+  <tr><td style="padding:0 34px 28px;"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#111;"><tr><td style="padding:20px 22px;color:#d9ff00;font-size:11px;font-weight:900;letter-spacing:1.4px;text-transform:uppercase;">{{.EventName}} / {{.RegistrationNumber}}</td></tr></table></td></tr>
+  <tr><td style="padding:0 34px 38px;"><a href="{{.DashboardURL}}" style="display:inline-block;background:#d9ff00;color:#111;text-decoration:none;padding:15px 21px;font-size:12px;font-weight:900;letter-spacing:1.2px;text-transform:uppercase;border:2px solid #111;">Open race wallet →</a></td></tr>
+</table>{{end}}

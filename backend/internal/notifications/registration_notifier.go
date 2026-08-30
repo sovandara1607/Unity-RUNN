@@ -18,7 +18,7 @@ func NewRegistrationNotifier(svc *Service) *RegistrationNotifier {
 
 // NotifyRegistrationConfirmed enqueues a registration confirmation email.
 func (n *RegistrationNotifier) NotifyRegistrationConfirmed(ctx context.Context, reg registrations.Registration) {
-	n.svc.enqueue(ctx, enqueueParams{
+	_ = n.svc.enqueue(ctx, enqueueParams{
 		UserID: &reg.UserID, RecipientEmail: reg.Email, Type: TypeRegistrationConfirmation,
 		EntityType: "registration", EntityID: reg.ID,
 		Payload: registrationPayload(reg),
@@ -29,7 +29,7 @@ func (n *RegistrationNotifier) NotifyRegistrationConfirmed(ctx context.Context, 
 func (n *RegistrationNotifier) NotifyPaymentConfirmed(ctx context.Context, reg registrations.Registration, amountCents int) {
 	payload := registrationPayload(reg)
 	payload["amount_cents"] = amountCents
-	n.svc.enqueue(ctx, enqueueParams{
+	_ = n.svc.enqueue(ctx, enqueueParams{
 		UserID: &reg.UserID, RecipientEmail: reg.Email, Type: TypePaymentConfirmation,
 		EntityType: "registration", EntityID: reg.ID,
 		Payload: payload,
@@ -38,7 +38,7 @@ func (n *RegistrationNotifier) NotifyPaymentConfirmed(ctx context.Context, reg r
 
 // NotifyRegistrationCancelled enqueues a cancellation email.
 func (n *RegistrationNotifier) NotifyRegistrationCancelled(ctx context.Context, reg registrations.Registration) {
-	n.svc.enqueue(ctx, enqueueParams{
+	_ = n.svc.enqueue(ctx, enqueueParams{
 		UserID: &reg.UserID, RecipientEmail: reg.Email, Type: TypeCancellation,
 		EntityType: "registration", EntityID: reg.ID,
 		Payload: registrationPayload(reg),

@@ -97,6 +97,92 @@ export interface MeResponse {
   updated_at: string;
 }
 
+export interface TelegramDeliveryStatus {
+  available: boolean;
+  connected: boolean;
+  bot_name?: string;
+  account?: {
+    username: string;
+    first_name: string;
+    linked_at: string;
+  };
+  preferences: TelegramDeliveryPreferences;
+}
+
+export interface TelegramDeliveryPreferences {
+  tickets: boolean;
+  reminders: boolean;
+  event_updates: boolean;
+}
+
+export interface TelegramLink {
+  url: string;
+  expires_at: string;
+}
+
+export interface TelegramDelivery {
+  id: string;
+  channel: "TELEGRAM";
+  status: "PENDING" | "PROCESSING" | "SENT" | "FAILED";
+  type: "REGISTRATION_CONFIRMATION" | "PAYMENT_CONFIRMATION" | "EVENT_REMINDER" | "EVENT_UPDATE" | "EVENT_ANNOUNCEMENT" | "CANCELLATION";
+  entity_id: string;
+  attempts: number;
+  created_at: string;
+  sent_at?: string;
+  updated_at: string;
+}
+
+export interface AdminAutomationDelivery {
+  id: string;
+  status: "PENDING" | "PROCESSING" | "SENT" | "SKIPPED" | "FAILED";
+  type: TelegramDelivery["type"];
+  entity_id: string;
+  runner_name: string;
+  recipient_email: string;
+  attempts: number;
+  failure_reason?: string;
+  created_at: string;
+  sent_at?: string;
+  updated_at: string;
+}
+
+export interface AdminAutomationSnapshot {
+  configured: boolean;
+  generated_at: string;
+  window_days: number;
+  connected_runners: number;
+  preferences: {
+    tickets: number;
+    reminders: number;
+    event_updates: number;
+  };
+  counts: {
+    total: number;
+    sent: number;
+    pending: number;
+    failed: number;
+    skipped: number;
+  };
+  success_rate: number;
+  by_type: Partial<Record<TelegramDelivery["type"], number>>;
+  recent: AdminAutomationDelivery[];
+}
+
+export interface EventAutomation {
+  id: string;
+  event_id: string;
+  name: string;
+  message: string;
+  send_at?: string;
+  status: "DRAFT" | "SCHEDULED" | "PROCESSING" | "SENT" | "FAILED" | "CANCELLED";
+  sent_count: number;
+  attempts: number;
+  last_error?: string;
+  created_at: string;
+  sent_at?: string;
+  updated_at: string;
+}
+
 export interface EventCategory {
   id: string;
   event_id: string;
@@ -172,6 +258,8 @@ export interface Registration {
   user_id: string;
   event_id: string;
   event_category_id: string;
+  event_name?: string;
+  category_name?: string;
   status: RegistrationStatus;
   full_name: string;
   email: string;

@@ -17,6 +17,7 @@ import (
 	"github.com/unity-run-club/api/internal/config"
 	"github.com/unity-run-club/api/internal/database"
 	"github.com/unity-run-club/api/internal/email"
+	"github.com/unity-run-club/api/internal/eventautomations"
 	"github.com/unity-run-club/api/internal/events"
 	apphttp "github.com/unity-run-club/api/internal/http"
 	"github.com/unity-run-club/api/internal/logger"
@@ -29,6 +30,7 @@ import (
 	"github.com/unity-run-club/api/internal/siteconfig"
 	"github.com/unity-run-club/api/internal/stats"
 	"github.com/unity-run-club/api/internal/systemstatus"
+	"github.com/unity-run-club/api/internal/telegram"
 )
 
 // Redis-backed registration tuning.
@@ -37,6 +39,7 @@ const (
 	availabilityCacheTTL   = 5 * time.Second
 	registrationRateLimit  = 5 // attempts
 	registrationRateWindow = time.Minute
+	telegramDeliveryPoll   = 5 * time.Second
 )
 
 func main() {
@@ -141,34 +144,52 @@ func run() error {
 	systemStatusHandler := systemstatus.NewHandler(systemStatusSvc)
 
 	emailSender := buildEmailSender(cfg, log)
+	telegramRepo := telegram.NewRepository(db.Pool)
+	telegramClient := telegram.NewClient(cfg.TelegramBotToken, cfg.TelegramAPIBaseURL)
+	telegramSvc := telegram.NewService(telegramRepo, telegramClient, cfg.TelegramBotUsername, cfg.TelegramBotToken != "")
+	telegramHandler := telegram.NewHandler(telegramSvc, cfg.TelegramWebhookSecret)
+	telegramHandler.SetDeliveryLister(notifRepo)
+	automationHandler := notifications.NewAdminHandler(notifRepo, cfg.TelegramBotToken != "", auditSvc)
 	notifWorker := notifications.NewWorker(notifRepo, notifQueue, regRepo, eventsRepo, emailSender, log,
 		cfg.NotificationSweepInterval, cfg.NotificationMaxAttempts, cfg.PublicAppURL)
+	telegramWorker := notifications.NewTelegramWorker(notifRepo, regRepo, eventsRepo, telegramSvc, log,
+		telegramDeliveryPoll, cfg.NotificationMaxAttempts, cfg.PublicAppURL)
 	reminderScheduler := notifications.NewReminderScheduler(notifSvc, eventsRepo, regRepo, log,
 		cfg.ReminderPollInterval, cfg.ReminderWindow)
+	eventAutomationRepo := eventautomations.NewRepository(db.Pool)
+	eventAutomationSvc := eventautomations.NewService(eventAutomationRepo)
+	eventAutomationHandler := eventautomations.NewHandler(eventAutomationSvc, auditSvc)
+	eventAutomationScheduler := eventautomations.NewScheduler(eventAutomationRepo, regRepo, eventNotifier, log,
+		15*time.Second, cfg.NotificationMaxAttempts)
 	paymentReconciler := registrations.NewPaymentReconciler(regSvc, log, 15*time.Second)
 
 	backgroundCtx, stopBackground := context.WithCancel(context.Background())
 	defer stopBackground()
 	go notifWorker.Run(backgroundCtx)
+	go telegramWorker.Run(backgroundCtx)
 	go reminderScheduler.Run(backgroundCtx)
+	go eventAutomationScheduler.Run(backgroundCtx)
 	go paymentReconciler.Run(backgroundCtx)
 
 	router := apphttp.NewRouter(apphttp.Deps{
-		Logger:               log,
-		DB:                   db,
-		Redis:                redisClient,
-		CORSAllowedOrigins:   cfg.CORSAllowedOrigins,
-		UploadDir:            cfg.UploadDir,
-		Tokens:               tokens,
-		AuthHandler:          authHandler,
-		EventsHandler:        eventsHandler,
-		RegistrationsHandler: regHandler,
-		CheckinHandler:       checkinHandler,
-		AdminHandler:         adminHandler,
-		StatsHandler:         statsHandler,
-		SiteConfigHandler:    siteConfigHandler,
-		SystemStatusHandler:  systemStatusHandler,
-		MediaHandler:         mediaHandler,
+		Logger:                  log,
+		DB:                      db,
+		Redis:                   redisClient,
+		CORSAllowedOrigins:      cfg.CORSAllowedOrigins,
+		UploadDir:               cfg.UploadDir,
+		Tokens:                  tokens,
+		AuthHandler:             authHandler,
+		EventsHandler:           eventsHandler,
+		RegistrationsHandler:    regHandler,
+		CheckinHandler:          checkinHandler,
+		AdminHandler:            adminHandler,
+		StatsHandler:            statsHandler,
+		SiteConfigHandler:       siteConfigHandler,
+		SystemStatusHandler:     systemStatusHandler,
+		MediaHandler:            mediaHandler,
+		TelegramHandler:         telegramHandler,
+		AutomationHandler:       automationHandler,
+		EventAutomationsHandler: eventAutomationHandler,
 	})
 
 	srv := apphttp.NewServer(":"+cfg.Port, router)

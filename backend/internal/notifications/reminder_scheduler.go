@@ -81,7 +81,7 @@ func (s *ReminderScheduler) remindRegistrants(ctx context.Context, ev events.Eve
 	}
 
 	for _, reg := range regs {
-		s.svc.enqueue(ctx, enqueueParams{
+		_ = s.svc.enqueue(ctx, enqueueParams{
 			UserID: &reg.UserID, RecipientEmail: reg.Email, Type: TypeEventReminder,
 			EntityType: "registration", EntityID: reg.ID, Payload: registrationPayload(reg),
 		})

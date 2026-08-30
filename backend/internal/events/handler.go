@@ -266,6 +266,35 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// Duplicate handles POST /api/v1/events/:id/duplicate (admin only).
+func (h *Handler) Duplicate(w http.ResponseWriter, r *http.Request) {
+	sourceID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpresponse.WriteError(w, http.StatusBadRequest, "invalid_id", "id must be a UUID")
+		return
+	}
+	var req DuplicateEventRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpresponse.WriteError(w, http.StatusBadRequest, "invalid_body", "malformed JSON body")
+		return
+	}
+	if err := validate.Struct(req); err != nil {
+		httpresponse.WriteError(w, http.StatusUnprocessableEntity, "validation_failed", err.Error())
+		return
+	}
+	clone, err := h.svc.Duplicate(r.Context(), sourceID, req)
+	switch {
+	case errors.Is(err, ErrNotFound):
+		httpresponse.WriteError(w, http.StatusNotFound, "not_found", "source event not found")
+	case errors.Is(err, ErrSlugTaken):
+		httpresponse.WriteError(w, http.StatusConflict, "slug_taken", "could not allocate a unique URL for the new edition")
+	case err != nil:
+		httpresponse.WriteError(w, http.StatusBadRequest, "duplicate_failed", err.Error())
+	default:
+		httpresponse.WriteData(w, http.StatusCreated, clone)
+	}
+}
+
 // Update handles PATCH /api/v1/events/:id (admin only)
 func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
@@ -502,6 +531,166 @@ func (h *Handler) DeleteSchedule(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		httpresponse.WriteError(w, http.StatusInternalServerError, "delete_failed", "failed to delete schedule item")
 	default:
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// CreateFAQ handles POST /api/v1/events/:id/faqs (admin only).
+func (h *Handler) CreateFAQ(w http.ResponseWriter, r *http.Request) {
+	eventID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpresponse.WriteError(w, http.StatusBadRequest, "invalid_id", "id must be a UUID")
+		return
+	}
+	var req CreateFAQRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpresponse.WriteError(w, http.StatusBadRequest, "invalid_body", "malformed JSON body")
+		return
+	}
+	if err := validate.Struct(req); err != nil {
+		httpresponse.WriteError(w, http.StatusUnprocessableEntity, "validation_failed", err.Error())
+		return
+	}
+	faq, err := h.svc.CreateFAQ(r.Context(), eventID, req)
+	switch {
+	case errors.Is(err, ErrNotFound):
+		httpresponse.WriteError(w, http.StatusNotFound, "not_found", "event not found")
+	case err != nil:
+		httpresponse.WriteError(w, http.StatusBadRequest, "create_failed", err.Error())
+	default:
+		httpresponse.WriteData(w, http.StatusCreated, faq)
+	}
+}
+
+// UpdateFAQ handles PATCH /api/v1/events/:id/faqs/:faqId (admin only).
+func (h *Handler) UpdateFAQ(w http.ResponseWriter, r *http.Request) {
+	eventID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpresponse.WriteError(w, http.StatusBadRequest, "invalid_id", "id must be a UUID")
+		return
+	}
+	faqID, err := uuid.Parse(chi.URLParam(r, "faqId"))
+	if err != nil {
+		httpresponse.WriteError(w, http.StatusBadRequest, "invalid_id", "faqId must be a UUID")
+		return
+	}
+	var req UpdateFAQRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpresponse.WriteError(w, http.StatusBadRequest, "invalid_body", "malformed JSON body")
+		return
+	}
+	if err := validate.Struct(req); err != nil {
+		httpresponse.WriteError(w, http.StatusUnprocessableEntity, "validation_failed", err.Error())
+		return
+	}
+	faq, err := h.svc.UpdateFAQ(r.Context(), eventID, faqID, req)
+	switch {
+	case errors.Is(err, ErrNotFound):
+		httpresponse.WriteError(w, http.StatusNotFound, "not_found", "FAQ not found")
+	case err != nil:
+		httpresponse.WriteError(w, http.StatusBadRequest, "update_failed", err.Error())
+	default:
+		httpresponse.WriteData(w, http.StatusOK, faq)
+	}
+}
+
+// DeleteFAQ handles DELETE /api/v1/events/:id/faqs/:faqId (admin only).
+func (h *Handler) DeleteFAQ(w http.ResponseWriter, r *http.Request) {
+	eventID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpresponse.WriteError(w, http.StatusBadRequest, "invalid_id", "id must be a UUID")
+		return
+	}
+	faqID, err := uuid.Parse(chi.URLParam(r, "faqId"))
+	if err != nil {
+		httpresponse.WriteError(w, http.StatusBadRequest, "invalid_id", "faqId must be a UUID")
+		return
+	}
+	if err := h.svc.DeleteFAQ(r.Context(), eventID, faqID); errors.Is(err, ErrNotFound) {
+		httpresponse.WriteError(w, http.StatusNotFound, "not_found", "FAQ not found")
+	} else if err != nil {
+		httpresponse.WriteError(w, http.StatusInternalServerError, "delete_failed", "failed to delete FAQ")
+	} else {
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// CreateRule handles POST /api/v1/events/:id/rules (admin only).
+func (h *Handler) CreateRule(w http.ResponseWriter, r *http.Request) {
+	eventID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpresponse.WriteError(w, http.StatusBadRequest, "invalid_id", "id must be a UUID")
+		return
+	}
+	var req CreateRuleRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpresponse.WriteError(w, http.StatusBadRequest, "invalid_body", "malformed JSON body")
+		return
+	}
+	if err := validate.Struct(req); err != nil {
+		httpresponse.WriteError(w, http.StatusUnprocessableEntity, "validation_failed", err.Error())
+		return
+	}
+	rule, err := h.svc.CreateRule(r.Context(), eventID, req)
+	switch {
+	case errors.Is(err, ErrNotFound):
+		httpresponse.WriteError(w, http.StatusNotFound, "not_found", "event not found")
+	case err != nil:
+		httpresponse.WriteError(w, http.StatusBadRequest, "create_failed", err.Error())
+	default:
+		httpresponse.WriteData(w, http.StatusCreated, rule)
+	}
+}
+
+// UpdateRule handles PATCH /api/v1/events/:id/rules/:ruleId (admin only).
+func (h *Handler) UpdateRule(w http.ResponseWriter, r *http.Request) {
+	eventID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpresponse.WriteError(w, http.StatusBadRequest, "invalid_id", "id must be a UUID")
+		return
+	}
+	ruleID, err := uuid.Parse(chi.URLParam(r, "ruleId"))
+	if err != nil {
+		httpresponse.WriteError(w, http.StatusBadRequest, "invalid_id", "ruleId must be a UUID")
+		return
+	}
+	var req UpdateRuleRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpresponse.WriteError(w, http.StatusBadRequest, "invalid_body", "malformed JSON body")
+		return
+	}
+	if err := validate.Struct(req); err != nil {
+		httpresponse.WriteError(w, http.StatusUnprocessableEntity, "validation_failed", err.Error())
+		return
+	}
+	rule, err := h.svc.UpdateRule(r.Context(), eventID, ruleID, req)
+	switch {
+	case errors.Is(err, ErrNotFound):
+		httpresponse.WriteError(w, http.StatusNotFound, "not_found", "rule not found")
+	case err != nil:
+		httpresponse.WriteError(w, http.StatusBadRequest, "update_failed", err.Error())
+	default:
+		httpresponse.WriteData(w, http.StatusOK, rule)
+	}
+}
+
+// DeleteRule handles DELETE /api/v1/events/:id/rules/:ruleId (admin only).
+func (h *Handler) DeleteRule(w http.ResponseWriter, r *http.Request) {
+	eventID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpresponse.WriteError(w, http.StatusBadRequest, "invalid_id", "id must be a UUID")
+		return
+	}
+	ruleID, err := uuid.Parse(chi.URLParam(r, "ruleId"))
+	if err != nil {
+		httpresponse.WriteError(w, http.StatusBadRequest, "invalid_id", "ruleId must be a UUID")
+		return
+	}
+	if err := h.svc.DeleteRule(r.Context(), eventID, ruleID); errors.Is(err, ErrNotFound) {
+		httpresponse.WriteError(w, http.StatusNotFound, "not_found", "rule not found")
+	} else if err != nil {
+		httpresponse.WriteError(w, http.StatusInternalServerError, "delete_failed", "failed to delete rule")
+	} else {
 		w.WriteHeader(http.StatusNoContent)
 	}
 }

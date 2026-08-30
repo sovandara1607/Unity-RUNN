@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useRouter } from "next/router";
-import { Activity, CalendarDays, ExternalLink, FileClock, Gauge, LogOut, Menu, MonitorUp, QrCode, ServerCog, ShieldCheck, UsersRound, X } from "lucide-react";
+import { Activity, CalendarDays, ExternalLink, FileClock, Gauge, LogOut, Menu, MonitorUp, QrCode, ServerCog, ShieldCheck, UsersRound, Workflow, X } from "lucide-react";
 import { api } from "../../lib/api";
 import type { MeResponse, Role } from "../../types";
 
@@ -16,6 +16,7 @@ const navigationItems = [
   { label: "Public site", short: "Brand & homepage", href: "/admin/public-site", icon: MonitorUp, minRank: 2 },
   { label: "Runner roster", short: "Entries", href: "/admin/registrations", icon: UsersRound, minRank: 1 },
   { label: "Activity log", short: "Audit", href: "/admin/audit-logs", icon: FileClock, minRank: 2 },
+  { label: "Automations", short: "Message control", href: "/admin/automations", icon: Workflow, minRank: 2 },
   { label: "Team access", short: "Roles", href: "/admin/users", icon: ShieldCheck, minRank: 3 },
   { label: "System", short: "Config & health", href: "/admin/system", icon: ServerCog, minRank: 3 },
 ];

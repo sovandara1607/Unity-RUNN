@@ -25,9 +25,37 @@ func clearAll(t *testing.T) {
 		"R2_SECRET_ACCESS_KEY", "R2_BUCKET", "R2_PUBLIC_BASE_URL",
 		"SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASSWORD", "SMTP_FROM",
 		"PUBLIC_APP_URL", "GOOGLE_OAUTH_CLIENT_ID", "GOOGLE_OAUTH_CLIENT_SECRET", "GOOGLE_OAUTH_REDIRECT_URL",
+		"TELEGRAM_BOT_TOKEN", "TELEGRAM_BOT_USERNAME", "TELEGRAM_WEBHOOK_SECRET", "TELEGRAM_API_BASE_URL",
 	} {
 		t.Setenv(k, "")
 		os.Unsetenv(k)
+	}
+}
+
+func TestLoad_TelegramConfig(t *testing.T) {
+	clearAll(t)
+	withEnv(t, map[string]string{
+		"DATABASE_URL": "postgres://user:pass@localhost:5432/unity", "JWT_SECRET": "development-secret",
+		"TELEGRAM_BOT_TOKEN": "123:secret", "TELEGRAM_BOT_USERNAME": "@unity_runn_bot",
+		"TELEGRAM_WEBHOOK_SECRET": "webhook-secret",
+	})
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() returned unexpected error: %v", err)
+	}
+	if cfg.TelegramBotUsername != "unity_runn_bot" || cfg.TelegramAPIBaseURL != "https://api.telegram.org" {
+		t.Fatalf("Telegram config not normalized: %#v", cfg)
+	}
+}
+
+func TestLoad_RejectsPartialTelegramConfig(t *testing.T) {
+	clearAll(t)
+	withEnv(t, map[string]string{
+		"DATABASE_URL": "postgres://user:pass@localhost:5432/unity", "JWT_SECRET": "development-secret",
+		"TELEGRAM_BOT_TOKEN": "123:secret",
+	})
+	if _, err := Load(); err == nil {
+		t.Fatal("Load() accepted partial Telegram configuration")
 	}
 }
 

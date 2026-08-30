@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { ArrowLeft, ArrowRight, ArrowUpRight, Pause, Play } from "lucide-react";
 import { useSiteConfig } from "./site/SiteConfigProvider";
+import { resolveApiAssetUrl } from "../lib/api";
 
 interface ClubCarouselProps {
   primaryHref: string;
@@ -60,7 +61,7 @@ export function ClubCarousel({ primaryHref, primaryLabel }: ClubCarouselProps) {
             <figure key={`${slide.image_url}-${index}`} className="relative min-w-full" aria-hidden={index !== active}>
               {/* Configured artwork may be served by the API or an external CDN. */}
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={slide.image_url} alt={index === active ? slide.alt : ""} className="absolute inset-0 h-full w-full object-cover" />
+              <img src={resolveApiAssetUrl(slide.image_url)} alt={index === active ? slide.alt : ""} className="absolute inset-0 h-full w-full object-cover" />
             </figure>
           ))}
         </div>

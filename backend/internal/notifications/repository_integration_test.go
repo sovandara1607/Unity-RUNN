@@ -28,11 +28,64 @@ func testPool(t *testing.T) *pgxpool.Pool {
 	}
 	t.Cleanup(pool.Close)
 
-	if _, err := pool.Exec(ctx, `TRUNCATE TABLE notifications`); err != nil {
+	if _, err := pool.Exec(ctx, `TRUNCATE TABLE notification_deliveries, notifications`); err != nil {
 		t.Fatalf("truncate notifications: %v", err)
 	}
 
 	return pool
+}
+
+func TestRepository_TelegramDeliveryLifecycle(t *testing.T) {
+	pool := testPool(t)
+	repo := NewRepository(pool)
+	ctx := context.Background()
+
+	userID := uuid.New()
+	if _, err := pool.Exec(ctx, `INSERT INTO users (id,email,password_hash) VALUES ($1,$2,'test')`, userID, userID.String()+"@example.com"); err != nil {
+		t.Fatalf("insert user: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id=$1`, userID) })
+
+	n := &Notification{UserID: &userID, RecipientEmail: "runner@example.com", Type: TypeEventReminder,
+		EntityType: "registration", EntityID: uuid.New()}
+	if err := repo.Create(ctx, n); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	claimed, err := repo.ClaimTelegramDeliveries(ctx, 10)
+	if err != nil || len(claimed) != 1 {
+		t.Fatalf("ClaimTelegramDeliveries() = %#v, %v", claimed, err)
+	}
+	if claimed[0].NotificationID != n.ID || claimed[0].Status != DeliveryProcessing {
+		t.Fatalf("claimed delivery = %#v", claimed[0])
+	}
+
+	if err := repo.RecordDeliveryFailure(ctx, claimed[0].ID, "temporary", 3); err != nil {
+		t.Fatalf("RecordDeliveryFailure() error = %v", err)
+	}
+	claimedAgain, err := repo.ClaimTelegramDeliveries(ctx, 10)
+	if err != nil || len(claimedAgain) != 0 {
+		t.Fatalf("backoff claim = %#v, %v", claimedAgain, err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE notification_deliveries SET next_attempt_at=now()-interval '1 second' WHERE id=$1`, claimed[0].ID); err != nil {
+		t.Fatal(err)
+	}
+
+	claimedAgain, err = repo.ClaimTelegramDeliveries(ctx, 10)
+	if err != nil || len(claimedAgain) != 1 {
+		t.Fatalf("retry claim = %#v, %v", claimedAgain, err)
+	}
+	if err := repo.MarkDeliverySent(ctx, claimed[0].ID, time.Now()); err != nil {
+		t.Fatalf("MarkDeliverySent() error = %v", err)
+	}
+
+	history, err := repo.ListUserTelegramDeliveries(ctx, userID, 8)
+	if err != nil || len(history) != 1 {
+		t.Fatalf("ListUserTelegramDeliveries() = %#v, %v", history, err)
+	}
+	if history[0].Status != DeliverySent || history[0].Type != TypeEventReminder || history[0].LastError != "" {
+		t.Fatalf("history delivery = %#v", history[0])
+	}
 }
 
 func TestRepository_Create_DedupUniqueConstraint(t *testing.T) {

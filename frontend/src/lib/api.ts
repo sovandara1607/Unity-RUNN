@@ -18,8 +18,17 @@ import type {
   Role,
   AuthUser,
   EventSchedule,
+	EventFAQ,
+	EventRule,
+	Availability,
 	PaymentCheckout,
 	PaymentVerificationResult,
+	TelegramDeliveryStatus,
+	TelegramDeliveryPreferences,
+	TelegramDelivery,
+	AdminAutomationSnapshot,
+	TelegramLink,
+	EventAutomation,
 } from "../types";
 
 const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:8080";
@@ -182,6 +191,22 @@ const upload = async <T>(path: string, body: FormData): Promise<T> => {
   return handleResponse<T>(res, { method: "POST", path });
 };
 
+const download = async (path: string): Promise<{ blob: Blob; filename?: string }> => {
+  const doFetch = () => fetch(`${BASE_URL}${path}`, { headers: getHeaders(false), credentials: "include" });
+  let res = await doFetch();
+  if (res.status === 401 && typeof window !== "undefined") {
+    if (await tryRefreshToken()) res = await doFetch();
+    else {
+      // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+      window.location.assign(`/auth/login?redirect=${encodeURIComponent(window.location.pathname + window.location.search)}`);
+    }
+  }
+  if (!res.ok) await handleResponse<never>(res, { method: "GET", path });
+  const disposition = res.headers.get("content-disposition") || "";
+  const filename = disposition.match(/filename="([^"]+)"/)?.[1];
+  return { blob: await res.blob(), filename };
+};
+
 export const api = {
   // --- Public club summary ---
   async getClubStats(): Promise<ClubStats> {
@@ -296,6 +321,30 @@ export const api = {
     return request<Profile>("/api/v1/me/", { method: "PATCH", body: data });
   },
 
+  async getTelegramDelivery(): Promise<TelegramDeliveryStatus> {
+    return request<TelegramDeliveryStatus>("/api/v1/me/telegram");
+  },
+
+  async createTelegramLink(): Promise<TelegramLink> {
+    return request<TelegramLink>("/api/v1/me/telegram/link", { method: "POST" });
+  },
+
+  async updateTelegramPreferences(preferences: TelegramDeliveryPreferences): Promise<TelegramDeliveryStatus> {
+    return request<TelegramDeliveryStatus>("/api/v1/me/telegram/preferences", { method: "PATCH", body: preferences });
+  },
+
+  async sendTelegramTest(): Promise<void> {
+    return request<void>("/api/v1/me/telegram/test", { method: "POST" });
+  },
+
+  async listTelegramDeliveries(): Promise<TelegramDelivery[]> {
+    return request<TelegramDelivery[]>("/api/v1/me/telegram/deliveries");
+  },
+
+  async disconnectTelegram(): Promise<void> {
+    return request<void>("/api/v1/me/telegram", { method: "DELETE" });
+  },
+
   // --- Events ---
   async listEvents(params?: {
     statuses?: string[];
@@ -330,8 +379,18 @@ export const api = {
     return request<Event>(`/api/v1/events/by-id/${id}`);
   },
 
+  async getCategoryAvailability(eventId: string, categoryId: string): Promise<Availability> {
+    return request<Availability>(`/api/v1/events/${eventId}/categories/${categoryId}/availability`, {
+      suppressAuthRedirect: true,
+    });
+  },
+
   async createEvent(data: Partial<Event>): Promise<Event> {
     return request<Event>("/api/v1/events/", { method: "POST", body: data });
+  },
+
+  async duplicateEvent(id: string, data: { name: string; event_date: string }): Promise<Event> {
+    return request<Event>(`/api/v1/events/${id}/duplicate`, { method: "POST", body: data });
   },
 
   async uploadEventPoster(file: File, artboard?: { width: number; height: number }): Promise<{ url: string; card_url: string; hero_url: string; width: number; height: number; format: "jpeg" }> {
@@ -411,12 +470,14 @@ export const api = {
   async adminListRegistrations(params?: {
     event_id?: string;
     status?: string;
+    search?: string;
     limit?: number;
     offset?: number;
   }): Promise<{ registrations: Registration[]; total: number }> {
     const searchParams = new URLSearchParams();
     if (params?.event_id) searchParams.set("event_id", params.event_id);
     if (params?.status) searchParams.set("status", params.status);
+    if (params?.search) searchParams.set("search", params.search);
     if (params?.limit) searchParams.set("limit", params.limit.toString());
     if (params?.offset) searchParams.set("offset", params.offset.toString());
 
@@ -428,6 +489,15 @@ export const api = {
       registrations: result?.registrations || [],
       total: result?.total || 0,
     };
+  },
+
+  async adminExportRegistrations(params?: { event_id?: string; status?: string; search?: string }): Promise<{ blob: Blob; filename?: string }> {
+    const searchParams = new URLSearchParams();
+    if (params?.event_id) searchParams.set("event_id", params.event_id);
+    if (params?.status) searchParams.set("status", params.status);
+    if (params?.search) searchParams.set("search", params.search);
+    const query = searchParams.toString();
+    return download(`/api/v1/admin/registrations/export.csv${query ? `?${query}` : ""}`);
   },
 
   async adminGetRegistration(registrationId: string): Promise<Registration> {
@@ -457,10 +527,10 @@ export const api = {
   },
 
   // --- Event categories & schedules (admin) ---
-  async createCategory(eventId: string, data: { name: string; distance: string; price_cents: number; currency: "USD" | "KHR"; capacity: number }): Promise<EventCategory> {
+  async createCategory(eventId: string, data: { name: string; distance: string; price_cents: number; currency: "USD" | "KHR"; capacity: number; registration_deadline?: string }): Promise<EventCategory> {
     return request<EventCategory>(`/api/v1/events/${eventId}/categories/`, { method: "POST", body: data });
   },
-  async updateCategory(eventId: string, categoryId: string, data: Partial<{ name: string; distance: string; price_cents: number; currency: "USD" | "KHR"; capacity: number; status: string }>): Promise<EventCategory> {
+  async updateCategory(eventId: string, categoryId: string, data: Partial<{ name: string; distance: string; price_cents: number; currency: "USD" | "KHR"; capacity: number; status: string; registration_deadline: string; clear_registration_deadline: boolean }>): Promise<EventCategory> {
     return request<EventCategory>(`/api/v1/events/${eventId}/categories/${categoryId}`, { method: "PATCH", body: data });
   },
   async deleteCategory(eventId: string, categoryId: string): Promise<void> {
@@ -477,6 +547,38 @@ export const api = {
   },
   async deleteScheduleItem(eventId: string, scheduleId: string): Promise<void> {
     await request<void>(`/api/v1/events/${eventId}/schedules/${scheduleId}`, { method: "DELETE" });
+  },
+
+  async createFAQ(eventId: string, data: { question: string; answer: string; sort_order: number }): Promise<EventFAQ> {
+    return request<EventFAQ>(`/api/v1/events/${eventId}/faqs/`, { method: "POST", body: data });
+  },
+  async updateFAQ(eventId: string, faqId: string, data: Partial<{ question: string; answer: string; sort_order: number }>): Promise<EventFAQ> {
+    return request<EventFAQ>(`/api/v1/events/${eventId}/faqs/${faqId}`, { method: "PATCH", body: data });
+  },
+  async deleteFAQ(eventId: string, faqId: string): Promise<void> {
+    await request<void>(`/api/v1/events/${eventId}/faqs/${faqId}`, { method: "DELETE" });
+  },
+  async createRule(eventId: string, data: { rule: string; sort_order: number }): Promise<EventRule> {
+    return request<EventRule>(`/api/v1/events/${eventId}/rules/`, { method: "POST", body: data });
+  },
+  async updateRule(eventId: string, ruleId: string, data: Partial<{ rule: string; sort_order: number }>): Promise<EventRule> {
+    return request<EventRule>(`/api/v1/events/${eventId}/rules/${ruleId}`, { method: "PATCH", body: data });
+  },
+  async deleteRule(eventId: string, ruleId: string): Promise<void> {
+    await request<void>(`/api/v1/events/${eventId}/rules/${ruleId}`, { method: "DELETE" });
+  },
+
+  async listEventAutomations(eventId: string): Promise<EventAutomation[]> {
+    return request<EventAutomation[]>(`/api/v1/events/${eventId}/automations/`);
+  },
+  async createEventAutomation(eventId: string, data: { name: string; message: string; send_at: string | null }): Promise<EventAutomation> {
+    return request<EventAutomation>(`/api/v1/events/${eventId}/automations/`, { method: "POST", body: data });
+  },
+  async updateEventAutomation(eventId: string, automationId: string, data: { name: string; message: string; send_at: string | null }): Promise<EventAutomation> {
+    return request<EventAutomation>(`/api/v1/events/${eventId}/automations/${automationId}`, { method: "PATCH", body: data });
+  },
+  async cancelEventAutomation(eventId: string, automationId: string): Promise<void> {
+    return request<void>(`/api/v1/events/${eventId}/automations/${automationId}`, { method: "DELETE" });
   },
 
   async checkIn(data: {
@@ -496,5 +598,13 @@ export const api = {
 
   async adminGetSystemStatus(): Promise<SystemStatusSnapshot> {
     return request<SystemStatusSnapshot>("/api/v1/admin/system");
+  },
+
+  async adminGetAutomations(): Promise<AdminAutomationSnapshot> {
+    return request<AdminAutomationSnapshot>("/api/v1/admin/automations");
+  },
+
+  async adminRetryAutomationDelivery(deliveryId: string): Promise<void> {
+    return request<void>(`/api/v1/admin/automations/deliveries/${deliveryId}/retry`, { method: "POST" });
   },
 };

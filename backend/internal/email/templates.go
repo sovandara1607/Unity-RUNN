@@ -19,6 +19,7 @@ const (
 	TypePaymentConfirmation      Type = "PAYMENT_CONFIRMATION"
 	TypeEventReminder            Type = "EVENT_REMINDER"
 	TypeEventUpdate              Type = "EVENT_UPDATE"
+	TypeEventAnnouncement        Type = "EVENT_ANNOUNCEMENT"
 	TypeCancellation             Type = "CANCELLATION"
 )
 
@@ -27,6 +28,7 @@ var subjects = map[Type]string{
 	TypePaymentConfirmation:      "Payment received for {{.EventName}}",
 	TypeEventReminder:            "{{.EventName}} is coming up!",
 	TypeEventUpdate:              "{{.EventName}} has been updated",
+	TypeEventAnnouncement:        "{{.AnnouncementTitle}} · {{.EventName}}",
 	TypeCancellation:             "Your registration for {{.EventName}} was cancelled",
 }
 
@@ -35,25 +37,28 @@ var filenames = map[Type]string{
 	TypePaymentConfirmation:      "payment_confirmation",
 	TypeEventReminder:            "event_reminder",
 	TypeEventUpdate:              "event_update",
+	TypeEventAnnouncement:        "event_announcement",
 	TypeCancellation:             "cancellation",
 }
 
 // TemplateData is the placeholder set every template can draw from. Not every field is used by every template
 type TemplateData struct {
-	FullName           string
-	EventName          string
-	CategoryName       string
-	RegistrationNumber string
-	EventDate          string
-	StartTime          string
-	Location           string
-	TshirtSize         string
-	AmountFormatted    string
-	PaymentProvider    string
-	PaymentReference   string
-	PaymentVerifiedAt  string
-	DashboardURL       string
-	ChangedFields      string
+	FullName            string
+	EventName           string
+	CategoryName        string
+	RegistrationNumber  string
+	EventDate           string
+	StartTime           string
+	Location            string
+	TshirtSize          string
+	AmountFormatted     string
+	PaymentProvider     string
+	PaymentReference    string
+	PaymentVerifiedAt   string
+	DashboardURL        string
+	ChangedFields       string
+	AnnouncementTitle   string
+	AnnouncementMessage string
 }
 
 // Render produces the subject, HTML body, and plain-text body for typ using data

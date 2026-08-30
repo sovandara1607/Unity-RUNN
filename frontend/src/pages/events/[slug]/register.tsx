@@ -22,6 +22,9 @@ import { withMinSkeleton } from "../../../lib/withMinSkeleton";
 import type { EventCategory, EventDetail, MeResponse, PaymentCheckout } from "../../../types";
 import { formatMoney } from "../../../lib/money";
 import { eventMapURL } from "../../../lib/eventLocation";
+import { EntryAvailability } from "../../../components/EntryAvailability";
+import { useCategoryAvailability } from "../../../lib/useCategoryAvailability";
+import { formatRegistrationDeadline, registrationDeadlineClosed } from "../../../lib/registrationDeadline";
 
 const fieldClass = "mt-2 w-full rounded-xl border border-black/15 bg-white px-4 py-3.5 text-[15px] font-medium text-[#111] outline-none transition placeholder:text-black/30 hover:border-black/30 focus:border-black focus:ring-4 focus:ring-black/5";
 
@@ -94,7 +97,7 @@ export default function EventRegisterPage() {
         }));
 
         const preselected = searchParams?.get("category");
-        if (preselected && detail.categories?.some((category) => category.id === preselected && category.status === "OPEN")) {
+        if (preselected && detail.categories?.some((category) => category.id === preselected && category.status === "OPEN" && !registrationDeadlineClosed(category.registration_deadline))) {
           setSelectedCategory(preselected);
         }
       } catch (caught: unknown) {
@@ -113,8 +116,15 @@ export default function EventRegisterPage() {
     () => event?.categories?.filter((category) => category.status === "OPEN") || [],
     [event]
   );
-  const category = openCategories.find((item) => item.id === selectedCategory) || null;
+  const { availability, refresh: refreshAvailability } = useCategoryAvailability(event?.id, openCategories.filter((category) => !registrationDeadlineClosed(category.registration_deadline)).map((category) => category.id));
+  const category = openCategories.find((item) => item.id === selectedCategory && !registrationDeadlineClosed(item.registration_deadline) && availability[item.id]?.available !== 0) || null;
   const canRegister = event?.status === "REGISTRATION_OPEN" && openCategories.length > 0;
+  const allCategoriesUnavailable = openCategories.length > 0 && openCategories.every((item) => registrationDeadlineClosed(item.registration_deadline) || availability[item.id]?.available === 0);
+
+  useEffect(() => {
+    const selected = openCategories.find((item) => item.id === selectedCategory);
+    if (selectedCategory && (!selected || registrationDeadlineClosed(selected.registration_deadline) || availability[selectedCategory]?.available === 0)) setSelectedCategory("");
+  }, [availability, openCategories, selectedCategory]);
 
   const handleInputChange = (field: keyof typeof formData, value: string) => {
     setFormData((current) => ({ ...current, [field]: value }));
@@ -175,6 +185,7 @@ export default function EventRegisterPage() {
 		router.push("/dashboard?registration=confirmed");
     } catch (caught: unknown) {
       setRegError(caught instanceof Error ? caught.message : "Registration could not be completed.");
+      if (typeof caught === "object" && caught && "code" in caught && caught.code === "capacity_full") void refreshAvailability();
     } finally {
       setRegistering(false);
     }
@@ -224,15 +235,22 @@ export default function EventRegisterPage() {
           <form id="event-registration-form" onSubmit={(formEvent) => { formEvent.preventDefault(); handleRegister(); }} className="min-w-0">
             <fieldset className="border-b border-black/15 pb-12">
               <StepHeading number="01" icon={<Ticket className="h-4 w-4" />} title="Choose your entry" description="Select the distance and entry fee you want attached to your bib." />
+              {allCategoriesUnavailable && <AlertBanner tone="warning" title="No category is accepting entries" className="mt-6">Each distance is either full or past its category cutoff. Choose another event or check back if the organizer reopens an entry.</AlertBanner>}
               <div className="mt-7 grid gap-3 sm:grid-cols-2">
                 {openCategories.map((item: EventCategory) => {
                   const selected = item.id === selectedCategory;
+                  const itemAvailability = availability[item.id];
+                  const full = itemAvailability?.available === 0;
+                  const deadlineClosed = registrationDeadlineClosed(item.registration_deadline);
+                  const unavailable = full || deadlineClosed;
                   return (
-                    <button key={item.id} type="button" aria-pressed={selected} onClick={() => { setSelectedCategory(item.id); setRegError(null); }} style={selected ? { backgroundColor: acid } : undefined} className={`group relative overflow-hidden rounded-2xl border p-5 text-left transition focus:outline-none focus:ring-4 focus:ring-black/10 ${selected ? "border-black shadow-[5px_5px_0_#111]" : "border-black/15 bg-white hover:border-black/40"}`}>
+                    <button key={item.id} type="button" disabled={unavailable} aria-pressed={selected} onClick={() => { setSelectedCategory(item.id); setRegError(null); }} style={selected ? { backgroundColor: acid } : undefined} className={`group relative overflow-hidden rounded-2xl border p-5 text-left transition focus:outline-none focus:ring-4 focus:ring-black/10 disabled:cursor-not-allowed disabled:opacity-55 ${selected ? "border-black shadow-[5px_5px_0_#111]" : "border-black/15 bg-white hover:border-black/40 disabled:hover:border-black/15"}`}>
                       <div className="flex items-start justify-between gap-4">
                         <div>
                           <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-black/45">Distance</p>
                           <p className="sport-display mt-1 text-4xl uppercase leading-none tracking-[-0.03em]">{item.distance}</p>
+                          <span className="mt-2 block"><EntryAvailability availability={itemAvailability} appearance="light" registrationDeadline={item.registration_deadline} /></span>
+                          {item.registration_deadline && <span className="mt-2 block font-mono text-[8px] font-bold uppercase tracking-[0.08em] text-black/35">{deadlineClosed ? "Category cutoff passed" : `Closes ${formatRegistrationDeadline(item.registration_deadline)}`}</span>}
                         </div>
                         <span style={selected ? { color: acid } : undefined} className={`flex h-7 w-7 items-center justify-center rounded-full border ${selected ? "border-black bg-black" : "border-black/15 text-transparent"}`}><Check className="h-4 w-4" /></span>
                       </div>
