@@ -1,8 +1,6 @@
 x-api-image: &api-image
-  image: ${COMPOSE_PROJECT_NAME:-unity-runn}-api:${IMAGE_TAG:-dev-server}
-  build:
-    context: ./backend
-    dockerfile: Dockerfile
+  image: ghcr.io/sovandara1607/unity-runn-api:${IMAGE_TAG:-dev-server}
+  pull_policy: always
 
 services:
   postgres:
@@ -163,9 +161,8 @@ services:
     logging: *service-logging
 
   realtime:
-    build:
-      context: ./realtime
-      dockerfile: Dockerfile
+    image: ghcr.io/sovandara1607/unity-runn-realtime:${IMAGE_TAG:-dev-server}
+    pull_policy: always
     restart: unless-stopped
     init: true
     mem_limit: ${REALTIME_MEMORY_LIMIT:-128m}
@@ -193,12 +190,8 @@ services:
     logging: *service-logging
 
   frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-      args:
-        NEXT_PUBLIC_BASE_URL: ${NEXT_PUBLIC_BASE_URL:-https://api-dev-server.sovandara.lol}
-        NEXT_PUBLIC_REALTIME_URL: ${NEXT_PUBLIC_REALTIME_URL:-https://realtime-dev-server.sovandara.lol}
+    image: ghcr.io/sovandara1607/unity-runn-frontend:${IMAGE_TAG:-dev-server}
+    pull_policy: always
     restart: unless-stopped
     init: true
     mem_limit: ${FRONTEND_MEMORY_LIMIT:-512m}
