@@ -37,6 +37,11 @@ export function AdminLayout({ children, title, subtitle, actions, minRole = "STA
   }, []);
 
   useEffect(() => {
+    document.body.style.overflow = sidebarOpen ? "hidden" : "";
+    return () => { document.body.style.overflow = ""; };
+  }, [sidebarOpen]);
+
+  useEffect(() => {
     async function checkAuth() {
       try {
         const user = await api.getMe();
@@ -62,7 +67,7 @@ export function AdminLayout({ children, title, subtitle, actions, minRole = "STA
   return (
     <div className="admin-shell min-h-screen bg-[#efeee8] text-[#151515] lg:flex">
       {sidebarOpen && <button aria-label="Close menu" className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm lg:hidden" onClick={() => setSidebarOpen(false)} />}
-      <aside className={`fixed inset-y-0 left-0 z-50 flex w-[286px] flex-col overflow-hidden bg-[#151515] text-white transition-transform duration-300 lg:sticky lg:top-0 lg:h-screen lg:translate-x-0 ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`}>
+      <aside className={`fixed inset-y-0 left-0 z-50 flex w-[min(286px,calc(100vw-24px))] flex-col overflow-hidden bg-[#151515] text-white transition-transform duration-300 lg:sticky lg:top-0 lg:h-screen lg:w-[286px] lg:translate-x-0 ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`}>
         <div aria-hidden className="absolute bottom-0 left-0 top-0 w-1.5 bg-[#3155ff]" /><div aria-hidden className="absolute left-1.5 top-0 h-24 w-1 bg-[#d9ff00]" />
         <div className="flex h-[88px] items-center justify-between border-b border-white/10 px-7">
           <Link href="/admin" className="flex items-center gap-3" aria-label="Unity Runn Club race control">
@@ -88,8 +93,16 @@ export function AdminLayout({ children, title, subtitle, actions, minRole = "STA
         </div>
       </aside>
       <div className="min-w-0 flex-1">
-        <header className="sticky top-0 z-30 border-b border-black/10 bg-[#efeee8]/95 backdrop-blur-xl"><div className="flex min-h-[88px] items-center justify-between gap-3 px-5 sm:gap-4 sm:px-8 xl:px-10"><div className="flex min-w-0 items-center gap-3 sm:gap-4"><button onClick={() => setSidebarOpen(true)} className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[#151515] text-white lg:hidden" aria-label="Open navigation"><Menu className="h-4 w-4" /></button><div className="min-w-0"><p className="flex items-center gap-2 font-mono text-[8px] font-bold uppercase tracking-[0.18em] text-black/35"><Activity className="h-3 w-3 text-[#3155ff]" /> Operations desk</p><h1 className="truncate text-base font-black tracking-[-0.02em] sm:text-xl">{title || "Race control"}</h1>{subtitle && <p className="mt-0.5 hidden truncate text-[11px] font-medium text-black/45 md:block">{subtitle}</p>}</div></div><div className="flex shrink-0 items-center gap-2">{router.pathname !== "/admin/checkin" && <Link href="/admin/checkin" className="hidden items-center gap-2 rounded-full border border-black/15 bg-white px-4 py-2.5 text-[10px] font-black uppercase tracking-[0.1em] transition hover:border-black sm:inline-flex"><QrCode className="h-3.5 w-3.5 text-[#3155ff]" /> Launch scanner</Link>}{actions}</div></div></header>
-        <main className="admin-track-surface mx-auto min-h-[calc(100vh-88px)] w-full max-w-[1600px] p-5 sm:p-8 xl:p-10">{children}</main>
+        <header className="sticky top-0 z-30 border-b border-black/10 bg-[#efeee8]/95 backdrop-blur-xl">
+          <div className="flex min-h-[76px] flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 sm:min-h-[88px] sm:flex-nowrap sm:gap-4 sm:px-8 sm:py-0 xl:px-10">
+            <div className="flex min-w-0 flex-1 items-center gap-3 sm:gap-4">
+              <button onClick={() => setSidebarOpen(true)} className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-[#151515] text-white lg:hidden" aria-label="Open navigation"><Menu className="h-4 w-4" /></button>
+              <div className="min-w-0"><p className="flex items-center gap-2 font-mono text-[8px] font-bold uppercase tracking-[0.18em] text-black/35"><Activity className="h-3 w-3 text-[#3155ff]" /> Operations desk</p><h1 className="truncate text-base font-black tracking-[-0.02em] sm:text-xl">{title || "Race control"}</h1>{subtitle && <p className="mt-0.5 hidden truncate text-[11px] font-medium text-black/45 md:block">{subtitle}</p>}</div>
+            </div>
+            <div className={`mobile-scroll-row order-3 w-full shrink-0 items-center gap-2 overflow-x-auto pl-14 [&_a]:shrink-0 [&_a]:whitespace-nowrap [&_button]:shrink-0 [&_button]:whitespace-nowrap sm:order-none sm:flex sm:w-auto sm:overflow-visible sm:pl-0 ${actions ? "flex" : "hidden"}`}>{router.pathname !== "/admin/checkin" && <Link href="/admin/checkin" className="hidden items-center gap-2 rounded-full border border-black/15 bg-white px-4 py-2.5 text-[10px] font-black uppercase tracking-[0.1em] transition hover:border-black sm:inline-flex"><QrCode className="h-3.5 w-3.5 text-[#3155ff]" /> Launch scanner</Link>}{actions}</div>
+          </div>
+        </header>
+        <main className="admin-track-surface mx-auto min-h-[calc(100vh-88px)] w-full max-w-[1600px] p-4 sm:p-8 xl:p-10">{children}</main>
       </div>
     </div>
   );

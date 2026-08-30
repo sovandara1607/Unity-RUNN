@@ -97,7 +97,7 @@ function AutomationBoard({ snapshot, retryingId, onRetry }: { snapshot: AdminAut
       <div className="grid gap-8 p-6 sm:p-9 xl:grid-cols-[1fr_390px] xl:p-11">
         <div>
           <p className={`flex items-center gap-2 font-mono text-[9px] font-black uppercase tracking-[0.2em] ${snapshot.configured ? "text-[#d9ff00]" : "text-amber-300"}`}><span className={`h-2 w-2 rounded-full ${snapshot.configured ? "animate-pulse bg-[#d9ff00] motion-reduce:animate-none" : "bg-amber-300"}`} />{snapshot.configured ? "Telegram channel online" : "Telegram setup required"}</p>
-          <h2 className="sport-display mt-6 max-w-4xl text-[clamp(58px,8vw,112px)] uppercase leading-[0.76] tracking-[-0.045em]">Signals in motion.</h2>
+          <h2 className="sport-display mt-6 max-w-4xl text-[clamp(46px,14vw,112px)] uppercase leading-[0.76] tracking-[-0.045em]">Signals in motion.</h2>
           <p className="mt-7 max-w-2xl text-sm font-semibold leading-6 text-white/50">See what left race control, what reached a runner, and which message needs another push.</p>
         </div>
         <div className="self-end overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04]">

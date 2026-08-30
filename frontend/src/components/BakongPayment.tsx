@@ -85,10 +85,10 @@ export function BakongPayment({ checkout, eventName, onPaid, onClose }: Props) {
               {checkout.deep_link && <a href={checkout.deep_link} className="mt-7 inline-flex items-center gap-2 rounded-full bg-black px-5 py-3 text-xs font-bold uppercase tracking-[0.1em] text-white">Open banking app <ExternalLink className="h-3.5 w-3.5" /></a>}
             </div>
             <div className="mt-10">
-              <div className="flex items-center gap-3 rounded-xl bg-white px-4 py-3 text-xs font-semibold">
+              <div className="flex flex-wrap items-center gap-3 rounded-xl bg-white px-4 py-3 text-xs font-semibold">
                 {message === "Payment confirmed" ? <Check className="h-4 w-4 text-emerald-600" /> : checking ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Clock3 className="h-4 w-4" />}
                 <span>{message}</span>
-				<button onClick={verify} disabled={checking || terminal} className="ml-auto underline underline-offset-4 disabled:opacity-40">Check now</button>
+				<button onClick={verify} disabled={checking || terminal} className="ml-auto min-h-8 underline underline-offset-4 disabled:opacity-40">Check now</button>
               </div>
               {failedChecks > 2 && <p className="mt-3 text-xs leading-5 text-black/50">Bakong is taking longer to respond. Do not pay twice. You can reopen this payment from your dashboard.</p>}
               <p className="mt-4 flex items-start gap-2 text-[10px] font-medium leading-4 text-black/45"><ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0" />Your race ticket is issued only after Bakong confirms settlement.</p>

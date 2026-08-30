@@ -133,7 +133,7 @@ export default function EventsPage() {
                 <div className="grid gap-2 sm:grid-cols-2">
                   <label className="relative">
                     <span className="sr-only">Race month</span>
-                    <select value={month} onChange={(event) => setMonth(event.target.value)} className="h-10 min-w-48 appearance-none rounded-full border border-white/15 bg-white/[0.06] pl-4 pr-10 text-[10px] font-black uppercase tracking-[0.09em] text-white outline-none transition hover:border-white/30 focus:border-white">
+                    <select value={month} onChange={(event) => setMonth(event.target.value)} className="h-11 w-full min-w-0 appearance-none rounded-full border border-white/15 bg-white/[0.06] pl-4 pr-10 text-[10px] font-black uppercase tracking-[0.09em] text-white outline-none transition hover:border-white/30 focus:border-white sm:h-10 sm:min-w-48">
                       <option value="ALL" className="text-black">Any month</option>
                       {monthOptions.map((option) => <option key={option.value} value={option.value} className="text-black">{option.label}</option>)}
                     </select>
@@ -141,7 +141,7 @@ export default function EventsPage() {
                   </label>
                   <label className="relative">
                     <span className="sr-only">Start location</span>
-                    <select value={location} onChange={(event) => setLocation(event.target.value)} className="h-10 min-w-48 appearance-none rounded-full border border-white/15 bg-white/[0.06] pl-4 pr-10 text-[10px] font-black uppercase tracking-[0.09em] text-white outline-none transition hover:border-white/30 focus:border-white">
+                    <select value={location} onChange={(event) => setLocation(event.target.value)} className="h-11 w-full min-w-0 appearance-none rounded-full border border-white/15 bg-white/[0.06] pl-4 pr-10 text-[10px] font-black uppercase tracking-[0.09em] text-white outline-none transition hover:border-white/30 focus:border-white sm:h-10 sm:min-w-48">
                       <option value="ALL" className="text-black">Any location</option>
                       {locationOptions.map((option) => <option key={option} value={option} className="text-black">{option}</option>)}
                     </select>

@@ -61,7 +61,7 @@ function SystemBoard({ snapshot }: { snapshot: SystemStatusSnapshot }) {
       <div className="grid gap-8 p-6 sm:p-9 xl:grid-cols-[1fr_360px] xl:p-11">
         <div>
           <p className={`flex items-center gap-2 font-mono text-[9px] font-black uppercase tracking-[0.2em] ${degraded ? "text-rose-400" : "text-[#d9ff00]"}`}><span className={`h-2 w-2 rounded-full ${degraded ? "bg-rose-400" : "animate-pulse bg-[#d9ff00]"}`} />Live infrastructure report</p>
-          <h2 className="sport-display mt-6 max-w-4xl text-[clamp(58px,8vw,118px)] uppercase leading-[0.76] tracking-[-0.045em]">{degraded ? "System needs attention." : "All lanes operational."}</h2>
+          <h2 className="sport-display mt-6 max-w-4xl text-[clamp(46px,14vw,118px)] uppercase leading-[0.76] tracking-[-0.045em]">{degraded ? "System needs attention." : "All lanes operational."}</h2>
           <p className="mt-7 max-w-2xl text-sm font-semibold leading-6 text-white/50">A sanitized view of the services that keep registration, payments, media, email and race-day operations moving.</p>
         </div>
         <div className="grid content-end gap-px overflow-hidden rounded-2xl border border-white/10 bg-white/10 sm:grid-cols-3 xl:grid-cols-1">

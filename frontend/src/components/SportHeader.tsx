@@ -51,15 +51,15 @@ export function SportHeader({ active, accountHref, accountLabel }: SportHeaderPr
       {config.announcement_enabled && config.announcement_text && config.announcement_event_name && (
         <AnnouncementStrip message={announcementMessage} href={announcementHref} color={config.primary_color} />
       )}
-      <div className="mx-auto flex h-[76px] max-w-[1440px] items-center px-5 sm:px-8">
-        <Link href="/" className="group flex shrink-0 items-center gap-3" aria-label="Unity Runn Club home">
+      <div className="mx-auto flex h-[72px] max-w-[1440px] items-center px-4 sm:h-[76px] sm:px-8">
+        <Link href="/" className="group flex min-w-0 shrink items-center gap-3" aria-label="Unity Runn Club home">
           <span className="flex h-11 w-11 items-center justify-center overflow-hidden transition-transform group-hover:-rotate-3" style={{ backgroundColor: config.primary_color }}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={resolveApiAssetUrl(config.logo_url) || "/Unity-Logos/logo%20UNTR-02.png"} alt="" className="h-full w-full object-cover" />
           </span>
-          <span>
+          <span className="min-w-0">
             <span className="block text-[8px] font-black uppercase tracking-[0.25em]" style={{ color: config.primary_color }}>{config.location_label}</span>
-            <span className="sport-display mt-0.5 block text-xl uppercase leading-none tracking-[-0.01em]">{config.club_name}</span>
+            <span className="sport-display mt-0.5 block truncate text-xl uppercase leading-none tracking-[-0.01em]">{config.club_name}</span>
           </span>
         </Link>
 
@@ -82,9 +82,9 @@ export function SportHeader({ active, accountHref, accountLabel }: SportHeaderPr
         </button>
       </div>
 
-      <div id="public-mobile-menu" style={{ backgroundColor: config.background_color }} className={`absolute left-0 right-0 top-full overflow-hidden border-t border-white/10 transition-[max-height,opacity] duration-300 md:hidden ${menuOpen ? "max-h-[calc(100vh-76px)] opacity-100" : "pointer-events-none max-h-0 opacity-0"}`}>
-        <div className="topo-surface flex min-h-[calc(100vh-76px)] max-h-[calc(100vh-76px)] flex-col overflow-y-auto px-5 py-6">
-          <div className="mx-auto flex min-h-[calc(100vh-124px)] w-full max-w-xl flex-col">
+      <div id="public-mobile-menu" style={{ backgroundColor: config.background_color }} className={`absolute left-0 right-0 top-full overflow-hidden border-t border-white/10 transition-[height,opacity] duration-300 md:hidden ${menuOpen ? "h-[calc(100dvh-100%)] opacity-100" : "pointer-events-none h-0 opacity-0"}`}>
+        <div className="topo-surface flex h-full flex-col overflow-y-auto px-4 py-5 sm:px-5 sm:py-6">
+          <div className="mx-auto flex min-h-full w-full max-w-xl flex-col">
             <div className="flex items-center justify-between border-b border-white/10 pb-5">
               <div><p className="font-mono text-[8px] font-black uppercase tracking-[0.2em] text-white/35">Club navigation</p><p className="mt-1 text-xs font-bold text-white/70">Choose where you want to run next.</p></div>
               <span className="flex items-center gap-2 font-mono text-[8px] font-black uppercase tracking-[0.15em]" style={{ color: config.primary_color }}><span className="h-1.5 w-1.5 animate-pulse rounded-full" style={{ backgroundColor: config.primary_color }} /> Season live</span>
@@ -102,7 +102,7 @@ export function SportHeader({ active, accountHref, accountLabel }: SportHeaderPr
               <span className="grid h-11 w-11 place-items-center rounded-full bg-black" style={{ color: config.primary_color }}><ArrowUpRight className="h-5 w-5" /></span>
             </Link>
 
-            <p className="mt-auto border-t border-white/10 pt-5 font-mono text-[8px] font-bold uppercase tracking-[0.16em] text-white/25">{config.footer_text}</p>
+            <p className="mt-auto border-t border-white/10 pb-[max(0px,env(safe-area-inset-bottom))] pt-5 font-mono text-[8px] font-bold uppercase tracking-[0.16em] text-white/25">{config.footer_text}</p>
           </div>
         </div>
       </div>

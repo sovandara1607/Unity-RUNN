@@ -40,7 +40,7 @@ export function ClubCarousel({ primaryHref, primaryLabel }: ClubCarouselProps) {
   return (
     <section className="relative overflow-hidden border-b border-white/10" style={{ backgroundColor: config.background_color }} aria-roledescription="carousel" aria-label={`${config.club_name} hero`}>
       <div
-        className="group relative min-h-[670px] focus:outline-none focus-visible:ring-4 focus-visible:ring-inset focus-visible:ring-[#d9ff00]/70 sm:min-h-[720px] lg:h-[calc(100svh-76px)] lg:min-h-[680px] lg:max-h-[920px]"
+        className="group relative h-[calc(100svh-72px)] min-h-[590px] max-h-[760px] focus:outline-none focus-visible:ring-4 focus-visible:ring-inset focus-visible:ring-[#d9ff00]/70 sm:h-auto sm:min-h-[720px] sm:max-h-none lg:h-[calc(100svh-76px)] lg:min-h-[680px] lg:max-h-[920px]"
         tabIndex={0}
         onKeyDown={(event) => { if (event.key === "ArrowLeft") move(-1); if (event.key === "ArrowRight") move(1); }}
         onMouseEnter={() => setInteracting(true)}
@@ -56,7 +56,7 @@ export function ClubCarousel({ primaryHref, primaryLabel }: ClubCarouselProps) {
           setInteracting(false);
         }}
       >
-        <div className="flex h-full min-h-[670px] transition-transform duration-700 ease-[cubic-bezier(.22,.76,.22,1)] motion-reduce:transition-none sm:min-h-[720px] lg:min-h-[680px]" style={{ transform: `translateX(-${active * 100}%)` }}>
+        <div className="flex h-full min-h-[590px] transition-transform duration-700 ease-[cubic-bezier(.22,.76,.22,1)] motion-reduce:transition-none sm:min-h-[720px] lg:min-h-[680px]" style={{ transform: `translateX(-${active * 100}%)` }}>
           {slides.map((slide, index) => (
             <figure key={`${slide.image_url}-${index}`} className="relative min-w-full" aria-hidden={index !== active}>
               {/* Configured artwork may be served by the API or an external CDN. */}
@@ -69,7 +69,7 @@ export function ClubCarousel({ primaryHref, primaryLabel }: ClubCarouselProps) {
         <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(90deg,rgba(8,8,8,.82)_0%,rgba(8,8,8,.4)_48%,rgba(8,8,8,.08)_78%),linear-gradient(0deg,rgba(8,8,8,.88)_0%,transparent_58%)]" />
         <div className="pointer-events-none absolute inset-0 opacity-25 [background:radial-gradient(circle_at_75%_20%,transparent_0,transparent_12%,rgba(0,0,0,.7)_75%)]" />
 
-        <div className="pointer-events-none absolute inset-0 mx-auto flex w-full max-w-[1440px] flex-col px-5 py-7 sm:px-8 sm:py-10 lg:py-12">
+        <div className="pointer-events-none absolute inset-0 mx-auto flex w-full max-w-[1440px] flex-col px-4 py-6 sm:px-8 sm:py-10 lg:py-12">
           <div className="flex items-start justify-between gap-5 pr-36 sm:pr-40">
             <p className="max-w-xs text-[10px] font-black uppercase leading-5 tracking-[0.16em] sm:text-xs" style={{ color: config.primary_color }}>
               {config.hero_intro}

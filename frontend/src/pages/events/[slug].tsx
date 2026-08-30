@@ -158,14 +158,14 @@ export default function EventDetailPage() {
               <h1 className="sport-display mt-6 max-w-4xl text-[clamp(3.5rem,7vw,7.5rem)] uppercase leading-[0.78] tracking-[-0.045em] text-white">{event.name}</h1>
               {event.description && <p className="mt-7 max-w-2xl text-base font-medium leading-7 text-white/62 sm:text-lg sm:leading-8">{event.description}</p>}
 
-              <div className="mt-8 flex flex-wrap items-center gap-2.5">
+              <div className="mt-8 grid grid-cols-2 gap-2.5 sm:flex sm:flex-wrap sm:items-center">
                 {canRegister && registerableCategories.length > 0 && (
-                  <Link href={`/events/${event.slug}/register?category=${registerableCategories[0].id}`} className="inline-flex h-12 items-center gap-3 px-5 text-[11px] font-black uppercase tracking-[0.12em] text-black transition hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-white" style={{ backgroundColor: acid }}>
+                  <Link href={`/events/${event.slug}/register?category=${registerableCategories[0].id}`} className="col-span-2 inline-flex h-12 items-center justify-center gap-3 px-5 text-[11px] font-black uppercase tracking-[0.12em] text-black transition hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-white sm:col-auto sm:justify-start" style={{ backgroundColor: acid }}>
                     <Ticket className="h-4 w-4" />Choose your entry<ArrowUpRight className="h-4 w-4" />
                   </Link>
                 )}
-                <button type="button" onClick={addToCalendar} className="inline-flex h-12 items-center gap-2 border border-white/20 px-4 text-[10px] font-black uppercase tracking-[0.1em] text-white/70 transition hover:border-white/50 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white"><CalendarPlus className="h-4 w-4" />Add to calendar</button>
-                <button type="button" onClick={shareEvent} className="inline-flex h-12 items-center gap-2 border border-white/20 px-4 text-[10px] font-black uppercase tracking-[0.1em] text-white/70 transition hover:border-white/50 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white"><Share2 className="h-4 w-4" />Share race</button>
+                <button type="button" onClick={addToCalendar} className="inline-flex h-12 items-center justify-center gap-2 border border-white/20 px-2 text-center text-[9px] font-black uppercase tracking-[0.08em] text-white/70 transition hover:border-white/50 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white sm:px-4 sm:text-[10px] sm:tracking-[0.1em]"><CalendarPlus className="h-4 w-4 shrink-0" />Add to calendar</button>
+                <button type="button" onClick={shareEvent} className="inline-flex h-12 items-center justify-center gap-2 border border-white/20 px-2 text-center text-[9px] font-black uppercase tracking-[0.08em] text-white/70 transition hover:border-white/50 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white sm:px-4 sm:text-[10px] sm:tracking-[0.1em]"><Share2 className="h-4 w-4 shrink-0" />Share race</button>
               </div>
             </div>
 

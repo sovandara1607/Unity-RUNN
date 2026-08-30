@@ -273,7 +273,7 @@ export default function DashboardPage() {
               </div>
             </div>
 
-            <nav aria-label="Dashboard" className="mt-8 flex gap-1 overflow-x-auto border-t border-white/10 pt-4">
+            <nav aria-label="Dashboard" className="mobile-scroll-row -mx-5 mt-8 flex gap-1 overflow-x-auto border-t border-white/10 px-5 pt-4 sm:mx-0 sm:px-0">
               {featuredRegistration && <a href="#ticket" className="inline-flex shrink-0 items-center gap-2 rounded-full px-4 py-2 text-[10px] font-black uppercase tracking-[0.1em] text-black" style={{ backgroundColor: acid }}><Ticket className="h-3.5 w-3.5" />{featuredRegistration.status === "PENDING" ? "Payment" : featuredRegistration.status === "CONFIRMED" ? "My ticket" : "Latest entry"}</a>}
               {others.length > 0 && <a href="#entries" className="inline-flex shrink-0 items-center gap-2 rounded-full px-4 py-2 text-[10px] font-black uppercase tracking-[0.1em] text-white/55 transition hover:bg-white/10 hover:text-white">Other entries</a>}
               <Link href="/profile" className="inline-flex shrink-0 items-center gap-2 rounded-full px-4 py-2 text-[10px] font-black uppercase tracking-[0.1em] text-white/55 transition hover:bg-white/10 hover:text-white"><UserRound className="h-3.5 w-3.5" /> Runner details</Link>

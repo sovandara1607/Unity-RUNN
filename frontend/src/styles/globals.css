@@ -295,8 +295,44 @@
   }
   body {
     @apply bg-background text-foreground;
+    min-width: 320px;
+    overflow-x: clip;
   }
   html {
     @apply font-sans;
+    overflow-x: clip;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+}
+
+/* Mobile is an operating mode, not a squeezed desktop. Keep form controls at
+   a readable size (and prevent iOS focus zoom), make long race names safe, and
+   preserve a little breathing room around device cutouts. */
+@media (max-width: 767px) {
+  .admin-shell input:not([type="checkbox"]):not([type="radio"]):not([type="color"]),
+  .admin-shell select,
+  .admin-shell textarea,
+  .public-shell input:not([type="checkbox"]):not([type="radio"]):not([type="color"]),
+  .public-shell select,
+  .public-shell textarea,
+  .auth-shell input:not([type="checkbox"]):not([type="radio"]):not([type="color"]),
+  .auth-shell select,
+  .auth-shell textarea {
+    font-size: 16px;
+  }
+
+  .sport-display {
+    overflow-wrap: anywhere;
+  }
+
+  .mobile-scroll-row {
+    scrollbar-width: none;
+    scroll-padding-inline: 1rem;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .mobile-scroll-row::-webkit-scrollbar {
+    display: none;
   }
 }

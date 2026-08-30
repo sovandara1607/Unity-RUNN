@@ -46,7 +46,7 @@ export function CookieConsent() {
       aria-modal="false"
       aria-labelledby="cookie-consent-title"
       aria-describedby="cookie-consent-description"
-      className="fixed inset-x-3 bottom-3 z-[80] mx-auto max-w-[1120px] overflow-hidden border border-white/20 bg-[#101010] text-white shadow-[0_24px_80px_rgba(0,0,0,.55)] sm:inset-x-6 sm:bottom-6"
+      className="fixed inset-x-3 bottom-[max(.75rem,env(safe-area-inset-bottom))] z-[80] mx-auto max-w-[1120px] max-h-[calc(100dvh-1.5rem)] overflow-y-auto border border-white/20 bg-[#101010] text-white shadow-[0_24px_80px_rgba(0,0,0,.55)] sm:inset-x-6 sm:bottom-6 sm:max-h-none sm:overflow-hidden"
     >
       <div className="grid sm:grid-cols-[112px_minmax(0,1fr)]">
         <div className="relative hidden min-h-full overflow-hidden text-black sm:grid sm:place-items-center" style={{ backgroundColor: config.primary_color }} aria-hidden="true">
