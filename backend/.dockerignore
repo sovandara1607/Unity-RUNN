@@ -13,7 +13,6 @@ coverage/
 
 cmd/emailpreview/
 cmd/emailtest/
-cmd/seed/
 
 **/*_test.go
 README.md
