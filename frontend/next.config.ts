@@ -3,6 +3,7 @@ import type { NextConfig } from "next";
 const apiBaseUrl = (process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:8080").replace(/\/$/, "");
 
 const nextConfig: NextConfig = {
+  output: "standalone",
   turbopack: {
     root: process.cwd(),
   },

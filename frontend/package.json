@@ -61,5 +61,8 @@
     "eslint": "^9",
     "eslint-config-next": "16.3.2",
     "typescript": "5.9.3"
+  },
+  "overrides": {
+    "linkify-it": "^6.1.0"
   }
 }

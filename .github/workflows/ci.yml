@@ -143,3 +143,10 @@ jobs:
 
       - name: Validate compose file
         run: docker compose config --quiet
+
+      - name: Validate Dokploy compose file
+        env:
+          POSTGRES_PASSWORD: ci-postgres-password
+          REDIS_PASSWORD: ci-redis-password
+          JWT_SECRET: ci-jwt-secret-that-is-long-enough-for-staging-validation
+        run: docker compose -f docker-compose.dokploy.yml config --quiet
