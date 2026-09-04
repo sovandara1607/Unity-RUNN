@@ -7,6 +7,7 @@ import { ClubCarousel } from "../components/ClubCarousel";
 import { EventArtwork } from "../components/EventArtwork";
 import { SportFooter, SportHeader } from "../components/SportHeader";
 import { useSiteConfig } from "../components/site/SiteConfigProvider";
+import { publicEventDescription } from "../lib/eventCopy";
 import type { ClubStats, Event, MeResponse } from "../types";
 
 const publicEventStatuses = ["PUBLISHED", "REGISTRATION_OPEN", "REGISTRATION_CLOSED"];
@@ -107,6 +108,7 @@ export default function HomePage() {
   const selectedEvent = events.find((event) => event.id === selectedEventId)
     || events.find((event) => event.cover_image?.trim())
     || nextEvent;
+  const selectedEventDescription = publicEventDescription(selectedEvent?.description);
   const countdown = useCountdown(nextEvent);
 
   return (
@@ -167,25 +169,16 @@ export default function HomePage() {
           </div>
         </section>
 
-        {/* Values marquee */}
-        <section className="topo-surface relative overflow-hidden border-y border-white/10 py-14 sm:py-20">
-          <div className="mx-auto flex max-w-[1440px] flex-wrap items-center justify-between gap-x-10 gap-y-6 px-5 sm:px-8">
-            {config.value_messages.map((word) => (
-              <p key={word} className="sport-display text-4xl uppercase leading-none tracking-[-0.03em] sm:text-6xl" style={{ color: acid }}>{word}</p>
-            ))}
-          </div>
-        </section>
-
         {/* Interactive race calendar */}
         <section className="px-5 py-16 sm:px-8 sm:py-24" style={{ backgroundColor: config.background_color }} aria-labelledby="calendar-heading">
           <div className="mx-auto max-w-[1440px]">
             <div className="mb-10 flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between lg:mb-12">
               <div>
-                <p className="text-xs font-bold uppercase tracking-[0.18em]" style={{ color: acid }}>On the calendar</p>
-                <h2 id="calendar-heading" className="sport-display mt-3 text-5xl uppercase leading-[0.82] tracking-[-0.035em] sm:text-6xl lg:text-7xl">Choose your<br />start line.</h2>
+                <p className="text-xs font-bold uppercase tracking-[0.18em]" style={{ color: acid }}>Upcoming races</p>
+                <h2 id="calendar-heading" className="sport-display mt-3 text-5xl uppercase leading-[0.82] tracking-[-0.035em] sm:text-6xl lg:text-7xl">Choose your<br />next race.</h2>
               </div>
               <div className="sm:text-right">
-                <p className="max-w-sm text-sm leading-6 text-white/50">Scan the next race days, compare locations, and open the event that feels right for you.</p>
+                <p className="max-w-sm text-sm leading-6 text-white/50">Compare dates and locations, then open a race to see its distances and entry options.</p>
                 <Link href="/events" className="mt-4 inline-flex items-center gap-2 border-b border-white/25 pb-1 text-[11px] font-black uppercase tracking-[0.12em] text-white transition hover:border-white">
                   Full race calendar <ArrowUpRight className="h-3.5 w-3.5" />
                 </Link>
@@ -202,7 +195,7 @@ export default function HomePage() {
               <div className="overflow-hidden rounded-[28px] border border-white/10 bg-white/[0.035] lg:grid lg:min-h-[600px] lg:grid-cols-[minmax(330px,0.72fr)_minmax(0,1.28fr)]">
                 <div className="border-b border-white/10 lg:border-b-0 lg:border-r">
                   <div className="flex items-center justify-between border-b border-white/10 px-5 py-4 sm:px-6">
-                    <p className="font-mono text-[9px] font-black uppercase tracking-[0.18em] text-white/40">Next departures</p>
+                    <p className="font-mono text-[9px] font-black uppercase tracking-[0.18em] text-white/40">Upcoming races</p>
                     <p className="font-mono text-[9px] font-black text-white/25">{String(events.length).padStart(2, "0")} races</p>
                   </div>
                   <div aria-label="Upcoming races">
@@ -254,13 +247,12 @@ export default function HomePage() {
                         <span className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-white/20 bg-black/25 px-3 py-2 backdrop-blur-sm"><MapPin className="h-3 w-3 shrink-0" /><span className="truncate">{selectedEvent.location || "Location TBC"}</span></span>
                       </div>
                       <h3 className="sport-display mt-5 max-w-3xl text-5xl uppercase leading-[0.78] tracking-[-0.035em] text-white sm:text-7xl lg:text-[88px]">{selectedEvent.name}</h3>
-                      {selectedEvent.description && <p className="mt-5 line-clamp-2 max-w-2xl text-sm font-medium leading-6 text-white/65">{selectedEvent.description}</p>}
+                      {selectedEventDescription && <p className="mt-5 line-clamp-2 max-w-2xl text-sm font-medium leading-6 text-white/65">{selectedEventDescription}</p>}
                       <div className="mt-7 flex flex-wrap items-center gap-3">
                         <Link href={`/events/${selectedEvent.slug}`} className="inline-flex items-center gap-2 rounded-full px-5 py-3 text-[11px] font-black uppercase tracking-[0.1em] text-black transition hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-white" style={{ backgroundColor: acid }}>
                           {selectedEvent.status === "REGISTRATION_OPEN" ? <Ticket className="h-4 w-4" /> : <ArrowUpRight className="h-4 w-4" />}
                           {selectedEvent.status === "REGISTRATION_OPEN" ? "Choose your entry" : "View race details"}
                         </Link>
-                        <span className="font-mono text-[8px] font-black uppercase tracking-[0.14em] text-white/35">Select another race on the board</span>
                       </div>
                     </div>
                   </div>

@@ -18,7 +18,7 @@ func main() {
 	}
 
 	data := clubemail.TemplateData{
-		FullName: "Demo Runner", EventName: "New Event Fun Run", CategoryName: "10K Open",
+		FullName: "Say Lyheang", EventName: "New Event Fun Run", CategoryName: "10K Open",
 		RegistrationNumber: "URC-2026-000009", EventDate: "Thursday, August 27, 2026",
 		StartTime: "6:00 AM", Location: "Koh Pich, Phnom Penh, Cambodia", TshirtSize: "L",
 		AmountFormatted: "$25.00 USD", PaymentProvider: "Bakong",

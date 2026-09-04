@@ -5,7 +5,7 @@ const event = {
   id: "event-mobile",
   name: "Phnom Penh Riverside Community Championship",
   slug: "mobile-championship",
-  description: "A community race designed to test realistic long content on narrow screens.",
+  description: "Lorem ipsum placeholder copy that must not reach the public site.",
   cover_image: "/images/club/race-start.jpg",
   event_date: "2026-10-18",
   start_time: "2026-10-18T06:00:00Z",
@@ -37,7 +37,7 @@ async function expectNoPageOverflow(page: import("@playwright/test").Page) {
 
 test("public and authentication pages stay inside a 320px viewport", async ({ page }) => {
   const pages = [
-    { path: "/", ready: /Move as a crew/i },
+    { path: "/", ready: /Run with the crew/i },
     { path: "/about", ready: /Behind every/i },
     { path: "/events", ready: /Find your next race/i },
     { path: "/events/mobile-championship", ready: /Phnom Penh Riverside Community Championship/i },
@@ -60,4 +60,12 @@ test("the mobile navigation fits the visible viewport", async ({ page }) => {
   await expect(menu).toBeVisible();
   await expect.poll(() => menu.evaluate((element) => Math.round(element.getBoundingClientRect().bottom))).toBeLessThanOrEqual(720);
   await expectNoPageOverflow(page);
+});
+
+test("placeholder event descriptions stay out of public views", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByText(/Lorem ipsum/i)).toHaveCount(0);
+
+  await page.goto("/events/mobile-championship");
+  await expect(page.getByText(/Lorem ipsum/i)).toHaveCount(0);
 });

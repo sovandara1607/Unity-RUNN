@@ -32,16 +32,16 @@ INSERT INTO site_settings (
     footer_text, value_messages, hero_slides
 ) VALUES (
     'Unity Runn Club', 'Phnom Penh · KH', '#d9ff00', '#3155ff', '#111111',
-    'Run loud, together — quality training and real race days for Phnom Penh''s running community.',
-    'Unity', 'Run Club', 'Founded 2026 · Phnom Penh, Cambodia',
-    'Unity Runn Club is a Cambodia-born crew making running more social, more useful, and more fun.',
-    'We create quality training and events, then turn that energy into real opportunities for young runners.',
-    'Explore events', '/events', 'Unity Runn Club · Phnom Penh, Cambodia',
+    'Community runs and race days for Phnom Penh runners.',
+    'Unity', 'Run Club', 'Run together · Phnom Penh',
+    'Unity Runn Club brings Phnom Penh runners together for community miles and race days.',
+    'Find an upcoming race, register online, and keep your entry and QR ticket in one place.',
+    'Browse races', '/events', 'Unity Runn Club · Phnom Penh, Cambodia',
     '["Grow the sport", "Back the next wave", "Connect the good stuff"]'::jsonb,
     '[
-      {"image_url":"/images/club/riverside-run.jpg","alt":"Unity runners moving together along the Phnom Penh riverside at dawn","eyebrow":"Dawn miles · Riverside","title":"Move as a crew.","copy":"Easy starts, honest effort, and enough company to make the next kilometre feel possible."},
-      {"image_url":"/images/club/race-start.jpg","alt":"Runners accelerating together at a community race start in Phnom Penh","eyebrow":"Race morning · Phnom Penh","title":"Earn the start line.","copy":"Training turns into something real when the road closes, the clock starts, and everyone commits."},
-      {"image_url":"/images/club/finish-together.jpg","alt":"Run club members recovering and celebrating together after a morning run","eyebrow":"After the run · Together","title":"Stay for the people.","copy":"The finish matters. So do the conversations, encouragement, and friendships that follow it."}
+      {"image_url":"/images/club/riverside-run.jpg","alt":"Unity runners moving together along the Phnom Penh riverside at dawn","eyebrow":"Dawn miles · Riverside","title":"Run with the crew.","copy":"Join a community run, meet runners at your pace, and keep showing up."},
+      {"image_url":"/images/club/race-start.jpg","alt":"Runners accelerating together at a community race start in Phnom Penh","eyebrow":"Race morning · Phnom Penh","title":"Train for race day.","copy":"Choose an event, build toward the date, and arrive ready for the start."},
+      {"image_url":"/images/club/finish-together.jpg","alt":"Run club members recovering and celebrating together after a morning run","eyebrow":"After the run · Together","title":"Finish together.","copy":"Share the road, the result, and the next run with the people around you."}
     ]'::jsonb
 );
 

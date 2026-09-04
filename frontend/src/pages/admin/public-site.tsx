@@ -2,7 +2,7 @@
 /* eslint-disable @next/next/no-img-element */
 import { useEffect, useState, type ChangeEvent, type ReactNode } from "react";
 import Link from "next/link";
-import { ArrowDown, ArrowUp, ArrowUpRight, Eye, History, ImagePlus, MonitorUp, Plus, Radio, RotateCcw, Save, Trash2, Upload, X } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpRight, Eye, History, ImagePlus, MonitorUp, Radio, RotateCcw, Save, Trash2, Upload, X } from "lucide-react";
 import { AdminLayout } from "../../components/admin/AdminLayout";
 import { AlertBanner, useAlerts } from "../../components/alerts/AlertSystem";
 import { defaultSiteConfig, useSiteConfig } from "../../components/site/SiteConfigProvider";
@@ -108,7 +108,7 @@ export default function PublicSiteEditorPage() {
 			<Field label="Optional destination override"><input className={inputClass} value={draft.announcement_href} onChange={(e) => update("announcement_href", e.target.value)} placeholder="Leave empty to open the selected event" /></Field>
           </EditorSection>
 
-          <EditorSection eyebrow="03 · Homepage" title="Hero and club story" description="Shape the main headline, introduction, mission panel, call-to-action, and footer.">
+          <EditorSection eyebrow="03 · Homepage" title="Hero and club story" description="Shape the main introduction, concise club story, primary action, and footer.">
             <Field label="Hero introduction"><textarea className={`${inputClass} min-h-24 resize-y`} value={draft.hero_intro} onChange={(e) => update("hero_intro", e.target.value)} maxLength={300} /></Field>
             <div className="grid gap-5 sm:grid-cols-2"><Field label="Large headline — line 1"><input className={inputClass} value={draft.hero_title_primary} onChange={(e) => update("hero_title_primary", e.target.value)} maxLength={40} /></Field><Field label="Large headline — line 2"><input className={inputClass} value={draft.hero_title_secondary} onChange={(e) => update("hero_title_secondary", e.target.value)} maxLength={40} /></Field></div>
             <Field label="Mission eyebrow"><input className={inputClass} value={draft.mission_eyebrow} onChange={(e) => update("mission_eyebrow", e.target.value)} /></Field>
@@ -116,7 +116,6 @@ export default function PublicSiteEditorPage() {
             <Field label="Supporting statement"><textarea className={`${inputClass} min-h-20 resize-y`} value={draft.mission_supporting_text} onChange={(e) => update("mission_supporting_text", e.target.value)} maxLength={500} /></Field>
             <div className="grid gap-5 sm:grid-cols-2"><Field label="Primary button label"><input className={inputClass} value={draft.primary_cta_label} onChange={(e) => update("primary_cta_label", e.target.value)} /></Field><Field label="Primary button destination"><input className={inputClass} value={draft.primary_cta_href} onChange={(e) => update("primary_cta_href", e.target.value)} /></Field></div>
             <Field label="Footer text"><input className={inputClass} value={draft.footer_text} onChange={(e) => update("footer_text", e.target.value)} maxLength={160} /></Field>
-            <div><p className="text-[10px] font-black uppercase tracking-[0.14em] text-black/45">Value statements</p><div className="mt-3 space-y-2">{draft.value_messages.map((value, index) => <div key={index} className="flex gap-2"><input className="w-full rounded-xl border border-black/15 px-3.5 py-3 text-sm font-semibold outline-none focus:border-[#3155ff]" value={value} onChange={(e) => update("value_messages", draft.value_messages.map((item, itemIndex) => itemIndex === index ? e.target.value : item))} /><button type="button" disabled={draft.value_messages.length === 1} onClick={() => update("value_messages", draft.value_messages.filter((_, itemIndex) => itemIndex !== index))} className="grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-black/10 text-black/35 hover:text-rose-600 disabled:opacity-20" aria-label="Remove value"><Trash2 className="h-4 w-4" /></button></div>)}</div>{draft.value_messages.length < 6 && <button type="button" onClick={() => update("value_messages", [...draft.value_messages, "New value"])} className="mt-3 inline-flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.1em]"><Plus className="h-3.5 w-3.5" />Add value</button>}</div>
           </EditorSection>
 
           <EditorSection eyebrow="04 · Carousel" title="Hero images" description="Upload and reorder the visual stories that lead the homepage. One to six slides are supported.">

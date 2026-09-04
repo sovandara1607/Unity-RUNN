@@ -16,6 +16,7 @@ import { useAlerts } from "../../components/alerts/AlertSystem";
 import { EntryAvailability } from "../../components/EntryAvailability";
 import { useCategoryAvailability } from "../../lib/useCategoryAvailability";
 import { formatRegistrationDeadline, registrationDeadlineClosed } from "../../lib/registrationDeadline";
+import { publicEventDescription } from "../../lib/eventCopy";
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat(undefined, { weekday: "long", day: "numeric", month: "long", year: "numeric" }).format(new Date(value));
@@ -131,6 +132,7 @@ export default function EventDetailPage() {
   const categories = event.categories?.filter((category) => category.status === "OPEN") || [];
   const registerableCategories = categories.filter((category) => !registrationDeadlineClosed(category.registration_deadline) && availability[category.id]?.available !== 0);
   const status = statusMeta[event.status] || { label: event.status, tone: "bg-white/10 text-white/65" };
+  const description = publicEventDescription(event.description);
 
   return (
     <div className="min-h-screen text-white" style={{ backgroundColor: config.background_color }}>
@@ -156,7 +158,7 @@ export default function EventDetailPage() {
                 <span className="font-mono text-[9px] font-black uppercase tracking-[0.16em] text-white/30">Unity Runn Club · Official entry</span>
               </div>
               <h1 className="sport-display mt-6 max-w-4xl text-[clamp(3.5rem,7vw,7.5rem)] uppercase leading-[0.78] tracking-[-0.045em] text-white">{event.name}</h1>
-              {event.description && <p className="mt-7 max-w-2xl text-base font-medium leading-7 text-white/62 sm:text-lg sm:leading-8">{event.description}</p>}
+              {description && <p className="mt-7 max-w-2xl text-base font-medium leading-7 text-white/62 sm:text-lg sm:leading-8">{description}</p>}
 
               <div className="mt-8 grid grid-cols-2 gap-2.5 sm:flex sm:flex-wrap sm:items-center">
                 {canRegister && registerableCategories.length > 0 && (
