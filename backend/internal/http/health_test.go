@@ -18,6 +18,20 @@ type fakePinger struct {
 	err error
 }
 
+func TestWorkerRouterExposesOnlyProbes(t *testing.T) {
+	router := NewHealthRouter(Deps{DB: fakePinger{}, Redis: fakePinger{}})
+	for path, want := range map[string]int{
+		"/health": 200, "/ready": 200, "/api/v1/stats": 404,
+		"/api/v1/auth/register": 404, "/uploads/test.png": 404,
+	} {
+		r := httptest.NewRecorder()
+		router.ServeHTTP(r, httptest.NewRequest(http.MethodGet, path, nil))
+		if r.Code != want {
+			t.Errorf("%s: status = %d, want %d", path, r.Code, want)
+		}
+	}
+}
+
 // TestFilesOnlyFS_DisablesDirectoryListing tests the FilesOnlyFS that disables directory listing
 func TestFilesOnlyFS_DisablesDirectoryListing(t *testing.T) {
 	root := t.TempDir()

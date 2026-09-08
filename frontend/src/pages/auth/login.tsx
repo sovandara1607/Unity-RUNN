@@ -30,6 +30,10 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [googleEnabled, setGoogleEnabled] = useState(false);
   const router = useRouter();
+  // Same-origin guard, shared by the submit handler, the Google link and the signup link.
+  const requestedRedirect = typeof router.query.redirect === "string" ? router.query.redirect : "";
+  const safeRedirectPath = requestedRedirect.startsWith("/") && !requestedRedirect.startsWith("//") ? requestedRedirect : "";
+  const enteringRace = safeRedirectPath.includes("/register");
 
   useEffect(() => {
     api.getAuthProviders().then((providers) => setGoogleEnabled(providers.google)).catch(() => setGoogleEnabled(false));
@@ -84,6 +88,11 @@ export default function LoginPage() {
       mode="login"
       title="Sign in."
     >
+      {enteringRace && (
+        <p className="mb-6 border-l-[3px] border-[#3155ff] bg-[#3155ff]/[0.06] px-4 py-3 text-sm font-semibold leading-5 text-[#111]">
+          Sign in to finish your race entry. We will take you straight back to it.
+        </p>
+      )}
       {error && <AlertBanner tone="error" title="Sign-in blocked" className="mb-6" onDismiss={() => setError(null)}>{error}</AlertBanner>}
 
       {googleEnabled && (
@@ -131,7 +140,7 @@ export default function LoginPage() {
         </details>
       )}
 
-      <p className="mt-7 text-sm text-black/50">New? <Link href="/auth/register" className="font-bold text-[#111] underline decoration-black/25 underline-offset-4 hover:decoration-[#3155ff]">Create account</Link></p>
+      <p className="mt-7 text-sm text-black/50">New? <Link href={safeRedirectPath ? `/auth/register?redirect=${encodeURIComponent(safeRedirectPath)}` : "/auth/register"} className="font-bold text-[#111] underline decoration-black/25 underline-offset-4 hover:decoration-[#3155ff]">Create account</Link></p>
     </AuthFrame>
   );
 }

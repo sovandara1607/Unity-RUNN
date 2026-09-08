@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from "react";
+import type { GetServerSideProps } from "next";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { ArrowUpRight, CalendarDays, CalendarPlus, Check, Clock3, MapPin, Share2, Ticket } from "lucide-react";
-import { api } from "../../lib/api";
+import { api, type ApiError } from "../../lib/api";
 import { withMinSkeleton } from "../../lib/withMinSkeleton";
 import { SportFooter, SportHeader } from "../../components/SportHeader";
 import { EventArtwork } from "../../components/EventArtwork";
@@ -17,37 +18,46 @@ import { EntryAvailability } from "../../components/EntryAvailability";
 import { useCategoryAvailability } from "../../lib/useCategoryAvailability";
 import { formatRegistrationDeadline, registrationDeadlineClosed } from "../../lib/registrationDeadline";
 import { publicEventDescription } from "../../lib/eventCopy";
+import { formatEventDate, formatEventTime, eventStatusLabel, eventStatusTone } from "../../lib/eventFormat";
+import { StatusChip } from "../../components/primitives/StatusChip";
+import { Button } from "../../components/primitives/Button";
+import { PageMeta } from "../../components/site/PageMeta";
+import { ErrorScreen } from "../../components/site/ErrorScreen";
 
-function formatDate(value: string) {
-  return new Intl.DateTimeFormat(undefined, { weekday: "long", day: "numeric", month: "long", year: "numeric" }).format(new Date(value));
-}
-
-const statusMeta: Record<string, { label: string; tone: string }> = {
-  REGISTRATION_OPEN: { label: "Registration open", tone: "bg-emerald-400/20 text-emerald-300" },
-  REGISTRATION_CLOSED: { label: "Registration closed", tone: "bg-amber-400/20 text-amber-300" },
-  PUBLISHED: { label: "Registration opens soon", tone: "bg-white/10 text-white/65" },
-  COMPLETED: { label: "Event completed", tone: "bg-white/10 text-white/65" },
-  CANCELLED: { label: "Event cancelled", tone: "bg-rose-400/20 text-rose-300" },
+type EventMeta = {
+  name: string;
+  description: string | null;
+  cover_image: string | null;
+  event_date: string | null;
+  location: string | null;
 };
 
-export default function EventDetailPage() {
+type PageProps = { initialMeta: EventMeta | null };
+
+export default function EventDetailPage({ initialMeta }: PageProps) {
   const { config } = useSiteConfig();
   const alerts = useAlerts();
   const acid = config.primary_color;
   const { slug } = useParams() || {};
   const [event, setEvent] = useState<EventDetail | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  // A network drop, a timeout and a genuinely missing race are three different messages.
+  // They were all rendering "This run isn't here", telling a runner on flaky mobile data
+  // that the race did not exist.
+  const [failure, setFailure] = useState<"missing" | "unavailable" | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
   const categoryIds = event?.categories?.filter((category) => category.status === "OPEN" && !registrationDeadlineClosed(category.registration_deadline)).map((category) => category.id) || [];
   const { availability } = useCategoryAvailability(event?.id, categoryIds);
 
   useEffect(() => {
     if (typeof slug !== "string") return;
+    setFailure(null);
     withMinSkeleton(() => api.getEvent(slug))
       .then(setEvent)
-      .catch((err: unknown) => {
-        setError(err instanceof Error ? err.message : "Failed to load event");
+      .catch((caught: unknown) => {
+        const status = (caught as ApiError)?.status;
+        setFailure(status === 404 ? "missing" : "unavailable");
       });
-  }, [slug]);
+  }, [slug, reloadKey]);
 
   const addToCalendar = () => {
     if (!event || typeof window === "undefined") return;
@@ -69,7 +79,7 @@ export default function EventDetailPage() {
 
   const shareEvent = async () => {
     if (!event || typeof window === "undefined") return;
-    const shareData = { title: event.name, text: `${event.name} · ${formatDate(event.event_date)} · ${event.location}`, url: window.location.href };
+    const shareData = { title: event.name, text: `${event.name} · ${formatEventDate(event.event_date, "long")} · ${event.location}`, url: window.location.href };
     try {
       if (navigator.share) {
         await navigator.share(shareData);
@@ -83,13 +93,26 @@ export default function EventDetailPage() {
     }
   };
 
-  if (error) {
-    return <NotFound />;
-  }
+  const meta = event
+    ? { name: event.name, description: publicEventDescription(event.description), cover_image: event.cover_image, event_date: event.event_date, location: event.location }
+    : initialMeta;
+  const metaBlock = meta ? (
+    <PageMeta
+      title={meta.name}
+      description={meta.description
+        || [meta.location, meta.event_date ? formatEventDate(meta.event_date, "long") : null].filter(Boolean).join(" · ")
+        || `A race day with ${config.club_name}.`}
+      image={meta.cover_image}
+    />
+  ) : null;
+
+  if (failure === "missing") return <NotFound />;
+  if (failure === "unavailable") return <LoadFailed onRetry={() => setReloadKey((key) => key + 1)} />;
 
   if (!event) {
     return (
       <div className="min-h-screen text-white" style={{ backgroundColor: config.background_color }}>
+        {metaBlock}
         <SportHeader active="events" />
         <div className="border-b border-white/10">
           <div className="mx-auto grid max-w-[1440px] lg:min-h-[680px] lg:grid-cols-[minmax(360px,0.88fr)_minmax(0,1.12fr)]">
@@ -131,16 +154,16 @@ export default function EventDetailPage() {
   const canRegister = event.status === "REGISTRATION_OPEN";
   const categories = event.categories?.filter((category) => category.status === "OPEN") || [];
   const registerableCategories = categories.filter((category) => !registrationDeadlineClosed(category.registration_deadline) && availability[category.id]?.available !== 0);
-  const status = statusMeta[event.status] || { label: event.status, tone: "bg-white/10 text-white/65" };
   const description = publicEventDescription(event.description);
 
   return (
     <div className="min-h-screen text-white" style={{ backgroundColor: config.background_color }}>
+      {metaBlock}
       <SportHeader active="events" />
 
-      <section className="overflow-hidden border-b border-white/10 bg-[#101010]">
+      <section className="overflow-hidden border-b border-white/10 bg-[var(--surface-sunken)]">
         <div className="mx-auto grid max-w-[1440px] lg:min-h-[680px] lg:grid-cols-[minmax(360px,0.88fr)_minmax(0,1.12fr)]">
-          <div className="relative min-h-[460px] overflow-hidden border-b border-white/10 bg-[#17202c] lg:min-h-full lg:border-b-0 lg:border-r">
+          <div className="relative min-h-[460px] overflow-hidden border-b border-white/10 bg-[var(--surface-tint)] lg:min-h-full lg:border-b-0 lg:border-r">
             <EventArtwork coverImage={event.cover_image} eventName={event.name} variant="hero" />
             <div className="pointer-events-none absolute inset-0 ring-1 ring-inset ring-white/10" />
             <span className="pointer-events-none absolute left-5 top-5 h-12 w-12 border-l-2 border-t-2" style={{ borderColor: acid }} />
@@ -154,8 +177,8 @@ export default function EventDetailPage() {
             <div className="relative">
               <Link href="/events" className="inline-flex items-center gap-2 border-b border-white/25 pb-1 font-mono text-[9px] font-black uppercase tracking-[0.14em] text-white/50 transition hover:border-white hover:text-white">← Race calendar</Link>
               <div className="mt-8 flex flex-wrap items-center gap-3">
-                <span className={`inline-flex border border-current px-3 py-2 font-mono text-[9px] font-black uppercase tracking-[0.14em] ${status.tone}`}>{status.label}</span>
-                <span className="font-mono text-[9px] font-black uppercase tracking-[0.16em] text-white/30">Unity Runn Club · Official entry</span>
+                <StatusChip tone={eventStatusTone(event.status)} variant="pill">{eventStatusLabel(event.status)}</StatusChip>
+                <span className="font-mono text-[9px] font-black uppercase tracking-[0.16em] text-white/50">Unity Runn Club · Official entry</span>
               </div>
               <h1 className="sport-display mt-6 max-w-4xl text-[clamp(3.5rem,7vw,7.5rem)] uppercase leading-[0.78] tracking-[-0.045em] text-white">{event.name}</h1>
               {description && <p className="mt-7 max-w-2xl text-base font-medium leading-7 text-white/62 sm:text-lg sm:leading-8">{description}</p>}
@@ -172,8 +195,8 @@ export default function EventDetailPage() {
             </div>
 
             <div className="relative mt-10 grid gap-px border border-white/10 bg-white/10 sm:grid-cols-3 lg:mt-auto">
-              <Fact icon={<CalendarDays className="h-4 w-4" />} label="Race day" value={formatDate(event.event_date)} />
-              <Fact icon={<Clock3 className="h-4 w-4" />} label="Start" value={event.start_time ? event.start_time.slice(11, 16) : "To be confirmed"} />
+              <Fact icon={<CalendarDays className="h-4 w-4" />} label="Race day" value={formatEventDate(event.event_date, "long")} />
+              <Fact icon={<Clock3 className="h-4 w-4" />} label="Start" value={formatEventTime(event.start_time, "To be confirmed")} />
               <Fact icon={<MapPin className="h-4 w-4" />} label="Meet" value={event.location || "Location to be confirmed"} href={event.location ? eventMapURL(event) : undefined} />
             </div>
           </div>
@@ -189,7 +212,7 @@ export default function EventDetailPage() {
           </div>
 
           {/* Registration card */}
-          <aside className="h-fit border border-white/10 bg-[#1a1a1a] p-6 lg:sticky lg:top-8">
+          <aside className="h-fit border border-white/10 bg-[var(--surface-raised)] p-6 lg:sticky lg:top-8">
             <p className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.16em] text-white/50"><Ticket className="h-4 w-4" style={{ color: acid }} />Join the run</p>
             {canRegister && categories.length > 0 ? (
               <div className="mt-5 space-y-3">
@@ -215,8 +238,8 @@ function Fact({ icon, label, value, href }: { icon: React.ReactNode; label: stri
     <div className="flex min-h-24 items-start gap-3 bg-[#151515] p-4">
       <span className="flex h-8 w-8 shrink-0 items-center justify-center border border-white/15 text-white/60">{icon}</span>
       <div>
-        <p className="font-mono text-[8px] font-black uppercase tracking-[0.16em] text-white/40">{label}</p>
-        {href ? <a href={href} target="_blank" rel="noreferrer" className="mt-1.5 inline-flex items-center gap-1.5 text-[13px] font-bold leading-5 text-white underline decoration-white/25 underline-offset-4 transition hover:decoration-[#d9ff00]"><span>{value}</span><ArrowUpRight className="h-3.5 w-3.5 shrink-0" /></a> : <p className="mt-1.5 text-[13px] font-bold leading-5 text-white">{value}</p>}
+        <p className="font-mono text-[8px] font-black uppercase tracking-[0.16em] text-white/60">{label}</p>
+        {href ? <a href={href} target="_blank" rel="noreferrer" className="mt-1.5 inline-flex items-center gap-1.5 text-[13px] font-bold leading-5 text-white underline decoration-white/25 underline-offset-4 transition hover:decoration-[var(--brand)]"><span>{value}</span><ArrowUpRight className="h-3.5 w-3.5 shrink-0" /></a> : <p className="mt-1.5 text-[13px] font-bold leading-5 text-white">{value}</p>}
       </div>
     </div>
   );
@@ -235,13 +258,13 @@ function Category({ category, slug, primary, availability }: { category: EventCa
         <span>{category.distance}</span>
         <EntryAvailability availability={availability} registrationDeadline={category.registration_deadline} />
       </div>
-      {category.registration_deadline && <p className="mt-2 font-mono text-[8px] font-bold uppercase tracking-[0.09em] text-white/35">{deadlineClosed ? "Category cutoff passed" : `Closes ${formatRegistrationDeadline(category.registration_deadline)}`}</p>}
-      <span className={`mt-3 inline-flex items-center gap-1 text-xs font-bold uppercase tracking-[0.06em] ${unavailable ? "text-white/25" : "text-white/70 group-hover:text-[#d9ff00]"}`}>
+      {category.registration_deadline && <p className="mt-2 font-mono text-[8px] font-bold uppercase tracking-[0.09em] text-white/55">{deadlineClosed ? "Category cutoff passed" : `Closes ${formatRegistrationDeadline(category.registration_deadline)}`}</p>}
+      <span className={`mt-3 inline-flex items-center gap-1 text-xs font-bold uppercase tracking-[0.06em] ${unavailable ? "text-white/50" : "text-white/70 group-hover:text-[var(--brand)]"}`}>
         {unavailable ? "Join another distance" : "Register"} {!unavailable && <ArrowUpRight className="h-3.5 w-3.5" />}
       </span>
   </>;
   if (unavailable) return <div className="block border border-white/10 bg-white/[0.02] p-4 opacity-75" aria-label={`${category.name} ${deadlineClosed ? "entry closed" : "entry full"}`}>{content}</div>;
-  return <Link href={`/events/${slug}/register?category=${category.id}`} className="group block border border-white/10 bg-white/[0.03] p-4 transition hover:border-[#d9ff00]/60 hover:bg-white/[0.06]">{content}</Link>;
+  return <Link href={`/events/${slug}/register?category=${category.id}`} className="group block border border-white/10 bg-white/[0.03] p-4 transition hover:border-[var(--brand)]/60 hover:bg-white/[0.06]">{content}</Link>;
 }
 
 function Schedule({ event }: { event: EventDetail }) {
@@ -294,6 +317,23 @@ function Rules({ event, primary }: { event: EventDetail; primary: string }) {
   );
 }
 
+function LoadFailed({ onRetry }: { onRetry: () => void }) {
+  return (
+    <ErrorScreen
+      title="Could not load this race"
+      message="The connection dropped on the way. Your place, if you already have one, is unaffected."
+      action={
+        <>
+          <Button onClick={onRetry}>Try again</Button>
+          <Link href="/events" className="text-[11px] font-bold uppercase tracking-[0.12em] text-white/60 underline underline-offset-4 transition hover:text-white">
+            Race calendar
+          </Link>
+        </>
+      }
+    />
+  );
+}
+
 function NotFound() {
   const { config } = useSiteConfig();
   return (
@@ -310,3 +350,37 @@ function NotFound() {
     </div>
   );
 }
+
+// Crawlers and link unfurlers do not run JavaScript, so the event's title, description and
+// poster have to be in the served HTML. The interactive page still loads client-side; this
+// only resolves what goes in <head>. A slug that cannot be resolved renders with noindex
+// rather than a hard 404, so the client can still tell "missing" from "temporarily down".
+export const getServerSideProps: GetServerSideProps<PageProps> = async ({ params }) => {
+  const slug = typeof params?.slug === "string" ? params.slug : "";
+  const base = (process.env.API_INTERNAL_URL || process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:8080").replace(/\/$/, "");
+  if (!slug) return { props: { initialMeta: null } };
+  try {
+    const response = await fetch(`${base}/api/v1/events/${encodeURIComponent(slug)}`, {
+      headers: { accept: "application/json" },
+      signal: AbortSignal.timeout(3000),
+    });
+    if (!response.ok) return { props: { initialMeta: null } };
+    const body = await response.json();
+    const event = body?.data;
+    if (!event?.name) return { props: { initialMeta: null } };
+    return {
+      props: {
+        initialMeta: {
+          name: event.name,
+          description: publicEventDescription(event.description),
+          cover_image: event.cover_image || null,
+          event_date: event.event_date || null,
+          location: event.location || null,
+        },
+      },
+    };
+  } catch {
+    // The page still renders; only the unfurl preview is degraded.
+    return { props: { initialMeta: null } };
+  }
+};

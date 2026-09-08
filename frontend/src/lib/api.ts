@@ -412,9 +412,15 @@ export const api = {
   },
 
   // --- Registrations ---
-  async listMyRegistrations(): Promise<Registration[]> {
+  /**
+   * `suppressAuthRedirect` is for opportunistic reads -- a caller enriching a page that is
+   * useful without this data. Without it a 401 hard-navigates the browser to /auth/login,
+   * which is right for the race wallet and wrong for a background pre-check.
+   */
+  async listMyRegistrations(options?: { suppressAuthRedirect?: boolean }): Promise<Registration[]> {
     const result = await request<Registration[] | { registrations: Registration[] }>(
-      "/api/v1/me/registrations"
+      "/api/v1/me/registrations",
+      { suppressAuthRedirect: options?.suppressAuthRedirect }
     );
     if (Array.isArray(result)) return result;
     return result?.registrations || [];

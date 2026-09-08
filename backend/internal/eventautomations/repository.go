@@ -87,10 +87,10 @@ func (r *Repository) classifyMissingMutation(ctx context.Context, eventID, id uu
 }
 
 func (r *Repository) ClaimDue(ctx context.Context, limit int) ([]Automation, error) {
-	rows, err := r.pool.Query(ctx, `WITH due AS (SELECT id FROM event_automations WHERE
+	rows, err := r.pool.Query(ctx, `WITH due AS (SELECT id AS due_id FROM event_automations WHERE
 		(status='SCHEDULED' AND send_at<=now() AND next_attempt_at<=now()) OR (status='PROCESSING' AND locked_at<now()-interval '5 minutes')
 		ORDER BY send_at LIMIT $1 FOR UPDATE SKIP LOCKED)
-		UPDATE event_automations a SET status='PROCESSING',locked_at=now(),updated_at=now() FROM due WHERE a.id=due.id RETURNING `+automationColumns, limit)
+		UPDATE event_automations a SET status='PROCESSING',locked_at=now(),updated_at=now() FROM due WHERE a.id=due.due_id RETURNING `+automationColumns, limit)
 	if err != nil {
 		return nil, err
 	}

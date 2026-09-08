@@ -3,6 +3,7 @@ import Link from "next/link";
 import { ArrowUpRight } from "lucide-react";
 import { resolveApiAssetUrl } from "../../lib/api";
 import { useSiteConfig } from "../site/SiteConfigProvider";
+import { useRouter } from "next/router";
 
 interface AuthFrameProps {
   mode: "login" | "register";
@@ -60,10 +61,17 @@ function RunnerCourse({ ink, signal, animated }: { ink: string; signal: string; 
 }
 
 export function AuthFrame({ mode, title, children }: AuthFrameProps) {
+  const router = useRouter();
   const { config } = useSiteConfig();
+  // Carry ?redirect across the login/signup switch. Without this a runner who bounced off
+  // "Choose your entry", then flipped to the other form, silently lost the race they were
+  // entering and landed on an empty dashboard.
+  const requested = typeof router.query.redirect === "string" ? router.query.redirect : "";
+  const safeRedirect = requested.startsWith("/") && !requested.startsWith("//") ? requested : "";
+  const suffix = safeRedirect ? `?redirect=${encodeURIComponent(safeRedirect)}` : "";
   const alternate = mode === "login"
-    ? { href: "/auth/register", label: "Create account" }
-    : { href: "/auth/login", label: "Sign in" };
+    ? { href: `/auth/register${suffix}`, label: "Create account" }
+    : { href: `/auth/login${suffix}`, label: "Sign in" };
   const panelTitle = mode === "login" ? "BACK ON PACE." : "RUN WITH US.";
   const logoSource = resolveApiAssetUrl(config.logo_url) || "/Unity-Logos/logo%20UNTR-02.png";
 

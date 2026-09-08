@@ -10,6 +10,14 @@ import (
 
 const defaultReadyTimeout = 2 * time.Second
 
+// NewHealthRouter exposes only probes for private worker processes.
+func NewHealthRouter(deps Deps) http.Handler {
+	r := http.NewServeMux()
+	r.HandleFunc("GET /health", healthHandler)
+	r.HandleFunc("GET /ready", readyHandler(deps))
+	return r
+}
+
 // healthResponse is the payload for /health
 type healthResponse struct {
 	Status string `json:"status"`

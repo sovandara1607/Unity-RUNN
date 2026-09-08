@@ -381,7 +381,7 @@ export default function AdminEditEventPage() {
                 required
                 value={formData.name}
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500"
+                className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#3155ff]"
               />
             </div>
 
@@ -397,7 +397,7 @@ export default function AdminEditEventPage() {
                   type="text"
                   value={formData.slug}
                   onChange={(e) => setFormData({ ...formData, slug: e.target.value })}
-                  className="w-full px-3 py-2 text-sm border border-slate-200 rounded-r-xl focus:outline-none focus:ring-2 focus:ring-orange-500 font-mono text-xs"
+                  className="w-full px-3 py-2 text-sm border border-slate-200 rounded-r-xl focus:outline-none focus:ring-2 focus:ring-[#3155ff] font-mono text-xs"
                 />
               </div>
             </div>
@@ -421,7 +421,7 @@ export default function AdminEditEventPage() {
                 required
                 value={formData.event_date}
                 onChange={(e) => setFormData({ ...formData, event_date: e.target.value })}
-                className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500"
+                className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#3155ff]"
               />
             </div>
 
@@ -434,7 +434,7 @@ export default function AdminEditEventPage() {
                 required
                 value={formData.start_time}
                 onChange={(e) => setFormData({ ...formData, start_time: e.target.value })}
-                className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500"
+                className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#3155ff]"
               />
             </div>
 
@@ -446,7 +446,7 @@ export default function AdminEditEventPage() {
                 rows={4}
                 value={formData.description}
                 onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500"
+                className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#3155ff]"
               />
             </div>
 
@@ -471,7 +471,7 @@ export default function AdminEditEventPage() {
                 type="datetime-local"
                 value={formData.registration_open_at}
                 onChange={(e) => setFormData({ ...formData, registration_open_at: e.target.value })}
-                className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500"
+                className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#3155ff]"
               />
             </div>
 
@@ -483,7 +483,7 @@ export default function AdminEditEventPage() {
                 type="datetime-local"
                 value={formData.registration_close_at}
                 onChange={(e) => setFormData({ ...formData, registration_close_at: e.target.value })}
-                className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500"
+                className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#3155ff]"
               />
             </div>
           </div>

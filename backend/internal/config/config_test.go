@@ -18,7 +18,7 @@ func withEnv(t *testing.T, kv map[string]string) {
 func clearAll(t *testing.T) {
 	t.Helper()
 	for _, k := range []string{
-		"APP_ENV", "PORT", "LOG_LEVEL", "DATABASE_URL", "DATABASE_MAX_CONN", "JWT_SECRET",
+		"APP_ENV", "PORT", "LOG_LEVEL", "PROCESS_ROLE", "DATABASE_URL", "DATABASE_MAX_CONN", "JWT_SECRET",
 		"ACCESS_TOKEN_TTL", "REFRESH_TOKEN_TTL", "BCRYPT_COST",
 		"REDIS_ADDR", "REDIS_PASSWORD", "REDIS_DB", "CORS_ALLOWED_ORIGINS",
 		"OBJECT_STORAGE_PROVIDER", "R2_ENDPOINT", "R2_ACCESS_KEY_ID",
@@ -29,6 +29,35 @@ func clearAll(t *testing.T) {
 	} {
 		t.Setenv(k, "")
 		os.Unsetenv(k)
+	}
+}
+
+func TestLoadProcessRole(t *testing.T) {
+	for _, role := range []string{"", "all", "api", "worker", "invalid"} {
+		t.Run(role, func(t *testing.T) {
+			clearAll(t)
+			withEnv(t, map[string]string{
+				"DATABASE_URL": "postgres://user:pass@localhost:5432/unity",
+				"JWT_SECRET":   "development-secret", "PROCESS_ROLE": role,
+			})
+			cfg, err := Load()
+			if role == "invalid" {
+				if err == nil {
+					t.Fatal("accepted an invalid process role")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := role
+			if want == "" {
+				want = "all"
+			}
+			if cfg.ProcessRole != want {
+				t.Fatalf("role = %q, want %q", cfg.ProcessRole, want)
+			}
+		})
 	}
 }
 

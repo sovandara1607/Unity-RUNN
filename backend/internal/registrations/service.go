@@ -458,19 +458,29 @@ func (s *Service) VerifyPayment(ctx context.Context, callerID uuid.UUID, callerR
 	if err != nil {
 		return nil, err
 	}
-	if stored.ExpiresAt != nil && s.now().After(*stored.ExpiresAt) {
-		_ = s.expirePendingPayments(ctx)
-		return nil, ErrPaymentExpired
-	}
-	if stored.Provider != s.provider.Name() {
+	// Ask the provider before trusting the local expiry clock. A payment that settles
+	// close to its TTL must be confirmed, not cancelled -- Bakong has no refund path,
+	// so expiring a settled payment loses the runner's money. This is the same ordering
+	// the background reconciler already uses in reconcilePayment.
+	expired := stored.ExpiresAt != nil && s.now().After(*stored.ExpiresAt)
+	if stored.Provider != s.provider.Name() || stored.ProviderReference == "" {
+		if expired {
+			_ = s.expirePendingPayments(ctx)
+			return nil, ErrPaymentExpired
+		}
 		return nil, ErrPaymentUnavailable
 	}
 	providerPayment, err := s.provider.GetPaymentStatus(ctx, stored.ProviderReference)
 	if err != nil {
+		// A provider outage must never expire a registration; surface it as transient.
 		return nil, err
 	}
 	checkout.Status = string(providerPayment.Status)
 	if providerPayment.Status == payments.StatusPending {
+		if expired {
+			_ = s.expirePendingPayments(ctx)
+			return nil, ErrPaymentExpired
+		}
 		return &RegisterResult{Registration: *reg, Payment: checkout}, nil
 	}
 	if providerPayment.Status != payments.StatusSucceeded || providerPayment.Verification == nil {
@@ -511,10 +521,11 @@ func (s *Service) GetByID(ctx context.Context, callerID uuid.UUID, callerRole au
 }
 
 // ListForUser returns the caller's own registrations.
+//
+// Deliberately read-only: expiry is owned by the leased background reconciler, which
+// asks the payment provider before cancelling anything. Sweeping here meant that merely
+// opening the dashboard could cancel a registration that had just been paid.
 func (s *Service) ListForUser(ctx context.Context, userID uuid.UUID) ([]Registration, error) {
-	if err := s.expirePendingPayments(ctx); err != nil {
-		return nil, err
-	}
 	return s.repo.ListForUser(ctx, userID)
 }
 
@@ -584,10 +595,12 @@ func (s *Service) Cancel(ctx context.Context, callerID uuid.UUID, callerRole aut
 	return nil
 }
 
+// GetAvailability reports remaining places for a category.
+//
+// This backs a public, unauthenticated endpoint that every visitor on an event page polls,
+// so it must stay read-only. It previously ran the expiry sweep, letting an anonymous
+// request open a table-wide write transaction and cancel a just-settled registration.
 func (s *Service) GetAvailability(ctx context.Context, eventID, categoryID uuid.UUID) (*Availability, error) {
-	if err := s.expirePendingPayments(ctx); err != nil {
-		return nil, err
-	}
 	category, err := s.eventsRepo.GetCategoryByID(ctx, categoryID)
 	if err != nil {
 		return nil, err

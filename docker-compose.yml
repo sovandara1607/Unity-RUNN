@@ -71,7 +71,7 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  api:
+  api: &api-service
     build:
       context: ./backend
       dockerfile: Dockerfile
@@ -83,15 +83,18 @@ services:
     env_file:
       - path: .env
         required: false
-    environment:
+    environment: &api-environment
+      PROCESS_ROLE: api
+      PORT: "8080"
+      DATABASE_MAX_CONN: ${DATABASE_MAX_CONN:-8}
       DATABASE_URL: postgres://${POSTGRES_USER:-unity}:${POSTGRES_PASSWORD:-unity}@postgres:5432/${POSTGRES_DB:-unity_run_club}?sslmode=disable
       REDIS_ADDR: redis:6379
       REALTIME_INTERNAL_URL: http://realtime:8081
       UPLOAD_DIR: /app/uploads
       GOMEMLIMIT: ${API_GO_MEMORY_LIMIT:-192MiB}
       GOMAXPROCS: ${API_GO_MAX_PROCS:-1}
-    ports:
-      - "${PORT:-8080}:8080"
+    expose:
+      - "8080"
     depends_on:
       postgres:
         condition: service_healthy
@@ -99,12 +102,63 @@ services:
         condition: service_healthy
     volumes:
       - event_uploads:/app/uploads
+    stop_grace_period: 20s
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8080/health"]
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8080/ready"]
       interval: 30s
       timeout: 3s
       retries: 3
       start_period: 10s
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  api-replica:
+    <<: *api-service
+
+  # Exactly one worker: email sweeps are not safe to run concurrently.
+  worker:
+    <<: *api-service
+    environment:
+      <<: *api-environment
+      PROCESS_ROLE: worker
+      DATABASE_MAX_CONN: ${WORKER_DATABASE_MAX_CONN:-4}
+
+  api-gateway:
+    image: traefik:v3.7.12
+    restart: unless-stopped
+    init: true
+    mem_limit: ${GATEWAY_MEMORY_LIMIT:-128m}
+    cpus: ${GATEWAY_CPU_LIMIT:-0.25}
+    pids_limit: 100
+    command:
+      - --entrypoints.api.address=:8080
+      - --entrypoints.health.address=:9090
+      - --providers.file.filename=/etc/traefik/api.yml
+      - --ping=true
+      - --ping.entrypoint=health
+      - --accesslog=true
+      - --accesslog.format=json
+      - --log.format=json
+    configs:
+      - source: api-load-balancer
+        target: /etc/traefik/api.yml
+    ports:
+      - "${PORT:-8080}:8080"
+    # Start even if a replica is unhealthy; the gateway checks /ready itself.
+    depends_on:
+      api:
+        condition: service_started
+      api-replica:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:9090/ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    stop_grace_period: 20s
     logging:
       driver: local
       options:
@@ -149,3 +203,7 @@ volumes:
   postgres_data:
   redis_data:
   event_uploads:
+
+configs:
+  api-load-balancer:
+    file: ./deploy/traefik/api.yml

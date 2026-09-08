@@ -135,6 +135,38 @@ jobs:
       - name: Syntax check
         run: npm run check
 
+  load-balancing:
+    name: API load balancing and failover
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.x"
+          cache-dependency-path: backend/go.sum
+
+      - name: Install isolated test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql redis-server
+          echo "$(pg_config --bindir)" >> "$GITHUB_PATH"
+          mkdir -p "$RUNNER_TEMP/traefik"
+          curl -fsSL --retry 3 https://github.com/traefik/traefik/releases/download/v3.7.12/traefik_v3.7.12_linux_amd64.tar.gz -o "$RUNNER_TEMP/traefik.tar.gz"
+          tar -xzf "$RUNNER_TEMP/traefik.tar.gz" -C "$RUNNER_TEMP/traefik" traefik
+          echo "$RUNNER_TEMP/traefik" >> "$GITHUB_PATH"
+
+      - name: Verify distribution, sessions, worker isolation, and failover
+        run: python3 deploy/test_load_balancing.py
+
+      - name: Upload diagnostic logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: load-balancing-logs
+          path: tmp/load-balancing-*/*.log
+
   compose-config:
     name: Docker Compose config
     runs-on: ubuntu-latest

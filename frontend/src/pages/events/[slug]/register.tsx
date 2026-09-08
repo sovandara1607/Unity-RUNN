@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import {
@@ -19,26 +19,16 @@ import { AlertBanner } from "../../../components/alerts/AlertSystem";
 import { useSiteConfig } from "../../../components/site/SiteConfigProvider";
 import { api } from "../../../lib/api";
 import { withMinSkeleton } from "../../../lib/withMinSkeleton";
-import type { EventCategory, EventDetail, MeResponse, PaymentCheckout } from "../../../types";
+import type { EventCategory, EventDetail, MeResponse, PaymentCheckout, Registration } from "../../../types";
 import { formatMoney } from "../../../lib/money";
 import { eventMapURL } from "../../../lib/eventLocation";
 import { EntryAvailability } from "../../../components/EntryAvailability";
 import { useCategoryAvailability } from "../../../lib/useCategoryAvailability";
 import { formatRegistrationDeadline, registrationDeadlineClosed } from "../../../lib/registrationDeadline";
+import { formatEventDate, formatEventTime } from "../../../lib/eventFormat";
+import { Button } from "../../../components/primitives/Button";
 
 const fieldClass = "mt-2 w-full rounded-xl border border-black/15 bg-white px-4 py-3.5 text-[15px] font-medium text-[#111] outline-none transition placeholder:text-black/30 hover:border-black/30 focus:border-black focus:ring-4 focus:ring-black/5";
-
-function formatDate(value?: string | null) {
-  if (!value) return "Date to be confirmed";
-  return new Intl.DateTimeFormat(undefined, {
-    weekday: "long", day: "numeric", month: "long", year: "numeric",
-  }).format(new Date(value));
-}
-
-function formatTime(value?: string | null) {
-  if (!value) return "Time to be confirmed";
-  return value.includes("T") ? value.slice(11, 16) : value.slice(0, 5);
-}
 
 export default function EventRegisterPage() {
   const { config } = useSiteConfig();
@@ -49,6 +39,9 @@ export default function EventRegisterPage() {
   const [event, setEvent] = useState<EventDetail | null>(null);
   const [user, setUser] = useState<MeResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [redirecting, setRedirecting] = useState(false);
+  const [existingEntry, setExistingEntry] = useState<Registration | null>(null);
+  const errorRef = useRef<HTMLDivElement | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [registering, setRegistering] = useState(false);
   const [regError, setRegError] = useState<string | null>(null);
@@ -78,6 +71,7 @@ export default function EventRegisterPage() {
         if (!me) {
           const category = searchParams?.get("category");
           const returnPath = `/events/${slug}/register${category ? `?category=${encodeURIComponent(category)}` : ""}`;
+          setRedirecting(true);
           router.replace(`/auth/login?redirect=${encodeURIComponent(returnPath)}`);
           return;
         }
@@ -100,6 +94,15 @@ export default function EventRegisterPage() {
         if (preselected && detail.categories?.some((category) => category.id === preselected && category.status === "OPEN" && !registrationDeadlineClosed(category.registration_deadline))) {
           setSelectedCategory(preselected);
         }
+
+        // Surface an entry the runner already holds before they fill the form. The API
+        // rejects a duplicate with a 409, but only after every field has been completed.
+        // Opportunistic: the entry form is still usable without this, so a failure here must
+        // not bounce the runner to the login page mid-load.
+        const mine = await api.listMyRegistrations({ suppressAuthRedirect: true }).catch(() => null);
+        const active = mine?.find((registration) => registration.event_id === detail.id
+          && (registration.status === "PENDING" || registration.status === "CONFIRMED"));
+        if (active) setExistingEntry(active);
       } catch (caught: unknown) {
         setError(caught instanceof Error ? caught.message : "Failed to load event");
       } finally {
@@ -123,7 +126,10 @@ export default function EventRegisterPage() {
 
   useEffect(() => {
     const selected = openCategories.find((item) => item.id === selectedCategory);
-    if (selectedCategory && (!selected || registrationDeadlineClosed(selected.registration_deadline) || availability[selectedCategory]?.available === 0)) setSelectedCategory("");
+    if (selectedCategory && (!selected || registrationDeadlineClosed(selected.registration_deadline) || availability[selectedCategory]?.available === 0)) {
+      setSelectedCategory("");
+      setRegError(`${selected?.name || "That entry"} just filled up while you were entering your details. Choose another distance to continue.`);
+    }
   }, [availability, openCategories, selectedCategory]);
 
   const handleInputChange = (field: keyof typeof formData, value: string) => {
@@ -152,14 +158,24 @@ export default function EventRegisterPage() {
     return null;
   };
 
+  const failWith = (message: string) => {
+    setRegError(message);
+    // Without this the runner presses a button and nothing visibly happens: on desktop the
+    // banner is in another column, on mobile it is far below the fold.
+    requestAnimationFrame(() => {
+      errorRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      errorRef.current?.focus();
+    });
+  };
+
   const handleRegister = async () => {
     if (!event || !selectedCategory) {
-      setRegError("Choose an entry category to continue.");
+      failWith("Choose an entry category to continue.");
       return;
     }
     const validationError = validateForm();
     if (validationError) {
-      setRegError(validationError);
+      failWith(validationError);
       return;
     }
 
@@ -179,27 +195,30 @@ export default function EventRegisterPage() {
       });
 		if (result.payment?.status === "PENDING") {
 			setPayment(result.payment);
-			if (typeof window !== "undefined") localStorage.setItem("unity_pending_payment", result.registration.id);
 			return;
 		}
 		router.push("/dashboard?registration=confirmed");
     } catch (caught: unknown) {
-      setRegError(caught instanceof Error ? caught.message : "Registration could not be completed.");
+      failWith(caught instanceof Error ? caught.message : "Registration could not be completed.");
       if (typeof caught === "object" && caught && "code" in caught && caught.code === "capacity_full") void refreshAvailability();
     } finally {
       setRegistering(false);
     }
   };
 
-  if (loading) return <RegisterSkeleton />;
+  if (loading || redirecting) return <RegisterSkeleton />;
+  if (event && existingEntry) return <AlreadyEntered event={event} entry={existingEntry} />;
   if (error || !event) return <RegisterUnavailable message={error} />;
 
   return (
     <div className="min-h-screen bg-[#efefe9] text-[#111]">
-		{payment && <BakongPayment checkout={payment} eventName={event.name} onPaid={() => {
-			if (typeof window !== "undefined") localStorage.removeItem("unity_pending_payment");
-			router.push("/dashboard?payment=confirmed");
-		}} onClose={() => setPayment(null)} />}
+		{payment && <BakongPayment
+			checkout={payment}
+			eventName={event.name}
+			restartHref={`/events/${event.slug}/register${selectedCategory ? `?category=${selectedCategory}` : ""}`}
+			onPaid={() => router.push("/dashboard?payment=confirmed")}
+			onClose={() => setPayment(null)}
+		/>}
       <div className="text-white" style={{ backgroundColor: config.background_color }}>
         <SportHeader active="events" accountHref="/dashboard" accountLabel="Account" />
         <section className="relative overflow-hidden border-b border-white/10">
@@ -215,15 +234,15 @@ export default function EventRegisterPage() {
                 <h1 className="sport-display mt-4 max-w-4xl text-[15vw] uppercase leading-[0.82] tracking-[-0.045em] sm:text-[88px] lg:text-[108px]">Claim your start line.</h1>
               </div>
               <div className="border-l border-white/20 pl-5">
-                <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-white/40">You’re entering</p>
+                <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-white/60">You’re entering</p>
                 <p className="mt-2 text-xl font-bold leading-tight text-white">{event.name}</p>
                 <p className="mt-3 text-xs leading-5 text-white/55">Confirm the entry, runner details, and safety contact below. Your QR ticket appears in your race wallet after registration.</p>
               </div>
             </div>
 
             <div className="mt-10 grid gap-4 border-t border-white/10 pt-6 text-sm sm:grid-cols-3">
-              <EventFact icon={<CalendarDays />} label="Race day" value={formatDate(event.event_date)} />
-              <EventFact icon={<Clock3 />} label="Start" value={formatTime(event.start_time)} />
+              <EventFact icon={<CalendarDays />} label="Race day" value={formatEventDate(event.event_date, "long", "Date to be confirmed")} />
+              <EventFact icon={<Clock3 />} label="Start" value={formatEventTime(event.start_time, "Time to be confirmed")} />
               <EventFact icon={<MapPin />} label="Meet" value={event.location || "Location to be confirmed"} href={event.location ? eventMapURL(event) : undefined} />
             </div>
           </div>
@@ -231,6 +250,7 @@ export default function EventRegisterPage() {
       </div>
 
       {!canRegister ? <RegistrationClosed event={event} /> : (
+        <>
         <main className="mx-auto grid max-w-[1320px] gap-10 px-5 py-10 sm:px-8 sm:py-16 lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start lg:gap-16">
           <form id="event-registration-form" onSubmit={(formEvent) => { formEvent.preventDefault(); handleRegister(); }} className="min-w-0">
             <fieldset className="border-b border-black/15 pb-12">
@@ -288,12 +308,38 @@ export default function EventRegisterPage() {
                 <Field label="Contact name" htmlFor="emergency-name" required><input id="emergency-name" autoComplete="off" required value={formData.emergency_contact_name} onChange={(e) => handleInputChange("emergency_contact_name", e.target.value)} placeholder="Emergency contact" className={fieldClass} /></Field>
                 <Field label="Contact phone" htmlFor="emergency-phone" required><input id="emergency-phone" type="tel" autoComplete="off" required value={formData.emergency_contact_phone} onChange={(e) => handleInputChange("emergency_contact_phone", e.target.value)} placeholder="+855 98 765 432" className={fieldClass} /></Field>
               </div>
-              {regError && <AlertBanner tone="error" title="Registration not completed" className="mt-7" onDismiss={() => setRegError(null)}>{regError}</AlertBanner>}
+
             </fieldset>
           </form>
 
-          <EntrySummary event={event} category={category} runnerName={formData.full_name} shirtSize={formData.tshirt_size} registering={registering} primary={acid} />
+          <div>
+            <div ref={errorRef} tabIndex={-1} className="scroll-mt-24 outline-none">
+              {regError && <AlertBanner tone="error" title="Registration not completed" className="mb-6" onDismiss={() => setRegError(null)}>{regError}</AlertBanner>}
+            </div>
+            <EntrySummary event={event} category={category} runnerName={formData.full_name} shirtSize={formData.tshirt_size} registering={registering} primary={acid} />
+          </div>
         </main>
+
+        {/* Mobile action bar. The aside is below the fold on a phone, so the price and the
+            submit control are pinned here instead. */}
+        <div className="sticky bottom-0 z-40 border-t border-black/15 bg-[#efefe9]/95 px-5 py-3 backdrop-blur lg:hidden" style={{ paddingBottom: "calc(0.75rem + env(safe-area-inset-bottom))" }}>
+          <div className="flex items-center gap-4">
+            <div className="min-w-0 flex-1">
+              <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-black/45">{category ? category.name : "No entry chosen"}</p>
+              <p className="truncate text-lg font-black leading-tight">{category ? formatMoney(category.price_cents, category.currency) : "—"}</p>
+            </div>
+            <button
+              type="submit"
+              form="event-registration-form"
+              disabled={registering || !category}
+              className="inline-flex shrink-0 items-center justify-center gap-2 rounded-full bg-black px-6 py-3.5 text-xs font-bold uppercase tracking-[0.12em] text-white transition disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {registering ? <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" /> : <Ticket className="h-4 w-4" />}
+              {registering ? "Claiming" : "Claim my place"}
+            </button>
+          </div>
+        </div>
+        </>
       )}
 
       <div className="text-white" style={{ backgroundColor: config.background_color }}><SportFooter /></div>
@@ -302,7 +348,7 @@ export default function EventRegisterPage() {
 }
 
 function EventFact({ icon, label, value, href }: { icon: React.ReactElement<{ className?: string }>; label: string; value: string; href?: string }) {
-  return <div className="flex items-start gap-3"><span className="mt-0.5 text-white/40">{React.cloneElement(icon, { className: "h-4 w-4" })}</span><div><p className="text-[10px] font-bold uppercase tracking-[0.16em] text-white/35">{label}</p>{href ? <a href={href} target="_blank" rel="noreferrer" className="mt-1 inline-flex items-center gap-1 text-xs font-semibold leading-5 text-white/75 underline decoration-white/25 underline-offset-4 hover:text-white">{value}<span aria-hidden>↗</span></a> : <p className="mt-1 text-xs font-semibold leading-5 text-white/75">{value}</p>}</div></div>;
+  return <div className="flex items-start gap-3"><span className="mt-0.5 text-white/60">{React.cloneElement(icon, { className: "h-4 w-4" })}</span><div><p className="text-[10px] font-bold uppercase tracking-[0.16em] text-white/55">{label}</p>{href ? <a href={href} target="_blank" rel="noreferrer" className="mt-1 inline-flex items-center gap-1 text-xs font-semibold leading-5 text-white/75 underline decoration-white/25 underline-offset-4 hover:text-white">{value}<span aria-hidden>↗</span></a> : <p className="mt-1 text-xs font-semibold leading-5 text-white/75">{value}</p>}</div></div>;
 }
 
 function StepHeading({ number, icon, title, description }: { number: string; icon: React.ReactNode; title: string; description: string }) {
@@ -311,6 +357,41 @@ function StepHeading({ number, icon, title, description }: { number: string; ico
 
 function Field({ label, htmlFor, required, hint, children }: { label: string; htmlFor: string; required?: boolean; hint?: string; children: React.ReactNode }) {
   return <div><div className="flex items-center justify-between gap-3"><label htmlFor={htmlFor} className="text-[11px] font-bold uppercase tracking-[0.12em] text-black/65">{label}{required && <span aria-hidden> *</span>}</label>{hint && <span className="text-[10px] font-medium text-black/35">{hint}</span>}</div>{children}</div>;
+}
+
+/**
+ * A runner who already holds a place for this event used to be handed the whole form and
+ * only rejected with a 409 after completing it, with no route to the entry they had.
+ */
+function AlreadyEntered({ event, entry }: { event: EventDetail; entry: Registration }) {
+  const { config } = useSiteConfig();
+  const pending = entry.status === "PENDING";
+  return (
+    <div className="min-h-screen text-white" style={{ backgroundColor: config.background_color }}>
+      <SportHeader active="events" accountHref="/dashboard" accountLabel="Account" />
+      <main className="mx-auto flex min-h-[58vh] max-w-[1200px] flex-col justify-center px-5 py-20 sm:px-8">
+        <p className="font-mono text-[10px] font-black uppercase tracking-[0.2em]" style={{ color: config.primary_color }}>
+          {pending ? "Payment outstanding" : "You are in"}
+        </p>
+        <h1 className="sport-display mt-4 text-5xl uppercase leading-[0.86] tracking-[-0.03em] sm:text-7xl">
+          {pending ? "Finish your entry." : "Already entered."}
+        </h1>
+        <p className="mt-5 max-w-lg text-sm font-medium leading-6 text-white/65">
+          {pending
+            ? `You have an unpaid place for ${event.name}. Complete the payment from your race wallet -- entering again would only create a duplicate.`
+            : `Your place for ${event.name} is confirmed. Your ticket and check-in QR are in your race wallet.`}
+        </p>
+        <p className="mt-4 font-mono text-xs font-bold text-white/50">{entry.registration_number || entry.id.slice(0, 8)}</p>
+        <div className="mt-9 flex flex-wrap items-center gap-3">
+          <Button href="/dashboard">{pending ? "Finish payment" : "View my ticket"}</Button>
+          <Link href={`/events/${event.slug}`} className="text-[11px] font-bold uppercase tracking-[0.12em] text-white/60 underline underline-offset-4 transition hover:text-white">
+            Back to the race
+          </Link>
+        </div>
+      </main>
+      <SportFooter />
+    </div>
+  );
 }
 
 function EntrySummary({ event, category, runnerName, shirtSize, registering, primary }: { event: EventDetail; category: EventCategory | null; runnerName: string; shirtSize: string; registering: boolean; primary: string }) {
@@ -328,7 +409,7 @@ function EntrySummary({ event, category, runnerName, shirtSize, registering, pri
           <dl className="mt-6 grid grid-cols-2 gap-4 border-t border-black/15 pt-5 text-xs"><div><dt className="font-bold uppercase tracking-[0.13em] text-black/40">Runner</dt><dd className="mt-1 truncate font-semibold">{runnerName || "Your name"}</dd></div><div><dt className="font-bold uppercase tracking-[0.13em] text-black/40">Shirt</dt><dd className="mt-1 font-semibold">{shirtSize}</dd></div></dl>
         </div>
         <div className="p-5">
-          <button type="submit" form="event-registration-form" disabled={registering || !category} className="flex w-full items-center justify-center gap-2 rounded-full bg-black px-5 py-4 text-xs font-bold uppercase tracking-[0.12em] text-white transition hover:bg-black/80 disabled:cursor-not-allowed disabled:opacity-40">{registering ? <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" /> : <Ticket className="h-4 w-4" />}{registering ? "Claiming your place" : "Claim my place"}</button>
+          <button type="submit" form="event-registration-form" disabled={registering || !category} className="hidden w-full items-center justify-center gap-2 rounded-full bg-black px-5 py-4 lg:flex text-xs font-bold uppercase tracking-[0.12em] text-white transition hover:bg-black/80 disabled:cursor-not-allowed disabled:opacity-40">{registering ? <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" /> : <Ticket className="h-4 w-4" />}{registering ? "Claiming your place" : "Claim my place"}</button>
           <p className="mt-4 flex items-start gap-2 text-[10px] font-medium leading-4 text-black/45"><ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0" />Your runner and safety details are shared only with the race operations team.</p>
         </div>
       </div>
@@ -349,5 +430,5 @@ function RegisterSkeleton() {
 
 function RegisterUnavailable({ message }: { message?: string | null }) {
   const { config } = useSiteConfig();
-  return <div className="flex min-h-screen flex-col text-white" style={{ backgroundColor: config.background_color }}><SportHeader active="events" /><main className="mx-auto flex w-full max-w-6xl flex-1 items-center px-5 sm:px-8"><div><p className="text-xs font-bold uppercase tracking-[0.18em] text-white/40">Registration unavailable</p><h1 className="sport-display mt-3 text-6xl uppercase tracking-[-0.045em]">This entry isn’t ready.</h1><p className="mt-4 max-w-md text-sm leading-6 text-white/55">{message || "The event could not be loaded. Return to the event list and choose another run."}</p><Link href="/events" className="mt-8 inline-flex items-center gap-2 text-sm font-semibold" style={{ color: config.primary_color }}><ArrowLeft className="h-4 w-4" /> Back to events</Link></div></main><SportFooter /></div>;
+  return <div className="flex min-h-screen flex-col text-white" style={{ backgroundColor: config.background_color }}><SportHeader active="events" /><main className="mx-auto flex w-full max-w-6xl flex-1 items-center px-5 sm:px-8"><div><p className="text-xs font-bold uppercase tracking-[0.18em] text-white/60">Registration unavailable</p><h1 className="sport-display mt-3 text-6xl uppercase tracking-[-0.045em]">This entry isn’t ready.</h1><p className="mt-4 max-w-md text-sm leading-6 text-white/55">{message || "The event could not be loaded. Return to the event list and choose another run."}</p><Link href="/events" className="mt-8 inline-flex items-center gap-2 text-sm font-semibold" style={{ color: config.primary_color }}><ArrowLeft className="h-4 w-4" /> Back to events</Link></div></main><SportFooter /></div>;
 }

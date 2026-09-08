@@ -1,0 +1,22 @@
+# One pool for all API routes, including uploads and OAuth callbacks.
+# Equal weights use Traefik's default weighted round-robin strategy.
+http:
+  routers:
+    api:
+      entryPoints: [api]
+      rule: PathPrefix(`/`)
+      service: api
+  services:
+    api:
+      loadBalancer:
+        healthCheck:
+          path: /ready
+          interval: 5s
+          timeout: 3s
+          status: 200
+          followRedirects: false
+        servers:
+          - url: http://api:8080
+          - url: http://api-replica:8080
+# Deliberately no retry middleware: failed payment/registration writes must
+# not be blindly replayed when a response is lost.

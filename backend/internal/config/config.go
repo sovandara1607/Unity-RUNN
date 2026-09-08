@@ -11,9 +11,10 @@ import (
 
 // Config holds all runtime configuration for the API process
 type Config struct {
-	AppEnv   string // "development", "staging", "production"
-	Port     string
-	LogLevel string // "debug", "info", "warn", "error"
+	AppEnv      string // "development", "staging", "production"
+	Port        string
+	LogLevel    string // "debug", "info", "warn", "error"
+	ProcessRole string // "all" (standalone), "api", or "worker"
 
 	DatabaseURL     string
 	DatabaseMaxConn int32
@@ -80,6 +81,7 @@ func Load() (*Config, error) {
 		AppEnv:                    getEnv("APP_ENV", "development"),
 		Port:                      getEnv("PORT", "8080"),
 		LogLevel:                  getEnv("LOG_LEVEL", "info"),
+		ProcessRole:               getEnv("PROCESS_ROLE", "all"),
 		DatabaseMaxConn:           10,
 		RedisDB:                   0,
 		AccessTokenTTL:            15 * time.Minute,
@@ -259,6 +261,9 @@ func Load() (*Config, error) {
 func validateRuntimeSecurity(cfg *Config) error {
 	if cfg.AppEnv != "development" && cfg.AppEnv != "staging" && cfg.AppEnv != "production" {
 		return fmt.Errorf("config: APP_ENV must be development, staging, or production")
+	}
+	if cfg.ProcessRole != "all" && cfg.ProcessRole != "api" && cfg.ProcessRole != "worker" {
+		return fmt.Errorf("config: PROCESS_ROLE must be all, api, or worker")
 	}
 	if cfg.DatabaseMaxConn < 1 {
 		return fmt.Errorf("config: DATABASE_MAX_CONN must be positive")

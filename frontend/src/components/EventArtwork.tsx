@@ -11,7 +11,7 @@ interface EventArtworkProps {
   variant?: "original" | "card" | "hero";
 }
 
-export function EventArtwork({ coverImage, eventName, imageClassName = "", accentColor = "#d9ff00", fit = "contain", variant = "hero" }: EventArtworkProps) {
+export function EventArtwork({ coverImage, eventName, imageClassName = "", accentColor = "var(--brand)", fit = "contain", variant = "hero" }: EventArtworkProps) {
   const [failed, setFailed] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const posterRef = useRef<HTMLImageElement>(null);
@@ -37,7 +37,7 @@ export function EventArtwork({ coverImage, eventName, imageClassName = "", accen
   };
 
   return (
-    <div className="relative h-full w-full overflow-hidden bg-[#202020]">
+    <div className="relative h-full w-full overflow-hidden bg-[var(--surface-overlay)]">
       {hasCover && !failed && !loaded && (
         <div className="topo-surface absolute inset-0 animate-pulse" aria-label={`${eventName} poster loading`}>
           <div className="absolute inset-0 bg-gradient-to-t from-black/45 to-transparent" />
@@ -48,9 +48,9 @@ export function EventArtwork({ coverImage, eventName, imageClassName = "", accen
         <div className="absolute -bottom-12 left-1/3 h-44 w-44 rounded-full border border-white/10" />
         <div className="absolute inset-0 flex items-center justify-center p-6 text-center">
           <div>
-            <ImageOff className="mx-auto h-6 w-6 text-white/25" />
+            <ImageOff className="mx-auto h-6 w-6 text-white/50" />
             <p className="mt-4 font-mono text-[8px] font-black uppercase tracking-[0.2em]" style={{ color: accentColor }}>Unity Runn Club</p>
-            <p className="sport-display mt-2 max-w-xs text-3xl uppercase leading-[0.9] tracking-[-0.03em] text-white/30">{failed ? "Poster unavailable" : "Poster coming soon"}</p>
+            <p className="sport-display mt-2 max-w-xs text-3xl uppercase leading-[0.9] tracking-[-0.03em] text-white/50">{failed ? "Poster unavailable" : "Poster coming soon"}</p>
           </div>
         </div>
       </div>}

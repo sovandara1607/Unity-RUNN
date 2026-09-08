@@ -373,15 +373,15 @@ export default function AdminNewEventPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="sm:col-span-2">
                 <label className="block text-xs font-semibold text-slate-700 mb-1">Event Name *</label>
-                <input type="text" required placeholder="e.g. Unity Phnom Penh Half Marathon 2026" value={formData.name} onChange={handleNameChange} className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500" />
+                <input type="text" required placeholder="e.g. Unity Phnom Penh Half Marathon 2026" value={formData.name} onChange={handleNameChange} className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#3155ff]" />
               </div>
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">Event Date *</label>
-                <input type="date" required value={formData.event_date} onChange={(e) => setFormData({ ...formData, event_date: e.target.value })} className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500" />
+                <input type="date" required value={formData.event_date} onChange={(e) => setFormData({ ...formData, event_date: e.target.value })} className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#3155ff]" />
               </div>
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">Start Time *</label>
-                <input type="time" required value={formData.start_time} onChange={(e) => setFormData({ ...formData, start_time: e.target.value })} className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500" />
+                <input type="time" required value={formData.start_time} onChange={(e) => setFormData({ ...formData, start_time: e.target.value })} className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#3155ff]" />
               </div>
               <div className="sm:col-span-2">
                 <EventLocationField
@@ -394,7 +394,7 @@ export default function AdminNewEventPage() {
               </div>
               <div className="sm:col-span-2">
                 <label className="block text-xs font-semibold text-slate-700 mb-1">Description</label>
-                <textarea rows={3} placeholder="Course, aid stations, what runners can expect…" value={formData.description} onChange={(e) => setFormData({ ...formData, description: e.target.value })} className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500" />
+                <textarea rows={3} placeholder="Course, aid stations, what runners can expect…" value={formData.description} onChange={(e) => setFormData({ ...formData, description: e.target.value })} className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#3155ff]" />
               </div>
               <div className="sm:col-span-2">
                 <EventPosterField
@@ -448,23 +448,23 @@ export default function AdminNewEventPage() {
               <form onSubmit={addCategory} className="grid grid-cols-2 sm:grid-cols-6 gap-3 items-end">
                 <div className="col-span-2 sm:col-span-1">
                   <label className="block text-[11px] font-semibold text-slate-600 mb-1">Name *</label>
-                  <input type="text" placeholder="Half Marathon" value={catForm.name} onChange={(e) => setCatForm({ ...catForm, name: e.target.value })} className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500" />
+                  <input type="text" placeholder="Half Marathon" value={catForm.name} onChange={(e) => setCatForm({ ...catForm, name: e.target.value })} className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#3155ff]" />
                 </div>
                 <div>
                   <label className="block text-[11px] font-semibold text-slate-600 mb-1">Distance *</label>
-                  <input type="text" placeholder="21.1K" value={catForm.distance} onChange={(e) => setCatForm({ ...catForm, distance: e.target.value })} className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500" />
+                  <input type="text" placeholder="21.1K" value={catForm.distance} onChange={(e) => setCatForm({ ...catForm, distance: e.target.value })} className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#3155ff]" />
                 </div>
                 <div>
                   <label className="block text-[11px] font-semibold text-slate-600 mb-1">Price</label>
-                  <input type="number" min="0" step={catForm.currency === "KHR" ? "1" : "0.01"} placeholder={catForm.currency === "KHR" ? "100000" : "25.00"} value={catForm.price} onChange={(e) => setCatForm({ ...catForm, price: e.target.value })} className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500" />
+                  <input type="number" min="0" step={catForm.currency === "KHR" ? "1" : "0.01"} placeholder={catForm.currency === "KHR" ? "100000" : "25.00"} value={catForm.price} onChange={(e) => setCatForm({ ...catForm, price: e.target.value })} className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#3155ff]" />
                 </div>
                 <div>
                   <label className="block text-[11px] font-semibold text-slate-600 mb-1">Currency</label>
-                  <select value={catForm.currency} onChange={(e) => setCatForm({ ...catForm, currency: e.target.value as SupportedCurrency })} className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-orange-500"><option value="USD">USD</option><option value="KHR">KHR</option></select>
+                  <select value={catForm.currency} onChange={(e) => setCatForm({ ...catForm, currency: e.target.value as SupportedCurrency })} className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-[#3155ff]"><option value="USD">USD</option><option value="KHR">KHR</option></select>
                 </div>
                 <div>
                   <label className="block text-[11px] font-semibold text-slate-600 mb-1">Capacity *</label>
-                  <input type="number" min="0" placeholder="500" value={catForm.capacity} onChange={(e) => setCatForm({ ...catForm, capacity: e.target.value })} className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500" />
+                  <input type="number" min="0" placeholder="500" value={catForm.capacity} onChange={(e) => setCatForm({ ...catForm, capacity: e.target.value })} className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#3155ff]" />
                 </div>
                 <button type="submit" disabled={loading} className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 bg-slate-900 hover:bg-slate-700 disabled:opacity-50 text-white text-xs font-semibold rounded-xl transition-colors">
                   <Plus className="w-4 h-4" /> Add
@@ -504,15 +504,15 @@ export default function AdminNewEventPage() {
               <form onSubmit={addScheduleItem} className="grid grid-cols-2 sm:grid-cols-6 gap-3 items-end">
                 <div>
                   <label className="block text-[11px] font-semibold text-slate-600 mb-1">Time *</label>
-                  <input type="time" value={schForm.time} onChange={(e) => setSchForm({ ...schForm, time: e.target.value })} className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500" />
+                  <input type="time" value={schForm.time} onChange={(e) => setSchForm({ ...schForm, time: e.target.value })} className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#3155ff]" />
                 </div>
                 <div className="col-span-2">
                   <label className="block text-[11px] font-semibold text-slate-600 mb-1">Title *</label>
-                  <input type="text" placeholder="Flag-off — Half Marathon" value={schForm.title} onChange={(e) => setSchForm({ ...schForm, title: e.target.value })} className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500" />
+                  <input type="text" placeholder="Flag-off — Half Marathon" value={schForm.title} onChange={(e) => setSchForm({ ...schForm, title: e.target.value })} className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#3155ff]" />
                 </div>
                 <div className="col-span-2">
                   <label className="block text-[11px] font-semibold text-slate-600 mb-1">Notes</label>
-                  <input type="text" placeholder="Assemble at Start Corral A" value={schForm.description} onChange={(e) => setSchForm({ ...schForm, description: e.target.value })} className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500" />
+                  <input type="text" placeholder="Assemble at Start Corral A" value={schForm.description} onChange={(e) => setSchForm({ ...schForm, description: e.target.value })} className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#3155ff]" />
                 </div>
                 <button type="submit" disabled={loading} className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 bg-slate-900 hover:bg-slate-700 disabled:opacity-50 text-white text-xs font-semibold rounded-xl transition-colors">
                   <Plus className="w-4 h-4" /> Add

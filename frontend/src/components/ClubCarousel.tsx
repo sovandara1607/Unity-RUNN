@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import Link from "next/link";
 import { ArrowLeft, ArrowRight, ArrowUpRight, Pause, Play } from "lucide-react";
 import { useSiteConfig } from "./site/SiteConfigProvider";
 import { resolveApiAssetUrl } from "../lib/api";
+import { Button } from "./primitives/Button";
 
 interface ClubCarouselProps {
   primaryHref: string;
@@ -13,6 +13,7 @@ export function ClubCarousel({ primaryHref, primaryLabel }: ClubCarouselProps) {
   const { config } = useSiteConfig();
   const slides = config.hero_slides;
   const [active, setActive] = useState(0);
+  const currentSlide = slides[active] ?? null;
   const [playing, setPlaying] = useState(true);
   const [interacting, setInteracting] = useState(false);
   const touchStart = useRef<number | null>(null);
@@ -26,21 +27,24 @@ export function ClubCarousel({ primaryHref, primaryLabel }: ClubCarouselProps) {
   }, []);
 
   useEffect(() => {
-    if (!playing || interacting) return;
+    if (!playing || interacting || slides.length < 2) return;
     const timer = window.setInterval(() => setActive((current) => (current + 1) % slides.length), 6500);
     return () => window.clearInterval(timer);
   }, [playing, interacting, slides.length]);
 
   useEffect(() => {
-    setActive((current) => Math.min(current, slides.length - 1));
+    setActive((current) => Math.max(0, Math.min(current, slides.length - 1)));
   }, [slides.length]);
 
-  const move = (direction: number) => setActive((current) => (current + direction + slides.length) % slides.length);
+  const move = (direction: number) => {
+    if (slides.length < 2) return;
+    setActive((current) => (current + direction + slides.length) % slides.length);
+  };
 
   return (
     <section className="relative overflow-hidden border-b border-white/10" style={{ backgroundColor: config.background_color }} aria-roledescription="carousel" aria-label={`${config.club_name} hero`}>
       <div
-        className="group relative h-[calc(100svh-72px)] min-h-[590px] max-h-[760px] focus:outline-none focus-visible:ring-4 focus-visible:ring-inset focus-visible:ring-[#d9ff00]/70 sm:h-auto sm:min-h-[720px] sm:max-h-none lg:h-[calc(100svh-76px)] lg:min-h-[680px] lg:max-h-[920px]"
+        className="group relative h-[calc(100svh-72px)] min-h-[590px] max-h-[760px] focus:outline-none focus-visible:ring-4 focus-visible:ring-inset focus-visible:ring-[var(--brand)]/70 sm:h-auto sm:min-h-[720px] sm:max-h-none lg:h-[calc(100svh-76px)] lg:min-h-[680px] lg:max-h-[920px]"
         tabIndex={0}
         onKeyDown={(event) => { if (event.key === "ArrowLeft") move(-1); if (event.key === "ArrowRight") move(1); }}
         onMouseEnter={() => setInteracting(true)}
@@ -77,20 +81,22 @@ export function ClubCarousel({ primaryHref, primaryLabel }: ClubCarouselProps) {
           </div>
 
           <div className="mt-auto">
-            <div aria-live="polite" aria-atomic="true" className="mb-7 max-w-xl sm:mb-8">
-              <p className="font-mono text-[9px] font-black uppercase tracking-[0.18em]" style={{ color: config.primary_color }}>{slides[active].eyebrow}</p>
-              <p className="mt-2 text-sm font-bold uppercase tracking-[0.1em] text-white/85">{slides[active].title}</p>
-              <p className="mt-2 max-w-md text-xs font-medium leading-5 text-white/55 sm:text-sm sm:leading-6">{slides[active].copy}</p>
-            </div>
+            {currentSlide && (
+              <div aria-live="polite" aria-atomic="true" className="mb-7 max-w-xl sm:mb-8">
+                <p className="font-mono text-[9px] font-black uppercase tracking-[0.18em]" style={{ color: config.primary_color }}>{currentSlide.eyebrow}</p>
+                <p className="mt-2 text-sm font-bold uppercase tracking-[0.1em] text-white/85">{currentSlide.title}</p>
+                <p className="mt-2 max-w-md text-xs font-medium leading-5 text-white/55 sm:text-sm sm:leading-6">{currentSlide.copy}</p>
+              </div>
+            )}
 
             <h1 className="sport-display text-[22vw] uppercase leading-[0.72] tracking-[-0.045em] sm:text-[15vw] lg:text-[168px]" style={{ color: config.primary_color }}>{config.hero_title_primary}</h1>
             <h1 className="sport-display mt-1 text-[17vw] uppercase leading-[0.76] tracking-[-0.04em] text-white/15 [-webkit-text-stroke:1.5px_rgba(255,255,255,0.75)] sm:text-[11.5vw] lg:text-[130px]">{config.hero_title_secondary}</h1>
 
             <div className="pointer-events-auto mt-7 flex items-center gap-4">
-              <Link href={primaryHref} style={{ backgroundColor: config.primary_color }} className="inline-flex items-center gap-2 rounded-full px-5 py-3 text-sm font-black uppercase tracking-[0.06em] text-black transition hover:scale-[1.02] focus:outline-none focus-visible:ring-2 focus-visible:ring-white">
+              <Button href={primaryHref} size="lg" className="hover:scale-[1.02]">
                 {primaryLabel} <ArrowUpRight className="h-4 w-4" />
-              </Link>
-              <span className="hidden font-mono text-[8px] font-black uppercase tracking-[0.15em] text-white/40 sm:block">Swipe · Arrow keys</span>
+              </Button>
+              <span className="hidden font-mono text-[8px] font-black uppercase tracking-[0.15em] text-white/60 sm:block">Swipe · Arrow keys</span>
             </div>
           </div>
         </div>

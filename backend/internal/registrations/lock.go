@@ -42,12 +42,17 @@ func (l *Locker) TryLock(ctx context.Context, categoryID uuid.UUID) (*Lock, erro
 	return &Lock{locker: l, key: key, token: token}, nil
 }
 
+var releaseLock = redis.NewScript(`
+if redis.call("GET", KEYS[1]) == ARGV[1] then
+  return redis.call("DEL", KEYS[1])
+end
+return 0
+`)
+
 func (l *Lock) Release(ctx context.Context) {
-	// Best-effort: if this fails, the lock still expires via its TTL.
-	current, err := l.locker.rdb.Get(ctx, l.key).Result()
-	if err == nil && current == l.token {
-		l.locker.rdb.Del(ctx, l.key)
-	}
+	// Compare and delete atomically: an expired owner must never delete a
+	// replacement lock acquired by another API instance. TTL handles failures.
+	_ = releaseLock.Run(ctx, l.locker.rdb, []string{l.key}, l.token).Err()
 }
 
 func lockKey(categoryID uuid.UUID) string {

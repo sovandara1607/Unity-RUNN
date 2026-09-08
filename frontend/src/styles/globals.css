@@ -5,9 +5,56 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  --primary: #f97316;
-  --font-secondary: "TT Norms Pro", "TT Norms", "Helvetica Neue", Arial, sans-serif;
-  --font-mono: "TT Norms Pro", "TT Norms", "Helvetica Neue", Arial, sans-serif;
+  /* Surfaces.
+     The near-black scale was previously eight bare hex literals repeated across pages
+     (#101010 #111111 #151515 #17202c #1a1a1a #202020 #252525 #efefe9), which made it
+     impossible to tell an intentional step from a typo. Named by role, not by value.
+     --surface-base tracks the admin-configurable background_color; the rest are the
+     fixed structural steps above and below it. */
+  --surface-sunken: #101010;
+  --surface-base: #111111;
+  --surface-inset: #151515;
+  --surface-raised: #1a1a1a;
+  --surface-overlay: #202020;
+  --surface-muted: #252525;
+  --surface-tint: #17202c;
+  --surface-paper: #efefe9;
+
+  /* Focus.
+     currentColor is deliberate: it inherits the element's own text colour, which is always
+     chosen to contrast with whatever it sits on. That gives one visible ring on the
+     near-black public site and on the cream registration/admin surfaces without a
+     per-shell override. The previous default was `outline-ring/50` -- a mid-grey at half
+     opacity, effectively invisible on #111111. */
+  --focus-ring: currentColor;
+
+  /* Brand.
+     SiteConfigProvider overwrites these from the admin-published settings on mount; the
+     values here are the defaults in defaultSiteConfig, so the first paint is already
+     correct rather than transparent. --brand-ink is derived from the brand's luminance
+     so a dark brand colour does not produce black text on a dark button. */
+  --brand: #d9ff00;
+  --brand-ink: #111111;
+  --brand-accent: #3155ff;
+  --brand-bg: #111111;
+
+}
+
+/* The next/font faces are declared in pages/_app.tsx, which scopes --font-display and
+   --font-body to .app-root. These two must therefore be declared here rather than on
+   :root: a custom property referencing another custom property is substituted at its
+   DECLARATION site, not where it is used, so `--font-secondary: var(--font-body)` on
+   :root resolves against <html> -- where --font-body does not exist -- and computes to
+   nothing. The tails are fallbacks for the font-display: swap window.
+
+   --font-mono is deliberately the same face rather than a monospace: the shell rules
+   below pair `.font-mono` with `font-variant-numeric: tabular-nums slashed-zero`, which
+   is what actually aligns bib numbers and split times. The class name is a role here,
+   not a typeface. */
+.app-root {
+  --font-secondary: var(--font-body), "Helvetica Neue", Arial, sans-serif;
+  --font-mono: var(--font-body), "Helvetica Neue", Arial, sans-serif;
+  font-family: var(--font-secondary);
 }
 
 .admin-shell,
@@ -130,8 +177,9 @@
 }
 
 .sport-display {
-  font-family: Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif;
-  font-stretch: condensed;
+  /* Anton is condensed by design and has no width axis, so the old `font-stretch: condensed`
+     is dropped rather than left to trigger synthetic narrowing. */
+  font-family: var(--font-display), Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif;
 }
 
 .admin-track-surface {
@@ -291,7 +339,14 @@
 
 @layer base {
   * {
-    @apply border-border outline-ring/50;
+    @apply border-border;
+  }
+  /* One focus treatment for the whole product. Most interactive elements -- including the
+     event card link, the /events filter tabs and search, and the category picker -- shipped
+     with no focus style at all, so keyboard users had no visible position. */
+  :focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
   }
   body {
     @apply bg-background text-foreground;

@@ -44,11 +44,11 @@ export function AboutCarousel({ slides, accent }: AboutCarouselProps) {
             <p className="font-mono text-[9px] font-black uppercase tracking-[0.18em]" style={{ color: accent }}>Club moments</p>
             <h2 className="sport-display mt-2 text-3xl uppercase leading-none tracking-[-0.03em] sm:text-4xl">Out on the road.</h2>
           </div>
-          <span className="font-mono text-[9px] font-black tracking-[0.14em] text-white/35">{String(active + 1).padStart(2, "0")} / {String(slides.length).padStart(2, "0")}</span>
+          <span className="font-mono text-[9px] font-black tracking-[0.14em] text-white/55">{String(active + 1).padStart(2, "0")} / {String(slides.length).padStart(2, "0")}</span>
         </div>
 
         <div
-          className="group relative aspect-[4/5] overflow-hidden bg-[#202020] outline-none focus-visible:ring-2 sm:aspect-[16/9]"
+          className="group relative aspect-[4/5] overflow-hidden bg-[var(--surface-overlay)] outline-none focus-visible:ring-2 sm:aspect-[16/9]"
           style={{ '--tw-ring-color': accent } as React.CSSProperties}
           tabIndex={0}
           onKeyDown={(event) => { if (event.key === "ArrowLeft") move(-1); if (event.key === "ArrowRight") move(1); }}

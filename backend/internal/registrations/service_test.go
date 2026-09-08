@@ -192,6 +192,26 @@ func (f *fakeRegRepo) SchedulePaymentReconciliation(ctx context.Context, payment
 	return nil
 }
 
+// ExpirePendingPayments makes fakeRegRepo satisfy expiringPaymentRepository, so tests
+// that assert a code path does NOT expire anything are meaningful rather than vacuous.
+func (f *fakeRegRepo) ExpirePendingPayments(ctx context.Context, now time.Time) ([]uuid.UUID, error) {
+	var categories []uuid.UUID
+	for i := range f.payments {
+		p := &f.payments[i]
+		if p.ExpiresAt == nil || !now.After(*p.ExpiresAt) {
+			continue
+		}
+		reg, ok := f.regs[p.RegistrationID]
+		if !ok || reg.Status != StatusPending {
+			continue
+		}
+		reg.Status = StatusCancelled
+		p.Status = string(payments.StatusFailed)
+		categories = append(categories, reg.EventCategoryID)
+	}
+	return categories, nil
+}
+
 func (f *fakeRegRepo) ExpireClaimedPayment(ctx context.Context, registrationID, paymentID uuid.UUID, workerID string) (uuid.UUID, bool, error) {
 	reg, ok := f.regs[registrationID]
 	if !ok {
@@ -695,5 +715,98 @@ func TestService_Cancel_NotifiesCancellation(t *testing.T) {
 
 	if len(notifier.cancelled) != 1 {
 		t.Errorf("cancelled notifications = %d, want 1", len(notifier.cancelled))
+	}
+}
+
+// --- Payment expiry ordering ------------------------------------------------
+//
+// Bakong exposes no refund path (payments.Bakong.RefundPayment returns ErrUnsupported),
+// so cancelling a registration whose payment actually settled loses the runner's money.
+// VerifyPayment must therefore always ask the provider before trusting the local clock.
+
+// newExpiredPendingPayment registers a paid entry and backdates its checkout TTL.
+func newExpiredPendingPayment(t *testing.T, provider *fakePaymentProvider) (*Service, *fakeRegRepo, *fakeEventsReader, uuid.UUID, *RegisterResult) {
+	t.Helper()
+	svc, repo, er := newTestSetup(provider)
+	eventID, categoryID := seedEventAndCategory(er, 2500, 10)
+	userID := uuid.New()
+	result, err := svc.Register(context.Background(), userID, eventID, validRegisterReq(categoryID))
+	if err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
+	expired := time.Now().Add(-time.Minute)
+	repo.payments[0].ExpiresAt = &expired
+	return svc, repo, er, userID, result
+}
+
+func TestService_VerifyPayment_ConfirmsPaymentSettledAfterExpiry(t *testing.T) {
+	provider := &fakePaymentProvider{status: payments.StatusPending}
+	svc, repo, _, userID, result := newExpiredPendingPayment(t, provider)
+
+	// The runner paid just before the TTL; Bakong reports it settled just after.
+	provider.status = payments.StatusSucceeded
+	provider.verification = &payments.Verification{AmountCents: 2500, Currency: "USD", ReceiverAccount: "test"}
+
+	verified, err := svc.VerifyPayment(context.Background(), userID, auth.RoleUser, result.Registration.ID)
+	if err != nil {
+		t.Fatalf("VerifyPayment() error = %v, want nil (a settled payment must win over the local TTL)", err)
+	}
+	if verified.Registration.Status != StatusConfirmed {
+		t.Fatalf("returned status = %q, want CONFIRMED", verified.Registration.Status)
+	}
+	if repo.regs[result.Registration.ID].Status != StatusConfirmed {
+		t.Fatalf("stored status = %q, want CONFIRMED", repo.regs[result.Registration.ID].Status)
+	}
+}
+
+func TestService_VerifyPayment_ExpiresOnlyWhenProviderStillPending(t *testing.T) {
+	provider := &fakePaymentProvider{status: payments.StatusPending}
+	svc, repo, _, userID, result := newExpiredPendingPayment(t, provider)
+
+	_, err := svc.VerifyPayment(context.Background(), userID, auth.RoleUser, result.Registration.ID)
+	if !errors.Is(err, ErrPaymentExpired) {
+		t.Fatalf("VerifyPayment() error = %v, want ErrPaymentExpired", err)
+	}
+	if repo.regs[result.Registration.ID].Status != StatusCancelled {
+		t.Fatalf("stored status = %q, want CANCELLED", repo.regs[result.Registration.ID].Status)
+	}
+}
+
+func TestService_VerifyPayment_ProviderOutageDoesNotExpire(t *testing.T) {
+	provider := &fakePaymentProvider{status: payments.StatusPending}
+	svc, repo, _, userID, result := newExpiredPendingPayment(t, provider)
+
+	// We cannot tell a settled payment from an unsettled one, so we must not cancel.
+	provider.err = errors.New("bakong unreachable")
+
+	if _, err := svc.VerifyPayment(context.Background(), userID, auth.RoleUser, result.Registration.ID); err == nil {
+		t.Fatal("VerifyPayment() error = nil, want the transient provider error")
+	}
+	if repo.regs[result.Registration.ID].Status != StatusPending {
+		t.Fatalf("stored status = %q, want PENDING (a provider outage must never cancel)", repo.regs[result.Registration.ID].Status)
+	}
+}
+
+// --- Read paths must not mutate --------------------------------------------
+
+func TestService_ReadPathsDoNotExpirePendingPayments(t *testing.T) {
+	provider := &fakePaymentProvider{status: payments.StatusPending}
+	svc, repo, er, userID, result := newExpiredPendingPayment(t, provider)
+	eventID := repo.regs[result.Registration.ID].EventID
+	categoryID := repo.regs[result.Registration.ID].EventCategoryID
+	_ = er
+
+	if _, err := svc.ListForUser(context.Background(), userID); err != nil {
+		t.Fatalf("ListForUser() error = %v", err)
+	}
+	if got := repo.regs[result.Registration.ID].Status; got != StatusPending {
+		t.Fatalf("after ListForUser status = %q, want PENDING (the dashboard must not cancel)", got)
+	}
+
+	if _, err := svc.GetAvailability(context.Background(), eventID, categoryID); err != nil {
+		t.Fatalf("GetAvailability() error = %v", err)
+	}
+	if got := repo.regs[result.Registration.ID].Status; got != StatusPending {
+		t.Fatalf("after GetAvailability status = %q, want PENDING (a public endpoint must not cancel)", got)
 	}
 }

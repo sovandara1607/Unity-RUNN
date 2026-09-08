@@ -29,7 +29,7 @@ export default function RegisterPage() {
       if (!name.trim() || !email.trim() || !password) throw new Error("Complete all three account fields.");
       if (password.length < 8) throw new Error("Use at least 8 characters for your password.");
       await api.register({ full_name: name.trim(), email: email.trim(), password });
-      await router.push("/dashboard");
+      await router.push(safeRedirect || "/dashboard");
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "This account could not be created. Check the email and try again.");
     } finally {
@@ -37,16 +37,26 @@ export default function RegisterPage() {
     }
   };
 
+  // Same same-origin guard the login page applies to ?redirect.
+  const requested = typeof router.query.redirect === "string" ? router.query.redirect : "";
+  const safeRedirect = requested.startsWith("/") && !requested.startsWith("//") ? requested : "";
+  const enteringRace = safeRedirect.includes("/register");
+
   const fieldClass = "mt-2 h-12 w-full border border-black/20 bg-white px-3.5 text-sm font-semibold text-[#111] outline-none transition placeholder:text-black/25 hover:border-black/35 focus:border-[#3155ff] focus:ring-2 focus:ring-[#3155ff]/10";
   return (
     <AuthFrame
       mode="register"
       title="Join."
     >
+      {enteringRace && (
+        <p className="mb-6 border-l-[3px] border-[#3155ff] bg-[#3155ff]/[0.06] px-4 py-3 text-sm font-semibold leading-5 text-[#111]">
+          Create your account and we will take you straight back to your race entry.
+        </p>
+      )}
       {error && <AlertBanner tone="error" title="Account not created" className="mb-6" onDismiss={() => setError(null)}>{error}</AlertBanner>}
 
       {googleEnabled && (
-        <a href={api.googleOAuthURL("/dashboard")} className="flex h-12 w-full items-center justify-center gap-3 border border-black/20 bg-white px-4 text-sm font-bold text-[#111] transition hover:border-black/45 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#3155ff]">
+        <a href={api.googleOAuthURL(safeRedirect || "/dashboard")} className="flex h-12 w-full items-center justify-center gap-3 border border-black/20 bg-white px-4 text-sm font-bold text-[#111] transition hover:border-black/45 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#3155ff]">
           <GoogleMark />
           Google
         </a>

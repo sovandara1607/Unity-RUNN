@@ -20,7 +20,7 @@ export function EntryAvailability({ availability, appearance = "dark", registrat
     : state.full ? "text-rose-700" : state.urgent ? "text-amber-700" : "text-emerald-700";
   const dot = state.full ? "bg-rose-400" : state.urgent ? "bg-amber-400" : "bg-emerald-400";
   return (
-    <span className={`inline-flex items-center gap-1.5 text-[9px] font-black uppercase tracking-[0.12em] ${availability ? foreground : appearance === "dark" ? "text-white/35" : "text-black/35"}`}>
+    <span className={`inline-flex items-center gap-1.5 text-[9px] font-black uppercase tracking-[0.12em] ${availability ? foreground : appearance === "dark" ? "text-white/55" : "text-black/35"}`}>
       <span className={`h-1.5 w-1.5 rounded-full ${availability ? dot : appearance === "dark" ? "animate-pulse bg-white/30" : "animate-pulse bg-black/25"}`} aria-hidden />
       {state.label}
     </span>

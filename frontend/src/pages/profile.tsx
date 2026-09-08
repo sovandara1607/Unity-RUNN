@@ -297,7 +297,7 @@ export default function ProfilePage() {
             <div className="rounded-[20px] border border-white/10 bg-white/[0.045] p-5">
               <p className="flex items-center gap-2 text-[9px] font-black uppercase tracking-[0.15em] text-white/45"><LockKeyhole className="h-3.5 w-3.5" /> Account email</p>
               <p className="mt-2 break-all text-sm font-bold text-white/85">{user?.email}</p>
-              <p className="mt-2 text-[11px] font-semibold leading-5 text-white/35">Your sign-in email stays separate from the contact details printed on entries.</p>
+              <p className="mt-2 text-[11px] font-semibold leading-5 text-white/55">Your sign-in email stays separate from the contact details printed on entries.</p>
             </div>
           </aside>
 
@@ -338,9 +338,9 @@ export default function ProfilePage() {
               <div className="relative border-b border-white/10 p-5 sm:p-7">
                 <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
                   <div className="flex items-start gap-3">
-                    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[#d9ff00] text-black"><Radio className="h-4 w-4" /></span>
+                    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[var(--brand)] text-black"><Radio className="h-4 w-4" /></span>
                     <div>
-                      <p className="font-mono text-[9px] font-black uppercase tracking-[0.17em] text-[#d9ff00]">04 · Race signal</p>
+                      <p className="font-mono text-[9px] font-black uppercase tracking-[0.17em] text-[var(--brand)]">04 · Race signal</p>
                       <h2 id="delivery-automations-title" className="mt-1 text-xl font-black tracking-[-0.025em]">Delivery automations</h2>
                       <p className="mt-1 max-w-lg text-xs font-semibold leading-5 text-white/45">Connect once. Race control sends the useful things at the useful moment—without replacing email.</p>
                     </div>
@@ -361,7 +361,7 @@ export default function ProfilePage() {
                   const enabled = telegram?.preferences?.[key] ?? true;
                   return <div key={label} className="bg-[#0d0d0d] p-4 sm:p-5">
                     <div className="flex items-start justify-between gap-3">
-                      <Icon className={`h-4 w-4 ${enabled ? "text-[#d9ff00]" : "text-white/20"}`} />
+                      <Icon className={`h-4 w-4 ${enabled ? "text-[var(--brand)]" : "text-white/20"}`} />
                       <button
                         type="button"
                         role="switch"
@@ -369,13 +369,13 @@ export default function ProfilePage() {
                         aria-label={`${enabled ? "Disable" : "Enable"} ${label}`}
                         disabled={!telegram?.connected || telegramPreferenceBusy !== null}
                         onClick={() => updateTelegramPreference(key)}
-                        className={`relative h-6 w-10 rounded-full border transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d9ff00] focus-visible:ring-offset-2 focus-visible:ring-offset-[#0d0d0d] disabled:cursor-not-allowed ${enabled ? "border-[#d9ff00]/40 bg-[#d9ff00]" : "border-white/15 bg-white/5"}`}
+                        className={`relative h-6 w-10 rounded-full border transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)] focus-visible:ring-offset-2 focus-visible:ring-offset-[#0d0d0d] disabled:cursor-not-allowed ${enabled ? "border-[var(--brand)]/40 bg-[var(--brand)]" : "border-white/15 bg-white/5"}`}
                       >
                         <span className={`absolute top-0.5 h-4.5 w-4.5 rounded-full transition-transform ${enabled ? "translate-x-[17px] bg-black" : "translate-x-0.5 bg-white/35"}`} />
                       </button>
                     </div>
-                    <p className={`mt-4 text-[10px] font-black uppercase tracking-[0.1em] ${enabled ? "text-white" : "text-white/35"}`}>{label}</p>
-                    <p className="mt-1 text-[10px] font-semibold text-white/35">{telegram?.connected ? (enabled ? moment : "Paused on Telegram") : moment}</p>
+                    <p className={`mt-4 text-[10px] font-black uppercase tracking-[0.1em] ${enabled ? "text-white" : "text-white/55"}`}>{label}</p>
+                    <p className="mt-1 text-[10px] font-semibold text-white/55">{telegram?.connected ? (enabled ? moment : "Paused on Telegram") : moment}</p>
                   </div>
                 })}
               </div>
@@ -386,7 +386,7 @@ export default function ProfilePage() {
                     <Send className="h-4 w-4 text-sky-400" />
                     {telegram?.connected ? `Connected${telegram.account?.username ? ` as @${telegram.account.username}` : telegram.account?.first_name ? ` as ${telegram.account.first_name}` : ""}` : "Telegram delivery"}
                   </p>
-                  <p className="mt-1 text-[11px] font-semibold leading-5 text-white/35">
+                  <p className="mt-1 text-[11px] font-semibold leading-5 text-white/55">
                     {!telegram?.available
                       ? "Add the Telegram bot credentials on the server to activate this channel."
                       : telegram?.connected
@@ -417,15 +417,15 @@ export default function ProfilePage() {
                 <div className="relative border-t border-white/10 px-5 py-6 sm:px-7">
                   <div className="flex items-end justify-between gap-4">
                     <div>
-                      <p className="font-mono text-[9px] font-black uppercase tracking-[0.17em] text-white/35">Signal trace</p>
+                      <p className="font-mono text-[9px] font-black uppercase tracking-[0.17em] text-white/55">Signal trace</p>
                       <h3 className="mt-1 text-sm font-black">Recent signals</h3>
                     </div>
-                    <span className="text-[9px] font-black uppercase tracking-[0.12em] text-white/25">Latest {Math.min(telegramDeliveries.length, 8)}</span>
+                    <span className="text-[9px] font-black uppercase tracking-[0.12em] text-white/50">Latest {Math.min(telegramDeliveries.length, 8)}</span>
                   </div>
                   {telegramDeliveries.length === 0 ? (
                     <div className="mt-5 border-l border-dashed border-white/15 py-1 pl-5">
                       <p className="text-xs font-bold text-white/55">No race signals sent yet.</p>
-                      <p className="mt-1 text-[10px] font-semibold leading-4 text-white/30">Your next ticket or event update will leave a delivery mark here.</p>
+                      <p className="mt-1 text-[10px] font-semibold leading-4 text-white/50">Your next ticket or event update will leave a delivery mark here.</p>
                     </div>
                   ) : (
                     <ol className="relative mt-5 space-y-0 border-l border-white/10">
@@ -434,12 +434,12 @@ export default function ProfilePage() {
                         const failed = delivery.status === "FAILED";
                         const timestamp = delivery.sent_at || delivery.updated_at || delivery.created_at;
                         return <li key={delivery.id} className="relative grid grid-cols-[minmax(0,1fr)_auto] gap-4 border-b border-white/[0.07] py-3 pl-5 last:border-b-0">
-                          <span className={`absolute -left-[5px] top-[18px] h-2.5 w-2.5 rounded-full border-2 border-[#0d0d0d] ${sent ? "bg-emerald-400" : failed ? "bg-rose-400" : "animate-pulse bg-[#d9ff00] motion-reduce:animate-none"}`} />
+                          <span className={`absolute -left-[5px] top-[18px] h-2.5 w-2.5 rounded-full border-2 border-[#0d0d0d] ${sent ? "bg-emerald-400" : failed ? "bg-rose-400" : "animate-pulse bg-[var(--brand)] motion-reduce:animate-none"}`} />
                           <div className="min-w-0">
                             <p className="truncate text-[10px] font-black uppercase tracking-[0.1em] text-white/80">{telegramDeliveryLabels[delivery.type]}</p>
-                            <p className="mt-1 text-[9px] font-semibold text-white/30">{new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(timestamp))}</p>
+                            <p className="mt-1 text-[9px] font-semibold text-white/50">{new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(timestamp))}</p>
                           </div>
-                          <span className={`inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-[8px] font-black uppercase tracking-[0.1em] ${sent ? "border-emerald-400/20 bg-emerald-400/10 text-emerald-300" : failed ? "border-rose-400/20 bg-rose-400/10 text-rose-300" : "border-[#d9ff00]/20 bg-[#d9ff00]/10 text-[#d9ff00]"}`}>
+                          <span className={`inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-[8px] font-black uppercase tracking-[0.1em] ${sent ? "border-emerald-400/20 bg-emerald-400/10 text-emerald-300" : failed ? "border-rose-400/20 bg-rose-400/10 text-rose-300" : "border-[var(--brand)]/20 bg-[var(--brand)]/10 text-[var(--brand)]"}`}>
                             {sent ? <Check className="h-3 w-3" /> : failed ? <AlertTriangle className="h-3 w-3" /> : <Clock3 className="h-3 w-3" />}
                             {sent ? "Delivered" : failed ? "Not delivered" : "Sending"}
                           </span>

@@ -1,3 +1,5 @@
+import { formatEventDateTime } from "./eventFormat";
+
 export function registrationDeadlineClosed(value?: string | null, now: Date = new Date()) {
   if (!value) return false;
   const deadline = new Date(value);
@@ -5,15 +7,9 @@ export function registrationDeadlineClosed(value?: string | null, now: Date = ne
 }
 
 export function formatRegistrationDeadline(value?: string | null) {
-  if (!value) return "No category cutoff";
-  const deadline = new Date(value);
-  if (!Number.isFinite(deadline.getTime())) return "No category cutoff";
-  return new Intl.DateTimeFormat(undefined, {
-    day: "numeric",
-    month: "short",
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(deadline);
+  // A deadline is a real instant, so it is rendered in the viewer's own zone --
+  // unlike event_date, which is a calendar date. See lib/eventFormat.ts.
+  return formatEventDateTime(value, "No category cutoff");
 }
 
 export function toLocalDateTimeInput(value?: string | null) {

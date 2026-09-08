@@ -8,11 +8,11 @@ import { AlertBanner } from "../../components/alerts/AlertSystem";
 import { Skeleton } from "../../components/Skeleton";
 import { withMinSkeleton } from "../../lib/withMinSkeleton";
 import { api } from "../../lib/api";
+import { formatEventDate, formatEventDateParts } from "../../lib/eventFormat";
 import type { AdminMetrics, Event, Registration } from "../../types";
 
 function formatDate(value?: string | null) {
-  if (!value) return "Date pending";
-  return new Intl.DateTimeFormat(undefined, { day: "2-digit", month: "short", year: "numeric" }).format(new Date(value));
+  return formatEventDate(value, "short", "Date pending");
 }
 
 export default function AdminDashboardPage() {
@@ -76,7 +76,7 @@ export default function AdminDashboardPage() {
 
       <section className="mt-6 grid gap-6 xl:grid-cols-[1.05fr_.95fr]">
         <OperationsList title="Event board" eyebrow="Course schedule" href="/admin/events" linkLabel="Manage events">
-          {loading ? <ListSkeleton /> : events.length === 0 ? <Empty icon={<CalendarDays />} text="No events are on the calendar." /> : events.slice(0, 5).map((event) => <div key={event.id} className="grid grid-cols-[70px_minmax(0,1fr)_auto] items-center gap-4 border-t border-black/10 px-5 py-4 first:border-t-0 sm:px-6"><div className="font-mono"><p className="text-lg font-black leading-none">{event.event_date ? new Date(event.event_date).getDate().toString().padStart(2, "0") : "--"}</p><p className="mt-1 text-[8px] font-bold uppercase tracking-[0.15em] text-black/35">{event.event_date ? new Intl.DateTimeFormat(undefined, { month: "short" }).format(new Date(event.event_date)) : "TBD"}</p></div><div className="min-w-0"><p className="truncate text-xs font-black">{event.name}</p><p className="mt-1 truncate text-[10px] font-medium text-black/40">{event.location || "Location pending"}</p></div><EventStatusBadge status={event.status} /></div>)}
+          {loading ? <ListSkeleton /> : events.length === 0 ? <Empty icon={<CalendarDays />} text="No events are on the calendar." /> : events.slice(0, 5).map((event) => <div key={event.id} className="grid grid-cols-[70px_minmax(0,1fr)_auto] items-center gap-4 border-t border-black/10 px-5 py-4 first:border-t-0 sm:px-6"><div className="font-mono"><p className="text-lg font-black leading-none">{formatEventDateParts(event.event_date).day}</p><p className="mt-1 text-[8px] font-bold uppercase tracking-[0.15em] text-black/35">{formatEventDateParts(event.event_date).month}</p></div><div className="min-w-0"><p className="truncate text-xs font-black">{event.name}</p><p className="mt-1 truncate text-[10px] font-medium text-black/40">{event.location || "Location pending"}</p></div><EventStatusBadge status={event.status} /></div>)}
         </OperationsList>
         <OperationsList title="Runner feed" eyebrow="Latest entries" href="/admin/registrations" linkLabel="Open roster">
           {loading ? <ListSkeleton /> : recentRegistrations.length === 0 ? <Empty icon={<UsersRound />} text="New registrations will appear here." /> : recentRegistrations.slice(0, 5).map((reg) => <div key={reg.id} className="grid grid-cols-[38px_minmax(0,1fr)_auto] items-center gap-3 border-t border-black/10 px-5 py-4 first:border-t-0 sm:px-6"><span className="grid h-9 w-9 place-items-center rounded-full bg-[#151515] font-mono text-[10px] font-black text-white">{(reg.full_name || "R").charAt(0)}</span><div className="min-w-0"><p className="truncate text-xs font-black">{reg.full_name || "Unnamed runner"}</p><p className="mt-1 truncate font-mono text-[8px] font-bold uppercase tracking-[0.1em] text-black/35">{reg.registration_number || reg.id.slice(0, 8)} · Tee {reg.tshirt_size || "—"}</p></div><RegistrationStatusBadge status={reg.status} /></div>)}

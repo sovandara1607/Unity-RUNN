@@ -6,6 +6,7 @@ import { api, resolveApiAssetUrl } from "../lib/api";
 import { useSiteConfig } from "./site/SiteConfigProvider";
 import { AnnouncementStrip } from "./site/AnnouncementStrip";
 import { openCookiePreferences } from "../lib/cookieConsent";
+import { Button } from "./primitives/Button";
 
 type SportHeaderProps = {
   active?: "home" | "events" | "about" | "account" | "control";
@@ -72,9 +73,9 @@ export function SportHeader({ active, accountHref, accountLabel }: SportHeaderPr
             {controlLink ? <Gauge className="h-3.5 w-3.5" /> : <UserRound className="h-3.5 w-3.5" />}
             {sessionLink.label}
           </Link>
-          <Link href={config.primary_cta_href} style={{ backgroundColor: config.primary_color }} className="ml-1 inline-flex items-center gap-2 rounded-full px-4 py-2.5 text-[10px] font-black uppercase tracking-[0.12em] text-black transition hover:-translate-y-0.5">
+          <Button href={config.primary_cta_href} size="sm" className="ml-1 hover:-translate-y-0.5">
             {config.primary_cta_label} <ArrowUpRight className="h-3.5 w-3.5" />
-          </Link>
+          </Button>
         </nav>
 
         <button type="button" onClick={() => setMenuOpen((open) => !open)} className="ml-auto grid h-11 w-11 place-items-center rounded-full border border-white/20 text-white transition hover:border-white md:hidden" aria-expanded={menuOpen} aria-controls="public-mobile-menu" aria-label={menuOpen ? "Close menu" : "Open menu"}>
@@ -86,7 +87,7 @@ export function SportHeader({ active, accountHref, accountLabel }: SportHeaderPr
         <div className="topo-surface flex h-full flex-col overflow-y-auto px-4 py-5 sm:px-5 sm:py-6">
           <div className="mx-auto flex min-h-full w-full max-w-xl flex-col">
             <div className="flex items-center justify-between border-b border-white/10 pb-5">
-              <div><p className="font-mono text-[8px] font-black uppercase tracking-[0.2em] text-white/35">Club navigation</p><p className="mt-1 text-xs font-bold text-white/70">Choose where you want to run next.</p></div>
+              <div><p className="font-mono text-[8px] font-black uppercase tracking-[0.2em] text-white/55">Club navigation</p><p className="mt-1 text-xs font-bold text-white/70">Choose where you want to run next.</p></div>
               <span className="flex items-center gap-2 font-mono text-[8px] font-black uppercase tracking-[0.15em]" style={{ color: config.primary_color }}><span className="h-1.5 w-1.5 animate-pulse rounded-full" style={{ backgroundColor: config.primary_color }} /> Season live</span>
             </div>
 
@@ -102,7 +103,7 @@ export function SportHeader({ active, accountHref, accountLabel }: SportHeaderPr
               <span className="grid h-11 w-11 place-items-center rounded-full bg-black" style={{ color: config.primary_color }}><ArrowUpRight className="h-5 w-5" /></span>
             </Link>
 
-            <p className="mt-auto border-t border-white/10 pb-[max(0px,env(safe-area-inset-bottom))] pt-5 font-mono text-[8px] font-bold uppercase tracking-[0.16em] text-white/25">{config.footer_text}</p>
+            <p className="mt-auto border-t border-white/10 pb-[max(0px,env(safe-area-inset-bottom))] pt-5 font-mono text-[8px] font-bold uppercase tracking-[0.16em] text-white/50">{config.footer_text}</p>
           </div>
         </div>
       </div>
@@ -115,10 +116,10 @@ function PublicNavLink({ href, label, active, primary }: { href: string; label: 
 }
 
 function MobileNavLink({ href, eyebrow, label, active, cobalt, primary, accent }: { href: string; eyebrow: string; label: string; active?: boolean; cobalt?: boolean; primary: string; accent: string }) {
-  return <Link href={href} style={active ? { color: primary } : undefined} className={`group flex items-center justify-between border-b border-white/10 py-5 ${active ? "" : "text-white"}`}><span><span className="block font-mono text-[8px] font-black uppercase tracking-[0.17em] text-white/30">{eyebrow}</span><span className="sport-display mt-1 block text-4xl uppercase leading-none tracking-[-0.02em]">{label}</span></span><span style={cobalt ? { borderColor: accent, backgroundColor: accent } : active ? { borderColor: primary, color: primary } : undefined} className={`grid h-9 w-9 place-items-center rounded-full border transition group-hover:translate-x-1 ${!cobalt && !active ? "border-white/20 text-white/50" : ""}`}><ArrowUpRight className="h-4 w-4" /></span></Link>;
+  return <Link href={href} style={active ? { color: primary } : undefined} className={`group flex items-center justify-between border-b border-white/10 py-5 ${active ? "" : "text-white"}`}><span><span className="block font-mono text-[8px] font-black uppercase tracking-[0.17em] text-white/50">{eyebrow}</span><span className="sport-display mt-1 block text-4xl uppercase leading-none tracking-[-0.02em]">{label}</span></span><span style={cobalt ? { borderColor: accent, backgroundColor: accent } : active ? { borderColor: primary, color: primary } : undefined} className={`grid h-9 w-9 place-items-center rounded-full border transition group-hover:translate-x-1 ${!cobalt && !active ? "border-white/20 text-white/50" : ""}`}><ArrowUpRight className="h-4 w-4" /></span></Link>;
 }
 
 export function SportFooter() {
   const { config } = useSiteConfig();
-  return <footer className="border-t border-white/10 px-5 py-7 text-[10px] font-bold uppercase tracking-[0.16em] text-white/35"><div className="mx-auto flex max-w-[1200px] flex-col items-center justify-between gap-3 sm:flex-row"><span>{config.footer_text}</span><button type="button" onClick={openCookiePreferences} className="border-b border-white/25 pb-0.5 transition hover:border-white hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white">Cookie settings</button></div></footer>;
+  return <footer className="border-t border-white/10 px-5 py-7 text-[10px] font-bold uppercase tracking-[0.16em] text-white/55"><div className="mx-auto flex max-w-[1200px] flex-col items-center justify-between gap-3 sm:flex-row"><span>{config.footer_text}</span><button type="button" onClick={openCookiePreferences} className="border-b border-white/25 pb-0.5 transition hover:border-white hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white">Cookie settings</button></div></footer>;
 }

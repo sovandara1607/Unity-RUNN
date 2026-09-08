@@ -165,11 +165,14 @@ func run() error {
 
 	backgroundCtx, stopBackground := context.WithCancel(context.Background())
 	defer stopBackground()
-	go notifWorker.Run(backgroundCtx)
-	go telegramWorker.Run(backgroundCtx)
-	go reminderScheduler.Run(backgroundCtx)
-	go eventAutomationScheduler.Run(backgroundCtx)
-	go paymentReconciler.Run(backgroundCtx)
+	if cfg.ProcessRole != "api" {
+		go notifWorker.Run(backgroundCtx)
+		go telegramWorker.Run(backgroundCtx)
+		go reminderScheduler.Run(backgroundCtx)
+		go eventAutomationScheduler.Run(backgroundCtx)
+		go paymentReconciler.Run(backgroundCtx)
+		log.Info("background_jobs_started")
+	}
 
 	router := apphttp.NewRouter(apphttp.Deps{
 		Logger:                  log,
@@ -192,11 +195,14 @@ func run() error {
 		EventAutomationsHandler: eventAutomationHandler,
 	})
 
+	if cfg.ProcessRole == "worker" {
+		router = apphttp.NewHealthRouter(apphttp.Deps{DB: db, Redis: redisClient})
+	}
 	srv := apphttp.NewServer(":"+cfg.Port, router)
 
 	serverErrCh := make(chan error, 1)
 	go func() {
-		log.Info("server_starting", "port", cfg.Port, "app_env", cfg.AppEnv)
+		log.Info("server_starting", "port", cfg.Port, "app_env", cfg.AppEnv, "process_role", cfg.ProcessRole)
 		if err := srv.Start(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			serverErrCh <- err
 			return

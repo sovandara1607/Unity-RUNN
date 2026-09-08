@@ -65,6 +65,8 @@ docs/        integration guides (Google OAuth, Gmail SMTP)
 - [continue.md](./continue.md) — implementation continuation notes
 - [docs/google-services.md](./docs/google-services.md) — Google OAuth + Gmail SMTP setup
 - [frontend/README.md](./frontend/README.md) — frontend-specific notes
+- [deploy/load-balancing.md](./deploy/load-balancing.md) — two API replicas, health-based routing, and verification
+- [deploy/dokploy.md](./deploy/dokploy.md) — deployment and API domain setup
 - [.env.example](./.env.example) / [frontend/.env.example](./frontend/.env.example) — full configuration reference
 
 When docs and code disagree, the code and migrations win — update the docs in the same change.

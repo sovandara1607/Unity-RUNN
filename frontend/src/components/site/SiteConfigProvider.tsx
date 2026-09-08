@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { api } from "../../lib/api";
 import { getRealtimeSocket } from "../../lib/realtime";
+import { brandCustomProperties } from "../../lib/brand";
 import type { SiteConfig } from "../../types";
 
 export const defaultSiteConfig: SiteConfig = {
@@ -80,6 +81,17 @@ export function SiteConfigProvider({ children }: { children: ReactNode }) {
       realtime?.disconnect();
     };
   }, []);
+
+  // Publish the brand as custom properties so hover/focus variants can reach it.
+  // Without this the only way to apply the configured colour is an inline style, which
+  // is why every interactive accent on the public site was hard-coded to the default.
+  useEffect(() => {
+    const root = document.documentElement;
+    const properties = brandCustomProperties(config);
+    for (const [name, propertyValue] of Object.entries(properties)) {
+      root.style.setProperty(name, propertyValue);
+    }
+  }, [config]);
 
   const value = useMemo(() => ({ config, setConfig, loading, realtimeConnected }), [config, loading, realtimeConnected]);
   return <SiteConfigContext.Provider value={value}>{children}</SiteConfigContext.Provider>;

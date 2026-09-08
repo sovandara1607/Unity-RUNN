@@ -108,7 +108,7 @@ export function EventPosterField({
           onDragOver={(event) => event.preventDefault()}
           onDragLeave={() => setDragging(false)}
           onDrop={(event) => { event.preventDefault(); setDragging(false); prepareFile(event.dataTransfer.files?.[0]); }}
-          className={`group flex min-h-52 w-full flex-col items-center justify-center rounded-2xl border-2 border-dashed px-6 text-center transition focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 disabled:opacity-50 ${dragging ? "border-orange-500 bg-orange-50" : "border-slate-200 bg-slate-50 hover:border-slate-400 hover:bg-white"}`}
+          className={`group flex min-h-52 w-full flex-col items-center justify-center rounded-2xl border-2 border-dashed px-6 text-center transition focus:outline-none focus-visible:ring-2 focus-visible:ring-[#3155ff] disabled:opacity-50 ${dragging ? "border-orange-500 bg-orange-50" : "border-slate-200 bg-slate-50 hover:border-slate-400 hover:bg-white"}`}
         >
           <span className="grid h-12 w-12 place-items-center rounded-full bg-slate-900 text-white transition group-hover:bg-orange-600">
             {uploading ? <Loader2 className="h-5 w-5 animate-spin" /> : <UploadCloud className="h-5 w-5" />}
@@ -124,7 +124,7 @@ export function EventPosterField({
         <summary className="inline-flex cursor-pointer list-none items-center gap-1.5 font-semibold hover:text-slate-800"><Link2 className="h-3.5 w-3.5" /> Use an image URL instead</summary>
         <div className="relative mt-2">
           <ImagePlus className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-          <input type="text" inputMode="url" value={value} disabled={disabled || uploading} onChange={(event) => { onChange(event.target.value); reportError(null); }} placeholder="/api/v1/media/… or https://example.com/poster.jpg" className="w-full rounded-xl border border-slate-200 py-2.5 pl-10 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500" />
+          <input type="text" inputMode="url" value={value} disabled={disabled || uploading} onChange={(event) => { onChange(event.target.value); reportError(null); }} placeholder="/api/v1/media/… or https://example.com/poster.jpg" className="w-full rounded-xl border border-slate-200 py-2.5 pl-10 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#3155ff]" />
         </div>
       </details>
 

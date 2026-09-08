@@ -124,7 +124,7 @@ export default function AdminUsersPage() {
           <select
             value={roleFilter}
             onChange={(e) => setRoleFilter(e.target.value)}
-            className="px-3 py-2 text-xs font-medium bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500"
+            className="px-3 py-2 text-xs font-medium bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#3155ff]"
           >
             <option value="ALL">All Roles ({users.length})</option>
             <option value="SUPER_ADMIN">Super Admins</option>
@@ -141,7 +141,7 @@ export default function AdminUsersPage() {
             placeholder="Search by email or ID..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-9 pr-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500"
+            className="w-full pl-9 pr-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#3155ff]"
           />
         </div>
       </div>
@@ -223,7 +223,7 @@ export default function AdminUsersPage() {
                       value={u.role}
                       disabled={updatingUserId === u.id}
                       onChange={(e) => handleRoleChange(u.id, u.email, e.target.value as Role)}
-                      className="px-2.5 py-1 text-xs font-semibold bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 shadow-sm"
+                      className="px-2.5 py-1 text-xs font-semibold bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#3155ff] shadow-sm"
                     >
                       <option value="USER">USER</option>
                       <option value="STAFF">STAFF</option>

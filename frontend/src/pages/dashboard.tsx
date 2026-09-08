@@ -1,36 +1,30 @@
 import React, { useMemo, useRef, useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/router";
-import { ArrowRight, ArrowUpRight, CalendarDays, Download, LogOut, QrCode, Shield, Ticket, UserRound } from "lucide-react";
+import { ArrowRight, ArrowUpRight, CalendarDays, Download, LogOut, QrCode, Shield, Ticket, Trash2, UserRound, X } from "lucide-react";
 import QRCode from "qrcode";
 import { api } from "../lib/api";
 import { withMinSkeleton } from "../lib/withMinSkeleton";
+import { formatEventDate, registrationStatusLabel } from "../lib/eventFormat";
 import { SportHeader, SportFooter } from "../components/SportHeader";
 import { Skeleton } from "../components/Skeleton";
 import { BakongPayment } from "../components/BakongPayment";
-import { AlertBanner } from "../components/alerts/AlertSystem";
+import { AlertBanner, useAlerts } from "../components/alerts/AlertSystem";
 import { useSiteConfig } from "../components/site/SiteConfigProvider";
 import type { Event, MeResponse, PaymentCheckout, Registration } from "../types";
+
+// A runner may leave a race until they have been scanned in at the gate; the API enforces
+// the same rule (registrations.Service.Cancel).
+function canWithdraw(reg: Registration): boolean {
+  return !reg.checked_in_at && (reg.status === "PENDING" || reg.status === "CONFIRMED");
+}
 
 const statusStyles: Record<string, string> = {
   CONFIRMED: "text-black",
   PENDING: "text-amber-300 border-amber-300/30",
-  CANCELLED: "text-white/40 border-white/15",
-  REFUNDED: "text-white/40 border-white/15",
+  CANCELLED: "text-white/60 border-white/15",
+  REFUNDED: "text-white/60 border-white/15",
 };
-
-function formatDate(value?: string | null) {
-  if (!value) return "Date TBD";
-  return new Intl.DateTimeFormat(undefined, { weekday: "short", day: "numeric", month: "short" }).format(new Date(value));
-}
-
-function statusLabel(registration: Registration) {
-  if (registration.checked_in_at) return "Checked in";
-  if (registration.status === "PENDING") return "Payment due";
-  if (registration.status === "CONFIRMED") return "Confirmed";
-  if (registration.status === "CANCELLED") return "Cancelled";
-  return "Refunded";
-}
 
 export default function DashboardPage() {
   const { config } = useSiteConfig();
@@ -46,9 +40,13 @@ export default function DashboardPage() {
   const [ticketDownloadingId, setTicketDownloadingId] = useState<string | null>(null);
 	const [payment, setPayment] = useState<PaymentCheckout | null>(null);
 	const [paymentEventName, setPaymentEventName] = useState("Your race entry");
+	const [paymentRestartHref, setPaymentRestartHref] = useState<string | undefined>(undefined);
 	const [paymentLoadingId, setPaymentLoadingId] = useState<string | null>(null);
+	const [cancelConfirmId, setCancelConfirmId] = useState<string | null>(null);
+	const [cancellingId, setCancellingId] = useState<string | null>(null);
   const ticketRefs = useRef<Record<string, HTMLElement | null>>({});
   const router = useRouter();
+  const alerts = useAlerts();
 
   useEffect(() => {
     async function load() {
@@ -74,6 +72,18 @@ export default function DashboardPage() {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (!router.isReady) return;
+    const { payment: paid, registration: registered, ...rest } = router.query;
+    if (paid !== "confirmed" && registered !== "confirmed") return;
+    alerts.notify(paid === "confirmed"
+      ? { tone: "success", title: "Payment confirmed", message: "Your place is secured. Your ticket and check-in QR are ready below." }
+      : { tone: "success", title: "You are in", message: "Your entry is confirmed. Your ticket and check-in QR are ready below." });
+    // Strip the flag so a refresh or back-navigation does not replay the toast.
+    router.replace({ pathname: router.pathname, query: rest }, undefined, { shallow: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router.isReady]);
 
   const eventById = useMemo(() => new Map(events.map((e) => [e.id, e])), [events]);
 
@@ -115,15 +125,30 @@ export default function DashboardPage() {
 		setError(null);
 		try {
 			const checkout = await api.getRegistrationPayment(reg.id);
-			setPaymentEventName(eventById.get(reg.event_id)?.name || "Your race entry");
+			const event = eventById.get(reg.event_id);
+			setPaymentEventName(event?.name || "Your race entry");
+			setPaymentRestartHref(event ? `/events/${event.slug}/register` : undefined);
 			setPayment(checkout);
 		} catch (caught: unknown) {
 			setError(caught instanceof Error ? caught.message : "Could not reopen this payment");
 		} finally { setPaymentLoadingId(null); }
 	};
 
+	const cancelEntry = async (reg: Registration) => {
+		setCancellingId(reg.id);
+		setError(null);
+		try {
+			await api.cancelRegistration(reg.id);
+			setCancelConfirmId(null);
+			const regs = await api.listMyRegistrations().catch(() => null);
+			if (regs) setRegistrations(regs);
+			alerts.notify({ tone: "success", title: "Entry withdrawn", message: "Your place has been released back to the race." });
+		} catch (caught: unknown) {
+			setError(caught instanceof Error ? caught.message : "Could not withdraw this entry");
+		} finally { setCancellingId(null); }
+	};
+
 	const finishPayment = async () => {
-		if (typeof window !== "undefined") localStorage.removeItem("unity_pending_payment");
 		setPayment(null);
 		const regs = await api.listMyRegistrations().catch(() => null);
 		if (regs) setRegistrations(regs);
@@ -253,7 +278,7 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen text-white" style={{ backgroundColor: config.background_color }}>
-		{payment && <BakongPayment checkout={payment} eventName={paymentEventName} onPaid={finishPayment} onClose={() => setPayment(null)} />}
+		{payment && <BakongPayment checkout={payment} eventName={paymentEventName} restartHref={paymentRestartHref} onPaid={finishPayment} onClose={() => setPayment(null)} />}
       <SportHeader active="account" accountHref="/dashboard" accountLabel="Account" />
 
       <main>
@@ -291,8 +316,10 @@ export default function DashboardPage() {
         {/* Tickets */}
         {registrations.length === 0 ? (
           <section className="mx-auto max-w-[1200px] px-5 py-20 text-center sm:px-8">
-            <p className="sport-display text-4xl uppercase leading-none text-white/10 sm:text-6xl">No races yet</p>
-            <p className="mx-auto mt-4 max-w-sm text-xs font-bold uppercase leading-5 tracking-[0.14em] text-white/40">
+            {/* Deliberately ghosted: a watermark behind the readable copy below. /35 is the
+                floor at which large text still clears AA (3:1). */}
+            <p className="sport-display text-4xl uppercase leading-none text-white/35 sm:text-6xl">No races yet</p>
+            <p className="mx-auto mt-4 max-w-sm text-xs font-bold uppercase leading-5 tracking-[0.14em] text-white/60">
               Sign up for an event and your race ticket appears here.
             </p>
             <Link
@@ -339,7 +366,7 @@ export default function DashboardPage() {
                               ? { backgroundColor: "#fff3cd", borderColor: "#e4bd4f", color: "#725000" }
                               : { backgroundColor: "#eeeeea", borderColor: "#d1d1ca", color: "#666" }}
                         >
-                          {statusLabel(featuredRegistration)}
+                          {registrationStatusLabel(featuredRegistration)}
                         </span>
                       </div>
 
@@ -354,7 +381,7 @@ export default function DashboardPage() {
                         </div>
                         <div>
                           <dt className="font-bold uppercase tracking-[0.14em] text-black/40">Date</dt>
-                          <dd className="mt-1 font-semibold">{formatDate(event?.event_date)}</dd>
+                          <dd className="mt-1 font-semibold">{formatEventDate(event?.event_date, "compact")}</dd>
                         </div>
                         <div>
                           <dt className="font-bold uppercase tracking-[0.14em] text-black/40">Runner</dt>
@@ -371,7 +398,7 @@ export default function DashboardPage() {
                     <div className="border-t-2 border-dashed border-black/15 p-6 sm:p-8" style={{ backgroundColor: featuredRegistration.status === "CONFIRMED" ? acid : "#f4f4f4" }}>
                       {featuredRegistration.checked_in_at ? (
                         <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.14em] text-black/65">
-                          <span className="flex h-6 w-6 items-center justify-center rounded-full bg-black text-[#d9ff00]">✓</span>
+                          <span className="flex h-6 w-6 items-center justify-center rounded-full bg-black text-[var(--brand)]">✓</span>
                           Checked in {new Date(featuredRegistration.checked_in_at).toLocaleString()}
                         </div>
                       ) : featuredRegistration.status === "PENDING" ? (
@@ -386,7 +413,7 @@ export default function DashboardPage() {
                           </button>
                         </div>
                       ) : featuredRegistration.status !== "CONFIRMED" ? (
-                        <p className="text-xs font-bold uppercase tracking-[0.12em] text-black/50">This registration is {statusLabel(featuredRegistration).toLowerCase()}.</p>
+                        <p className="text-xs font-bold uppercase tracking-[0.12em] text-black/50">This registration is {registrationStatusLabel(featuredRegistration).toLowerCase()}.</p>
                       ) : isOpen ? (
                         <div className="flex flex-col items-center gap-3 sm:flex-row sm:items-center sm:gap-6">
                           <div
@@ -433,6 +460,28 @@ export default function DashboardPage() {
                           Show check-in QR
                         </button>
                       )}
+                      {canWithdraw(featuredRegistration) && (
+                        <div data-ticket-export-hide="true" className="mt-5 border-t border-black/10 pt-4">
+                          {cancelConfirmId === featuredRegistration.id ? (
+                            <div className="flex flex-wrap items-center gap-3">
+                              <p className="text-[11px] font-medium text-black/60">
+                                {featuredRegistration.status === "PENDING"
+                                  ? "Drop this entry? Your reserved place goes back to the race."
+                                  : "Give up your place? You will need to enter again if you change your mind."}
+                              </p>
+                              <button onClick={() => cancelEntry(featuredRegistration)} disabled={cancellingId === featuredRegistration.id} className="inline-flex items-center gap-1.5 rounded-full bg-rose-500 px-4 py-2 text-[11px] font-bold uppercase tracking-[0.1em] text-white transition hover:opacity-85 disabled:opacity-60">
+                                {cancellingId === featuredRegistration.id ? <span className="h-3 w-3 animate-spin rounded-full border-2 border-white/30 border-t-white" /> : <Trash2 className="h-3.5 w-3.5" />}
+                                {featuredRegistration.status === "PENDING" ? "Drop entry" : "Give up place"}
+                              </button>
+                              <button onClick={() => setCancelConfirmId(null)} className="text-[11px] font-bold uppercase tracking-[0.12em] underline underline-offset-4 hover:opacity-70">Keep it</button>
+                            </div>
+                          ) : (
+                            <button onClick={() => setCancelConfirmId(featuredRegistration.id)} className="text-[11px] font-bold uppercase tracking-[0.12em] text-black/45 underline underline-offset-4 transition hover:text-black/80">
+                              Withdraw from this race
+                            </button>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </article>
                 </div>
@@ -441,13 +490,13 @@ export default function DashboardPage() {
 
             {/* Everything else */}
             <div id="entries" className="scroll-mt-32">
-              <p className="text-xs font-bold uppercase tracking-[0.18em] text-white/40">
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-white/60">
                 Other entries {others.length > 0 && `(${others.length})`}
               </p>
 
               {others.length === 0 ? (
                 <div className="mt-4 rounded-2xl border border-dashed border-white/15 p-8 text-center">
-                  <p className="text-xs font-bold uppercase leading-5 tracking-[0.14em] text-white/40">
+                  <p className="text-xs font-bold uppercase leading-5 tracking-[0.14em] text-white/60">
                     One race on the books. Add another?
                   </p>
                   <Link href="/events" className="mt-4 inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-[0.12em] transition hover:opacity-80" style={{ color: acid }}>
@@ -471,14 +520,14 @@ export default function DashboardPage() {
                               className={`shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] ${statusStyles[reg.status] ?? ""}`}
                               style={reg.status === "CONFIRMED" ? { backgroundColor: acid, borderColor: acid, color: "#000" } : undefined}
                             >
-                              {statusLabel(reg)}
+                              {registrationStatusLabel(reg)}
                             </span>
                             <div className="min-w-0 flex-1">
                               {event ? <Link href={`/events/${event.slug}`} className="block truncate text-sm font-bold transition hover:text-white/70">{event.name}</Link> : <p className="truncate text-sm font-bold">Registration</p>}
-                              <p className="mt-0.5 flex items-center gap-3 text-[11px] font-medium text-white/40">
+                              <p className="mt-0.5 flex items-center gap-3 text-[11px] font-medium text-white/60">
                                 <span className="font-mono">{reg.registration_number ?? reg.id.slice(0, 8)}</span>
                                 <span className="inline-flex items-center gap-1">
-                                  <CalendarDays className="h-3 w-3" /> {formatDate(event?.event_date)}
+                                  <CalendarDays className="h-3 w-3" /> {formatEventDate(event?.event_date, "compact")}
                                 </span>
                               </p>
                             </div>
@@ -497,10 +546,23 @@ export default function DashboardPage() {
                               </button>
                             )}
 							{reg.status === "PENDING" && (
-								<button onClick={() => resumePayment(reg)} disabled={paymentLoadingId === reg.id} className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-[#d9ff00] px-3.5 py-2 text-[11px] font-bold uppercase tracking-[0.1em] text-black transition hover:opacity-85 disabled:opacity-60">
+								<button onClick={() => resumePayment(reg)} disabled={paymentLoadingId === reg.id} className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-[var(--brand)] px-3.5 py-2 text-[11px] font-bold uppercase tracking-[0.1em] text-black transition hover:opacity-85 disabled:opacity-60">
 										{paymentLoadingId === reg.id ? <span className="h-3 w-3 animate-spin rounded-full border-2 border-black/20 border-t-black" /> : <ArrowRight className="h-3.5 w-3.5" />} Pay now
 								</button>
 							)}
+							{canWithdraw(reg) && (cancelConfirmId === reg.id ? (
+								<span className="flex shrink-0 items-center gap-1.5">
+									<button onClick={() => cancelEntry(reg)} disabled={cancellingId === reg.id} className="inline-flex items-center gap-1.5 rounded-full bg-rose-500 px-3.5 py-2 text-[11px] font-bold uppercase tracking-[0.1em] text-white transition hover:opacity-85 disabled:opacity-60">
+										{cancellingId === reg.id ? <span className="h-3 w-3 animate-spin rounded-full border-2 border-white/30 border-t-white" /> : <Trash2 className="h-3.5 w-3.5" />}
+										{reg.status === "PENDING" ? "Drop entry" : "Give up place"}
+									</button>
+									<button onClick={() => setCancelConfirmId(null)} aria-label="Keep this entry" className="rounded-full border border-white/20 p-2 transition hover:border-white/50"><X className="h-3.5 w-3.5" /></button>
+								</span>
+							) : (
+								<button onClick={() => setCancelConfirmId(reg.id)} className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-white/15 px-3.5 py-2 text-[11px] font-bold uppercase tracking-[0.1em] text-white/50 transition hover:border-white/40 hover:text-white">
+									<Trash2 className="h-3.5 w-3.5" /> Withdraw
+								</button>
+							))}
                           </div>
                           {isOpen && canQr && qrByRegId[reg.id] && (
                             <div className="flex flex-col items-start gap-4 border-t border-white/10 p-4 sm:flex-row sm:items-center sm:p-5">
