@@ -83,6 +83,7 @@ func run() error {
 		ClientID: cfg.GoogleOAuthClientID, ClientSecret: cfg.GoogleOAuthClientSecret,
 		RedirectURL: cfg.GoogleOAuthRedirectURL, PublicAppURL: cfg.PublicAppURL,
 	})
+	authHandler.ConfigureGoogleMobile(redisClient.Raw())
 
 	notifRepo := notifications.NewRepository(db.Pool)
 	notifQueue := notifications.NewQueue(redisClient.Raw())

@@ -14,16 +14,25 @@ import (
 	"strings"
 	"time"
 
+	"github.com/redis/go-redis/v9"
+
 	"github.com/unity-run-club/api/internal/httpresponse"
 )
 
 const (
 	googleStateCookieName  = "google_oauth_state"
 	googleReturnCookieName = "google_oauth_return"
+	googleMobileCookieName = "google_oauth_mobile"
 	googleCookiePath       = "/api/v1/auth/google"
 	googleAuthorizeURL     = "https://accounts.google.com/o/oauth2/v2/auth"
 	googleTokenURL         = "https://oauth2.googleapis.com/token"
 	googleUserInfoURL      = "https://openidconnect.googleapis.com/v1/userinfo"
+	// mobileDeepLinkRedirect must match the "scheme" in mobile/app.json plus the path the
+	// app's GoogleSignInButton listens for. No redirect_uri registration is needed for this
+	// in Google Cloud Console — Google only ever redirects to googleAuthorizeURL's
+	// server-side RedirectURL above; this is *our own* second redirect afterward.
+	mobileDeepLinkRedirect = "unityrun://auth/callback"
+	mobileCodeTTL          = 60 * time.Second
 )
 
 // GoogleOAuthConfig contains only server-side OAuth web-client settings
@@ -51,13 +60,25 @@ func (h *Handler) ConfigureGoogle(config GoogleOAuthConfig) {
 	}
 }
 
+// ConfigureGoogleMobile enables the mobile deep-link handoff for Google sign-in (see
+// completeMobileGoogleLogin). rdb may be nil to disable it without touching the web flow.
+func (h *Handler) ConfigureGoogleMobile(rdb *redis.Client) {
+	h.mobileCodes = rdb
+}
+
 // Providers reports which optional sign-in providers are available
 func (h *Handler) Providers(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
-	httpresponse.WriteData(w, http.StatusOK, map[string]bool{"google": h.google != nil})
+	httpresponse.WriteData(w, http.StatusOK, map[string]bool{
+		"google":        h.google != nil,
+		"google_mobile": h.google != nil && h.mobileCodes != nil,
+	})
 }
 
-// GoogleStart begins the authorization-code flow with a browser-bound state
+// GoogleStart begins the authorization-code flow with a browser-bound state. The mobile app
+// and the web app share this single entry point and the single Google OAuth client already
+// configured for it — passing ?platform=mobile is the only difference, and it only changes
+// where GoogleCallback sends the browser afterward.
 func (h *Handler) GoogleStart(w http.ResponseWriter, r *http.Request) {
 	if h.google == nil {
 		httpresponse.WriteError(w, http.StatusNotFound, "provider_unavailable", "Google sign-in is not configured")
@@ -71,6 +92,9 @@ func (h *Handler) GoogleStart(w http.ResponseWriter, r *http.Request) {
 	returnPath := safeReturnPath(r.URL.Query().Get("redirect"))
 	h.setOAuthCookie(w, googleStateCookieName, state, 600)
 	h.setOAuthCookie(w, googleReturnCookieName, returnPath, 600)
+	if r.URL.Query().Get("platform") == "mobile" {
+		h.setOAuthCookie(w, googleMobileCookieName, "1", 600)
+	}
 
 	query := url.Values{
 		"client_id":     {h.google.config.ClientID},
@@ -90,37 +114,111 @@ func (h *Handler) GoogleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	returnPath := h.oauthReturnPath(r)
+	mobileCookie, mobileErr := r.Cookie(googleMobileCookieName)
+	mobile := mobileErr == nil && mobileCookie.Value == "1"
 	h.clearOAuthCookies(w)
 
 	if providerError := r.URL.Query().Get("error"); providerError != "" {
-		h.redirectOAuthError(w, r, "access_denied")
+		h.redirectOAuthError(w, r, mobile, "access_denied")
 		return
 	}
 	stateCookie, err := r.Cookie(googleStateCookieName)
 	state := r.URL.Query().Get("state")
 	if err != nil || state == "" || subtle.ConstantTimeCompare([]byte(stateCookie.Value), []byte(state)) != 1 {
-		h.redirectOAuthError(w, r, "invalid_state")
+		h.redirectOAuthError(w, r, mobile, "invalid_state")
 		return
 	}
 	code := strings.TrimSpace(r.URL.Query().Get("code"))
 	if code == "" {
-		h.redirectOAuthError(w, r, "missing_code")
+		h.redirectOAuthError(w, r, mobile, "missing_code")
 		return
 	}
 
 	profile, err := h.google.exchangeProfile(r.Context(), code)
 	if err != nil {
-		h.redirectOAuthError(w, r, "verification_failed")
+		h.redirectOAuthError(w, r, mobile, "verification_failed")
 		return
 	}
 	result, err := h.svc.LoginWithGoogle(r.Context(), profile)
 	if err != nil {
-		h.redirectOAuthError(w, r, "account_unavailable")
+		h.redirectOAuthError(w, r, mobile, "account_unavailable")
+		return
+	}
+	if mobile {
+		h.completeMobileGoogleLogin(w, r, result)
 		return
 	}
 	h.setRefreshCookie(w, result.RefreshToken)
 	destination := h.google.config.PublicAppURL + "/auth/google/callback?redirect=" + url.QueryEscape(returnPath)
 	http.Redirect(w, r, destination, http.StatusFound)
+}
+
+// completeMobileGoogleLogin hands the already-issued token pair to the mobile app via a
+// short-lived, single-use opaque code instead of putting bearer tokens directly in a URL
+// (which browsers and OS-level history/logs can retain). The app's GoogleSignInButton opens
+// this whole flow in an ephemeral auth session and never sees anything but this final
+// mobileDeepLinkRedirect, which it already knows to expect (mobile/app.json's "scheme").
+func (h *Handler) completeMobileGoogleLogin(w http.ResponseWriter, r *http.Request, result *AuthResult) {
+	if h.mobileCodes == nil {
+		h.redirectOAuthError(w, r, true, "mobile_unavailable")
+		return
+	}
+	code, err := randomOAuthState()
+	if err != nil {
+		h.redirectOAuthError(w, r, true, "internal_error")
+		return
+	}
+	payload, err := json.Marshal(authResponse{
+		AccessToken:  result.AccessToken,
+		RefreshToken: result.RefreshToken,
+		User:         toUserResponse(result.User),
+	})
+	if err != nil {
+		h.redirectOAuthError(w, r, true, "internal_error")
+		return
+	}
+	if err := h.mobileCodes.Set(r.Context(), mobileCodeRedisKey(code), payload, mobileCodeTTL).Err(); err != nil {
+		h.redirectOAuthError(w, r, true, "internal_error")
+		return
+	}
+	http.Redirect(w, r, mobileDeepLinkRedirect+"?code="+url.QueryEscape(code), http.StatusFound)
+}
+
+// MobileGoogleCallback exchanges the one-time code from completeMobileGoogleLogin for the
+// actual bearer token pair. Single-use (GETDEL) so a leaked or reused deep link is inert.
+func (h *Handler) MobileGoogleCallback(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	if h.mobileCodes == nil {
+		httpresponse.WriteError(w, http.StatusNotFound, "provider_unavailable", "Google sign-in is not configured for mobile")
+		return
+	}
+	var req struct {
+		Code string `json:"code"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpresponse.WriteError(w, http.StatusBadRequest, "invalid_body", "malformed JSON body")
+		return
+	}
+	req.Code = strings.TrimSpace(req.Code)
+	if req.Code == "" {
+		httpresponse.WriteError(w, http.StatusBadRequest, "missing_code", "code is required")
+		return
+	}
+	raw, err := h.mobileCodes.GetDel(r.Context(), mobileCodeRedisKey(req.Code)).Bytes()
+	if err != nil {
+		httpresponse.WriteError(w, http.StatusUnauthorized, "invalid_code", "this sign-in link has expired or was already used")
+		return
+	}
+	var response authResponse
+	if err := json.Unmarshal(raw, &response); err != nil {
+		httpresponse.WriteError(w, http.StatusInternalServerError, "internal_error", "could not complete Google sign-in")
+		return
+	}
+	httpresponse.WriteData(w, http.StatusOK, response)
+}
+
+func mobileCodeRedisKey(code string) string {
+	return "auth:google-mobile-code:" + code
 }
 
 func (f *googleOAuthFlow) exchangeProfile(ctx context.Context, code string) (GoogleProfile, error) {
@@ -212,7 +310,7 @@ func (h *Handler) setOAuthCookie(w http.ResponseWriter, name, value string, maxA
 }
 
 func (h *Handler) clearOAuthCookies(w http.ResponseWriter) {
-	for _, name := range []string{googleStateCookieName, googleReturnCookieName} {
+	for _, name := range []string{googleStateCookieName, googleReturnCookieName, googleMobileCookieName} {
 		http.SetCookie(w, &http.Cookie{
 			Name: name, Value: "", Path: googleCookiePath, HttpOnly: true,
 			Secure: h.isProduction, SameSite: http.SameSiteLaxMode,
@@ -229,7 +327,10 @@ func (h *Handler) oauthReturnPath(r *http.Request) string {
 	return safeReturnPath(cookie.Value)
 }
 
-func (h *Handler) redirectOAuthError(w http.ResponseWriter, r *http.Request, code string) {
+func (h *Handler) redirectOAuthError(w http.ResponseWriter, r *http.Request, mobile bool, code string) {
 	destination := h.google.config.PublicAppURL + "/auth/login?oauth_error=" + url.QueryEscape(code)
+	if mobile {
+		destination = mobileDeepLinkRedirect + "?error=" + url.QueryEscape(code)
+	}
 	http.Redirect(w, r, destination, http.StatusFound)
 }

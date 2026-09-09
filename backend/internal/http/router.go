@@ -106,6 +106,15 @@ func NewRouter(deps Deps) http.Handler {
 
 		api.Route("/auth", func(a chi.Router) {
 			a.Get("/providers", deps.AuthHandler.Providers)
+			// Explicit native transport shares the auth service; cookies are ignored.
+			a.Route("/mobile", func(m chi.Router) {
+				m.Use(middleware.RequireAllowedOrigin(deps.CORSAllowedOrigins))
+				m.Post("/register", deps.AuthHandler.MobileRegister)
+				m.Post("/login", deps.AuthHandler.MobileLogin)
+				m.Post("/google/callback", deps.AuthHandler.MobileGoogleCallback)
+				m.Post("/refresh", deps.AuthHandler.MobileRefresh)
+				m.Post("/logout", deps.AuthHandler.MobileLogout)
+			})
 			a.Get("/google", deps.AuthHandler.GoogleStart)
 			a.Get("/google/callback", deps.AuthHandler.GoogleCallback)
 			a.Post("/register", deps.AuthHandler.Register)

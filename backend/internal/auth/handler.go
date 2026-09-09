@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/redis/go-redis/v9"
+
 	"github.com/unity-run-club/api/internal/httpresponse"
 )
 
@@ -18,6 +20,10 @@ type Handler struct {
 	refreshTokenTTL time.Duration
 	loginLimiter    AttemptLimiter
 	google          *googleOAuthFlow
+	// mobileCodes stores short-lived, single-use handoff codes for the mobile Google
+	// sign-in deep-link callback (see completeMobileGoogleLogin). Nil disables that path
+	// without touching the web OAuth flow.
+	mobileCodes *redis.Client
 	// isProduction controls cookie SameSite/Secure flags: Lax+non-Secure in development (so plain-HTTP localhost testing works), None+Secure otherwise (required for a cross-site Vercel <-> API deployment)
 	isProduction bool
 }
@@ -42,12 +48,22 @@ func toUserResponse(u *User) userResponse {
 }
 
 type authResponse struct {
-	AccessToken string       `json:"access_token"`
-	User        userResponse `json:"user"`
+	AccessToken  string       `json:"access_token"`
+	RefreshToken string       `json:"refresh_token,omitempty"`
+	User         userResponse `json:"user"`
 }
 
 // Register handles POST /api/v1/auth/register
 func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
+	h.register(w, r, false)
+}
+
+// MobileRegister uses explicit tokens and never reads or writes browser cookies.
+func (h *Handler) MobileRegister(w http.ResponseWriter, r *http.Request) {
+	h.register(w, r, true)
+}
+
+func (h *Handler) register(w http.ResponseWriter, r *http.Request, mobile bool) {
 	w.Header().Set("Cache-Control", "no-store")
 	var req RegisterRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -66,16 +82,21 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		httpresponse.WriteError(w, http.StatusInternalServerError, "internal_error", "failed to register")
 	default:
-		h.setRefreshCookie(w, result.RefreshToken)
-		httpresponse.WriteData(w, http.StatusCreated, authResponse{
-			AccessToken: result.AccessToken,
-			User:        toUserResponse(result.User),
-		})
+		h.writeSession(w, http.StatusCreated, result, mobile)
 	}
 }
 
 // Login handles POST /api/v1/auth/login
 func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
+	h.login(w, r, false)
+}
+
+// MobileLogin uses explicit tokens and never reads or writes browser cookies.
+func (h *Handler) MobileLogin(w http.ResponseWriter, r *http.Request) {
+	h.login(w, r, true)
+}
+
+func (h *Handler) login(w http.ResponseWriter, r *http.Request, mobile bool) {
 	w.Header().Set("Cache-Control", "no-store")
 	var req LoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -105,46 +126,70 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		if h.loginLimiter != nil {
 			_ = h.loginLimiter.Reset(r.Context(), req.Email)
 		}
-		h.setRefreshCookie(w, result.RefreshToken)
-		httpresponse.WriteData(w, http.StatusOK, authResponse{
-			AccessToken: result.AccessToken,
-			User:        toUserResponse(result.User),
-		})
+		h.writeSession(w, http.StatusOK, result, mobile)
 	}
 }
 
 // Refresh handles POST /api/v1/auth/refresh
 func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
+	h.refresh(w, r, false)
+}
+
+// MobileRefresh uses explicit tokens and never reads or writes browser cookies.
+func (h *Handler) MobileRefresh(w http.ResponseWriter, r *http.Request) {
+	h.refresh(w, r, true)
+}
+
+func (h *Handler) refresh(w http.ResponseWriter, r *http.Request, mobile bool) {
 	w.Header().Set("Cache-Control", "no-store")
-	cookie, err := r.Cookie(refreshCookieName)
-	if err != nil || cookie.Value == "" {
+	rawToken, err := refreshTokenFromRequest(r, mobile)
+	if err != nil || rawToken == "" {
 		httpresponse.WriteError(w, http.StatusUnauthorized, "unauthorized", "missing refresh token")
 		return
 	}
 
-	result, err := h.svc.Refresh(r.Context(), cookie.Value)
+	result, err := h.svc.Refresh(r.Context(), rawToken)
 	switch {
 	case errors.Is(err, ErrInvalidToken):
-		h.clearRefreshCookie(w)
+		if !mobile {
+			h.clearRefreshCookie(w)
+		}
 		httpresponse.WriteError(w, http.StatusUnauthorized, "unauthorized", "invalid or expired refresh token")
 	case err != nil:
 		httpresponse.WriteError(w, http.StatusInternalServerError, "internal_error", "failed to refresh session")
 	default:
-		h.setRefreshCookie(w, result.RefreshToken)
-		httpresponse.WriteData(w, http.StatusOK, authResponse{
-			AccessToken: result.AccessToken,
-			User:        toUserResponse(result.User),
-		})
+		h.writeSession(w, http.StatusOK, result, mobile)
 	}
 }
 
 // Logout handles POST /api/v1/auth/logout
 func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
+	h.logout(w, r, false)
+}
+
+// MobileLogout uses explicit tokens and never reads or writes browser cookies.
+func (h *Handler) MobileLogout(w http.ResponseWriter, r *http.Request) {
+	h.logout(w, r, true)
+}
+
+func (h *Handler) logout(w http.ResponseWriter, r *http.Request, mobile bool) {
 	w.Header().Set("Cache-Control", "no-store")
-	if cookie, err := r.Cookie(refreshCookieName); err == nil && cookie.Value != "" {
-		_ = h.svc.Logout(r.Context(), cookie.Value) // best-effort; always clear the cookie
+	if mobile {
+		rawToken, err := refreshTokenFromRequest(r, true)
+		if err != nil || rawToken == "" {
+			httpresponse.WriteError(w, http.StatusBadRequest, "invalid_body", "refresh_token is required")
+			return
+		}
+		if err := h.svc.Logout(r.Context(), rawToken); err != nil {
+			httpresponse.WriteError(w, http.StatusInternalServerError, "internal_error", "failed to revoke session")
+			return
+		}
+	} else {
+		if cookie, err := r.Cookie(refreshCookieName); err == nil && cookie.Value != "" {
+			_ = h.svc.Logout(r.Context(), cookie.Value)
+		}
+		h.clearRefreshCookie(w)
 	}
-	h.clearRefreshCookie(w)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -237,4 +282,35 @@ func (h *Handler) sameSite() http.SameSite {
 		return http.SameSiteNoneMode
 	}
 	return http.SameSiteLaxMode
+}
+
+// Transport choice is made by the registered route, never by a request header.
+func (h *Handler) writeSession(w http.ResponseWriter, status int, result *AuthResult, mobile bool) {
+	response := authResponse{AccessToken: result.AccessToken, User: toUserResponse(result.User)}
+	if mobile {
+		response.RefreshToken = result.RefreshToken
+	} else {
+		h.setRefreshCookie(w, result.RefreshToken)
+	}
+	httpresponse.WriteData(w, status, response)
+}
+
+func refreshTokenFromRequest(r *http.Request, mobile bool) (string, error) {
+	if !mobile {
+		cookie, err := r.Cookie(refreshCookieName)
+		if err != nil {
+			return "", err
+		}
+		return cookie.Value, nil
+	}
+	var request struct {
+		RefreshToken string `json:"refresh_token"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		return "", err
+	}
+	if len(request.RefreshToken) > 256 {
+		return "", ErrInvalidToken
+	}
+	return request.RefreshToken, nil
 }

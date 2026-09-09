@@ -179,6 +179,9 @@ func (s *Service) Refresh(ctx context.Context, rawRefreshToken string) (*AuthRes
 	}
 
 	if err := s.repo.RevokeRefreshToken(ctx, stored.ID, s.now()); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return nil, ErrInvalidToken
+		}
 		return nil, err
 	}
 
