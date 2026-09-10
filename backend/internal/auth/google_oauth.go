@@ -27,10 +27,6 @@ const (
 	googleAuthorizeURL     = "https://accounts.google.com/o/oauth2/v2/auth"
 	googleTokenURL         = "https://oauth2.googleapis.com/token"
 	googleUserInfoURL      = "https://openidconnect.googleapis.com/v1/userinfo"
-	// mobileDeepLinkRedirect must match the "scheme" in mobile/app.json plus the path the
-	// app's GoogleSignInButton listens for. No redirect_uri registration is needed for this
-	// in Google Cloud Console — Google only ever redirects to googleAuthorizeURL's
-	// server-side RedirectURL above; this is *our own* second redirect afterward.
 	mobileDeepLinkRedirect = "unityrun://auth/callback"
 	mobileCodeTTL          = 60 * time.Second
 )
@@ -44,8 +40,9 @@ type GoogleOAuthConfig struct {
 }
 
 type googleOAuthFlow struct {
-	config GoogleOAuthConfig
-	client *http.Client
+	config   GoogleOAuthConfig
+	client   *http.Client
+	verifier *googleIDTokenVerifier
 }
 
 // ConfigureGoogle enables Google sign-in. Leaving ClientID empty keeps the provider disabled and the normal password flow unchanged
@@ -54,14 +51,14 @@ func (h *Handler) ConfigureGoogle(config GoogleOAuthConfig) {
 		h.google = nil
 		return
 	}
+	client := &http.Client{Timeout: 10 * time.Second}
 	h.google = &googleOAuthFlow{
 		config: config,
-		client: &http.Client{Timeout: 10 * time.Second},
+		client: client,
+		verifier: newGoogleIDTokenVerifier(client, config.ClientID),
 	}
 }
 
-// ConfigureGoogleMobile enables the mobile deep-link handoff for Google sign-in (see
-// completeMobileGoogleLogin). rdb may be nil to disable it without touching the web flow.
 func (h *Handler) ConfigureGoogleMobile(rdb *redis.Client) {
 	h.mobileCodes = rdb
 }
@@ -75,10 +72,6 @@ func (h *Handler) Providers(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
-// GoogleStart begins the authorization-code flow with a browser-bound state. The mobile app
-// and the web app share this single entry point and the single Google OAuth client already
-// configured for it — passing ?platform=mobile is the only difference, and it only changes
-// where GoogleCallback sends the browser afterward.
 func (h *Handler) GoogleStart(w http.ResponseWriter, r *http.Request) {
 	if h.google == nil {
 		httpresponse.WriteError(w, http.StatusNotFound, "provider_unavailable", "Google sign-in is not configured")
@@ -153,11 +146,6 @@ func (h *Handler) GoogleCallback(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, destination, http.StatusFound)
 }
 
-// completeMobileGoogleLogin hands the already-issued token pair to the mobile app via a
-// short-lived, single-use opaque code instead of putting bearer tokens directly in a URL
-// (which browsers and OS-level history/logs can retain). The app's GoogleSignInButton opens
-// this whole flow in an ephemeral auth session and never sees anything but this final
-// mobileDeepLinkRedirect, which it already knows to expect (mobile/app.json's "scheme").
 func (h *Handler) completeMobileGoogleLogin(w http.ResponseWriter, r *http.Request, result *AuthResult) {
 	if h.mobileCodes == nil {
 		h.redirectOAuthError(w, r, true, "mobile_unavailable")
@@ -215,6 +203,41 @@ func (h *Handler) MobileGoogleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpresponse.WriteData(w, http.StatusOK, response)
+}
+
+// MobileGoogleSignIn verifies a Google ID token from the mobile app's native Google Sign-In
+// SDK (no browser, no deep link) and issues a bearer session directly. Unlike
+// MobileGoogleCallback, this never touches h.mobileCodes: the ID token itself, once verified
+// against Google's public keys, is proof enough of who signed in.
+func (h *Handler) MobileGoogleSignIn(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	if h.google == nil {
+		httpresponse.WriteError(w, http.StatusNotFound, "provider_unavailable", "Google sign-in is not configured")
+		return
+	}
+	var req struct {
+		IDToken string `json:"id_token"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpresponse.WriteError(w, http.StatusBadRequest, "invalid_body", "malformed JSON body")
+		return
+	}
+	req.IDToken = strings.TrimSpace(req.IDToken)
+	if req.IDToken == "" {
+		httpresponse.WriteError(w, http.StatusBadRequest, "missing_id_token", "id_token is required")
+		return
+	}
+	profile, err := h.google.verifier.verify(r.Context(), req.IDToken)
+	if err != nil {
+		httpresponse.WriteError(w, http.StatusUnauthorized, "invalid_id_token", "could not verify Google sign-in")
+		return
+	}
+	result, err := h.svc.LoginWithGoogle(r.Context(), profile)
+	if err != nil {
+		httpresponse.WriteError(w, http.StatusUnauthorized, "account_unavailable", "could not complete Google sign-in")
+		return
+	}
+	h.writeSession(w, http.StatusOK, result, true)
 }
 
 func mobileCodeRedisKey(code string) string {

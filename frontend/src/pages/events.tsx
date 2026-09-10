@@ -34,9 +34,6 @@ export default function EventsPage() {
   const router = useRouter();
   const seeded = useRef(false);
 
-  // Filters live in the URL so a filtered board can be shared, bookmarked, and restored by
-  // the back button. Previously they were component state only, so /events always reopened
-  // showing everything no matter how the runner got there.
   useEffect(() => {
     if (!router.isReady || seeded.current) return;
     seeded.current = true;
@@ -58,8 +55,7 @@ export default function EventsPage() {
     const desired = new URLSearchParams(next).toString();
     if (current === desired) return;
     router.replace({ pathname: "/events", query: next }, undefined, { shallow: true });
-    // router is intentionally omitted: including it re-runs this on every URL write.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    
   }, [tab, month, location, query]);
 
   useEffect(() => {

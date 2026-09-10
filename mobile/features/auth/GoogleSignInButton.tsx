@@ -5,19 +5,21 @@ import { Button, Copy } from "../../components/ui";
 import { colors } from "../../constants/theme";
 import { useApi } from "../../services/api/provider";
 
-// Must match mobile/app.json's "scheme" plus the path the backend's
-// completeMobileGoogleLogin redirects to.
-const DEEP_LINK_REDIRECT = "unityrun://auth/callback";
+const REDIRECT_URL = "unityrun://auth/callback";
 
 /**
- * Opens the *same* /auth/google flow the website uses, in a system browser tab — same Google
- * OAuth client, no separate native client to register in Cloud Console. The backend recognizes
- * ?platform=mobile and, instead of setting a cookie and redirecting to the web app, hands back
- * a short-lived one-time code via DEEP_LINK_REDIRECT, which this screen exchanges for the
- * actual bearer session.
+ * Browser-based Google Sign-In: reuses the same OAuth flow the web app already has (see
+ * backend/internal/auth/google_oauth.go), opened in an OS-level ephemeral browser session
+ * (ASWebAuthenticationSession on iOS, Custom Tabs on Android) instead of the native
+ * Google Sign-In SDK. No GoogleService-Info.plist, no per-platform OAuth client, no extra
+ * Google Cloud Console setup -- just the web OAuth client the backend already has.
+ *
+ * The backend redirects the browser straight to REDIRECT_URL with a short-lived, single-use
+ * code (see completeMobileGoogleLogin); we hand that code back to the backend to exchange it
+ * for the actual bearer session (see MobileGoogleCallback).
  */
 export function GoogleSignInButton() {
-  const { apiOrigin, session } = useApi();
+  const { session, apiOrigin } = useApi();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -26,25 +28,12 @@ export function GoogleSignInButton() {
     setError("");
     try {
       const startUrl = `${apiOrigin}/api/v1/auth/google?platform=mobile`;
-      const result = await WebBrowser.openAuthSessionAsync(startUrl, DEEP_LINK_REDIRECT);
-      if (result.type !== "success" || !result.url) {
-        if (result.type !== "cancel" && result.type !== "dismiss")
-          setError("Could not complete Google sign-in.");
-        return;
-      }
-      const url = new URL(result.url);
-      const oauthError = url.searchParams.get("error");
-      if (oauthError) {
-        setError(
-          oauthError === "access_denied"
-            ? "Google sign-in was cancelled."
-            : "Could not sign in with Google. Please try again.",
-        );
-        return;
-      }
-      const code = url.searchParams.get("code");
-      if (!code) {
-        setError("Google sign-in did not return a code.");
+      const result = await WebBrowser.openAuthSessionAsync(startUrl, REDIRECT_URL);
+      if (result.type !== "success") return; // user cancelled/dismissed
+      const redirect = new URL(result.url);
+      const code = redirect.searchParams.get("code");
+      if (redirect.searchParams.get("error") || !code) {
+        setError("Could not sign in with Google.");
         return;
       }
       await session.loginWithGoogle(code);

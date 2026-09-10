@@ -22,7 +22,8 @@ import type { Me, PaymentCheckout } from "../../services/api/types";
 import { useEvent, useCategoryAvailability } from "./queries";
 import { useMyRegistrations, useRegisterForEvent } from "../registrations/queries";
 import { BakongPayment } from "../payment/BakongPayment";
-import { money } from "./format";
+import { ApiError } from "../../services/api/client";
+import { money, registrationDeadlineClosed, registrationDeadlineLabel } from "./format";
 
 const schema = z.object({
   full_name: z.string().trim().min(1, "Enter your full name."),
@@ -65,6 +66,7 @@ export default function RegisterScreen() {
   const [gender, setGender] = useState("OTHER");
   const [tshirtSize, setTshirtSize] = useState("M");
   const [submitError, setSubmitError] = useState("");
+  const [retrying, setRetrying] = useState(false);
   const [payment, setPayment] = useState<PaymentCheckout | null>(null);
 
   const profile = useQuery({
@@ -118,6 +120,25 @@ export default function RegisterScreen() {
   const selected = openCategories.find((c) => c.id === category) || null;
   const canRegister = event?.status === "REGISTRATION_OPEN" && openCategories.length > 0;
 
+  // A category can fill up or hit its own cutoff (registration_deadline) while the runner is
+  // still filling out the form -- catch that here instead of letting them submit into a
+  // confusing "registration is not open" error after finishing every field.
+  useEffect(() => {
+    if (!category) return;
+    const stillOpen = openCategories.find((c) => c.id === category);
+    const unavailable =
+      !stillOpen ||
+      availability[category]?.available === 0 ||
+      registrationDeadlineClosed(stillOpen.registration_deadline);
+    if (unavailable) {
+      setCategory("");
+      setSubmitError(
+        `${stillOpen?.name || "That entry"} just filled up while you were entering your details. Choose another distance to continue.`,
+      );
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [availability, openCategories]);
+
   const existingEntry = (mine.data || []).find(
     (r) =>
       r.event_id === event?.id && (r.status === "PENDING" || r.status === "CONFIRMED"),
@@ -130,27 +151,44 @@ export default function RegisterScreen() {
       return;
     }
     setSubmitError("");
-    try {
-      const result = await register.mutateAsync({
-        event_category_id: category,
-        full_name: values.full_name,
-        email: values.email,
-        phone: values.phone,
-        gender,
-        date_of_birth: values.date_of_birth,
-        emergency_contact_name: values.emergency_contact_name,
-        emergency_contact_phone: values.emergency_contact_phone,
-        tshirt_size: tshirtSize,
-      });
-      if (result.payment?.status === "PENDING") {
-        setPayment(result.payment);
+    const payload = {
+      event_category_id: category,
+      full_name: values.full_name,
+      email: values.email,
+      phone: values.phone,
+      gender,
+      date_of_birth: values.date_of_birth,
+      emergency_contact_name: values.emergency_contact_name,
+      emergency_contact_phone: values.emergency_contact_phone,
+      tshirt_size: tshirtSize,
+    };
+    // The category is briefly locked per in-flight checkout (see registrations.Locker,
+    // 5s TTL) -- a "busy" 429 means someone else is mid-checkout for the same category, not
+    // that this entry failed, so retry a couple of times before bothering the runner with it.
+    const attempts = 3;
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+      try {
+        const result = await register.mutateAsync(payload);
+        setRetrying(false);
+        if (result.payment?.status === "PENDING") {
+          setPayment(result.payment);
+          return;
+        }
+        router.replace("/(tabs)/account");
+        return;
+      } catch (caught) {
+        const busy = caught instanceof ApiError && caught.code === "busy";
+        if (busy && attempt < attempts) {
+          setRetrying(true);
+          await new Promise((resolve) => setTimeout(resolve, attempt * 1200));
+          continue;
+        }
+        setRetrying(false);
+        setSubmitError(
+          caught instanceof Error ? caught.message : "Registration could not be completed.",
+        );
         return;
       }
-      router.replace("/(tabs)/account");
-    } catch (caught) {
-      setSubmitError(
-        caught instanceof Error ? caught.message : "Registration could not be completed.",
-      );
     }
   });
 
@@ -253,12 +291,22 @@ export default function RegisterScreen() {
               const isSelected = item.id === category;
               const itemAvailability = availability[item.id];
               const full = itemAvailability?.available === 0;
+              const deadlineClosed = registrationDeadlineClosed(item.registration_deadline);
+              const unavailable = full || deadlineClosed;
+              const deadlineLabel = registrationDeadlineLabel(item.registration_deadline);
+              const status = full
+                ? " · Full"
+                : deadlineClosed
+                  ? " · Cutoff passed"
+                  : deadlineLabel
+                    ? ` · ${deadlineLabel}`
+                    : "";
               return (
                 <Button
                   key={item.id}
-                  disabled={full}
+                  disabled={unavailable}
                   secondary={!isSelected}
-                  title={`${item.distance} · ${item.name} — ${money(item.price_cents, item.currency)}${full ? " · Full" : ""}`}
+                  title={`${item.distance} · ${item.name} — ${money(item.price_cents, item.currency)}${status}`}
                   onPress={() => {
                     setCategory(item.id);
                     setSubmitError("");
@@ -366,7 +414,13 @@ export default function RegisterScreen() {
         </View>
 
         <Button
-          title={isSubmitting || register.isPending ? "Claiming" : "Claim my place"}
+          title={
+            !(isSubmitting || register.isPending)
+              ? "Claim my place"
+              : retrying
+                ? "Retrying"
+                : "Claiming"
+          }
           busy={isSubmitting || register.isPending}
           disabled={!category}
           onPress={() => {

@@ -112,6 +112,7 @@ func NewRouter(deps Deps) http.Handler {
 				m.Post("/register", deps.AuthHandler.MobileRegister)
 				m.Post("/login", deps.AuthHandler.MobileLogin)
 				m.Post("/google/callback", deps.AuthHandler.MobileGoogleCallback)
+				m.Post("/google", deps.AuthHandler.MobileGoogleSignIn)
 				m.Post("/refresh", deps.AuthHandler.MobileRefresh)
 				m.Post("/logout", deps.AuthHandler.MobileLogout)
 			})

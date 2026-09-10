@@ -81,9 +81,8 @@ export class Session {
       this.establish(`/api/v1/auth/mobile/${kind}`, credentials),
     );
   }
-  /** code is the one-time handoff code from GoogleSignInButton's deep-link callback — the
-   * browser-based flow already completed sign-in with Google server-side; this just redeems
-   * that code for the bearer session. */
+  /** code is the one-time code from GoogleSignInButton's browser-based OAuth redirect — the
+   * backend exchanges it for the bearer session it already established server-side. */
   loginWithGoogle(code: string) {
     return this.serialize(() =>
       this.establish("/api/v1/auth/mobile/google/callback", { code }),

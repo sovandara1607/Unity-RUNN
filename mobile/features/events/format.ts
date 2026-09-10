@@ -43,6 +43,19 @@ export function assetUrl(value: string, apiOrigin: string, webOrigin: string) {
     return undefined;
   }
 }
+/** A category can cut off entries before the event's own registration window closes
+ * (see registration_deadline on EventCategory). Mirrors web's lib/registrationDeadline.ts. */
+export function registrationDeadlineClosed(value?: string | null, now: Date = new Date()) {
+  if (!value) return false;
+  const deadline = new Date(value);
+  return Number.isFinite(deadline.getTime()) && now.getTime() > deadline.getTime();
+}
+export function registrationDeadlineLabel(value?: string | null) {
+  if (!value) return null;
+  const deadline = new Date(value);
+  if (!Number.isFinite(deadline.getTime())) return null;
+  return `Closes ${new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: false }).format(deadline)}`;
+}
 export const statusLabel: Record<string, string> = {
   REGISTRATION_OPEN: "Registration open",
   PUBLISHED: "Coming up",

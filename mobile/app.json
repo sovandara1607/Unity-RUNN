@@ -28,7 +28,6 @@
       "expo-secure-store",
       "expo-font",
       "./plugins/withSceneDelegate",
-      "expo-web-browser",
       [
         "expo-splash-screen",
         {
