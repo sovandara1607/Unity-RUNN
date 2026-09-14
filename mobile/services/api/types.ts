@@ -60,6 +60,19 @@ export type EventDetail = RunEvent & {
   faqs: { id: string; question: string; answer: string; sort_order: number }[];
   rules: { id: string; rule: string; sort_order: number }[];
 };
+export type HeroSlide = {
+  image_url: string;
+  alt: string;
+  eyebrow: string;
+  title: string;
+  copy: string;
+};
+// Only the fields the app actually reads from GET /api/v1/site-config
+// (backend internal/siteconfig.Settings has more admin-editable fields --
+// club branding, announcement banner, mission copy -- not needed here yet).
+export type SiteConfig = {
+  hero_slides: HeroSlide[];
+};
 export type Profile = {
   id: string;
   user_id: string;
@@ -116,6 +129,33 @@ export type Registration = {
   checked_in_at?: string | null;
   event?: RunEvent;
   category?: Category;
+};
+// Mirrors backend/internal/liveactivities/model.go RaceStatus exactly.
+export type RaceLiveActivityStatus =
+  | "UPCOMING"
+  | "CHECK_IN"
+  | "STARTING"
+  | "LIVE"
+  | "FINISHED"
+  | "CANCELLED";
+// Mirrors backend/internal/liveactivities/model.go LiveActivity's JSON shape.
+// push_token is intentionally absent -- the backend never returns it (see
+// the Go struct's `json:"-"` tag), so there is nothing here for a client to
+// leak even by accident.
+export type LiveActivityRecord = {
+  id: string;
+  user_id: string;
+  event_id: string;
+  registration_id?: string;
+  activity_id: string;
+  device_id?: string;
+  platform: "ios";
+  status: "ACTIVE" | "ENDED" | "EXPIRED";
+  race_status: RaceLiveActivityStatus;
+  created_at: string;
+  updated_at: string;
+  expires_at?: string;
+  ended_at?: string;
 };
 export type PaymentCheckout = {
   registration_id: string;

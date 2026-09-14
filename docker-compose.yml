@@ -9,7 +9,7 @@ services:
     command:
       - postgres
       - -c
-      - max_connections=30
+      - max_connections=50
       - -c
       - shared_buffers=64MB
       - -c
@@ -71,6 +71,41 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  # Sits between the API/worker and Postgres: transaction pooling lets each
+  # replica keep a generous local pgx pool (DATABASE_MAX_CONN) while Postgres
+  # itself only ever sees PGBOUNCER_DEFAULT_POOL_SIZE real backend
+  # connections, regardless of how many API replicas are running.
+  pgbouncer:
+    image: edoburu/pgbouncer:v1.24.1-p1
+    restart: unless-stopped
+    init: true
+    mem_limit: ${PGBOUNCER_MEMORY_LIMIT:-64m}
+    cpus: ${PGBOUNCER_CPU_LIMIT:-0.25}
+    pids_limit: 50
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-unity}:${POSTGRES_PASSWORD:-unity}@postgres:5432/${POSTGRES_DB:-unity_run_club}
+      LISTEN_PORT: "6432"
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: ${PGBOUNCER_MAX_CLIENT_CONN:-1000}
+      DEFAULT_POOL_SIZE: ${PGBOUNCER_DEFAULT_POOL_SIZE:-20}
+      AUTH_TYPE: scram-sha-256
+    expose:
+      - "6432"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 6432 -U ${POSTGRES_USER:-unity}"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   api: &api-service
     build:
       context: ./backend
@@ -86,8 +121,10 @@ services:
     environment: &api-environment
       PROCESS_ROLE: api
       PORT: "8080"
-      DATABASE_MAX_CONN: ${DATABASE_MAX_CONN:-8}
-      DATABASE_URL: postgres://${POSTGRES_USER:-unity}:${POSTGRES_PASSWORD:-unity}@postgres:5432/${POSTGRES_DB:-unity_run_club}?sslmode=disable
+      METRICS_PORT: "9091"
+      DATABASE_MAX_CONN: ${DATABASE_MAX_CONN:-20}
+      DATABASE_URL: postgres://${POSTGRES_USER:-unity}:${POSTGRES_PASSWORD:-unity}@pgbouncer:6432/${POSTGRES_DB:-unity_run_club}?sslmode=disable
+      DATABASE_PGBOUNCER_COMPAT: "true"
       REDIS_ADDR: redis:6379
       REALTIME_INTERNAL_URL: http://realtime:8081
       UPLOAD_DIR: /app/uploads
@@ -95,8 +132,11 @@ services:
       GOMAXPROCS: ${API_GO_MAX_PROCS:-1}
     expose:
       - "8080"
+      - "9091"
     depends_on:
       postgres:
+        condition: service_healthy
+      pgbouncer:
         condition: service_healthy
       redis:
         condition: service_healthy
@@ -124,7 +164,7 @@ services:
     environment:
       <<: *api-environment
       PROCESS_ROLE: worker
-      DATABASE_MAX_CONN: ${WORKER_DATABASE_MAX_CONN:-4}
+      DATABASE_MAX_CONN: ${WORKER_DATABASE_MAX_CONN:-10}
 
   api-gateway:
     image: traefik:v3.7.12

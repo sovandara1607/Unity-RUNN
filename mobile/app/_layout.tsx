@@ -35,7 +35,7 @@ export default function Layout() {
     return (
       <SafeAreaProvider>
         <View
-          style={{ flex: 1, paddingTop: 70, backgroundColor: colors.white }}
+          style={{ flex: 1, paddingTop: 70, backgroundColor: colors.ink }}
         >
           <Feedback title="Set up your connection" message={config.error} />
         </View>
@@ -44,14 +44,14 @@ export default function Layout() {
   return (
     <SafeAreaProvider>
       <ApiProvider config={config.value}>
-        <StatusBar style="dark" />
+        <StatusBar style="light" />
         <Stack
           screenOptions={{
             headerShadowVisible: false,
-            headerTintColor: colors.ink,
-            headerStyle: { backgroundColor: colors.white },
-            headerTitleStyle: { fontFamily: fonts.bold },
-            contentStyle: { backgroundColor: colors.white },
+            headerTintColor: colors.white,
+            headerStyle: { backgroundColor: colors.ink },
+            headerTitleStyle: { fontFamily: fonts.bold, color: colors.white },
+            contentStyle: { backgroundColor: colors.ink },
           }}
         >
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />

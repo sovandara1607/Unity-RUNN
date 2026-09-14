@@ -5,13 +5,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/unity-run-club/api/internal/auth"
 	"github.com/unity-run-club/api/internal/events"
+	"github.com/unity-run-club/api/internal/idempotency"
+	"github.com/unity-run-club/api/internal/metrics"
 	"github.com/unity-run-club/api/internal/payments"
 	"github.com/unity-run-club/api/internal/tokenhash"
 )
@@ -19,6 +24,9 @@ import (
 const (
 	defaultListLimit = 20
 	maxListLimit     = 1000
+
+	// idempotencyRoute scopes stored idempotency records to this endpoint.
+	idempotencyRoute = "POST /events/{id}/registrations"
 )
 
 var ErrInvalidCategory = errors.New("registrations: invalid category for this event")
@@ -68,12 +76,19 @@ type Service struct {
 	locker      *Locker
 	availCache  *AvailabilityCache
 	rateLimiter *RateLimiter
+	idemSvc     *idempotency.Service
+	// pool backs idemSvc's standalone (non-transactional) writes on the paid
+	// path, where the outcome is only known after an external payment-provider
+	// call that must not happen inside an open DB transaction. Nil-safe: left
+	// nil whenever idemSvc is nil (e.g. in unit tests).
+	pool *pgxpool.Pool
 
 	now func() time.Time
 }
 
 func NewService(repo regRepository, eventsRepo eventsReader, provider payments.Provider,
-	locker *Locker, availCache *AvailabilityCache, rateLimiter *RateLimiter, notifier RegistrationNotifier) *Service {
+	locker *Locker, availCache *AvailabilityCache, rateLimiter *RateLimiter, notifier RegistrationNotifier,
+	idemSvc *idempotency.Service, pool *pgxpool.Pool) *Service {
 	return &Service{
 		repo:        repo,
 		eventsRepo:  eventsRepo,
@@ -82,6 +97,8 @@ func NewService(repo regRepository, eventsRepo eventsReader, provider payments.P
 		locker:      locker,
 		availCache:  availCache,
 		rateLimiter: rateLimiter,
+		idemSvc:     idemSvc,
+		pool:        pool,
 		now:         time.Now,
 	}
 }
@@ -90,6 +107,14 @@ type RegisterResult struct {
 	Registration Registration
 	TicketToken  string           // raw token, empty if not yet confirmed
 	Payment      *PaymentCheckout `json:"payment,omitempty"`
+
+	// Replayed reports that this result came from a stored idempotency
+	// record rather than a fresh registration attempt; ReplayStatus/ReplayBody
+	// are the exact status/body to write back, and Registration/TicketToken/
+	// Payment above are left zero.
+	Replayed     bool
+	ReplayStatus int
+	ReplayBody   json.RawMessage
 }
 
 type PaymentCheckout struct {
@@ -135,7 +160,21 @@ func (s *Service) expirePendingPayments(ctx context.Context) error {
 	return nil
 }
 
-func (s *Service) Register(ctx context.Context, userID, eventID uuid.UUID, req RegisterRequest) (*RegisterResult, error) {
+func (s *Service) Register(ctx context.Context, userID, eventID uuid.UUID, req RegisterRequest, idemKey, requestHash string) (*RegisterResult, error) {
+	metrics.RegistrationAttemptTotal.Inc()
+
+	if idemKey != "" && s.idemSvc != nil {
+		rec, err := s.idemSvc.Lookup(ctx, userID, idempotencyRoute, idemKey, requestHash)
+		switch {
+		case err == nil:
+			return &RegisterResult{Replayed: true, ReplayStatus: rec.ResponseStatus, ReplayBody: rec.ResponseBody}, nil
+		case errors.Is(err, idempotency.ErrNotFound):
+			// no stored outcome yet, proceed normally
+		default:
+			return nil, err // idempotency.ErrConflict, or a real lookup failure
+		}
+	}
+
 	if err := s.expirePendingPayments(ctx); err != nil {
 		return nil, err
 	}
@@ -211,17 +250,24 @@ func (s *Service) Register(ctx context.Context, userID, eventID uuid.UUID, req R
 
 	var result *RegisterResult
 	if category.PriceCents == 0 {
-		result, err = s.registerFree(ctx, userID, eventID, categoryID, category.Capacity, participant)
+		result, err = s.registerFree(ctx, userID, eventID, categoryID, category.Capacity, participant, idemKey, requestHash)
 	} else {
 		currency := strings.ToUpper(strings.TrimSpace(category.Currency))
 		if currency == "" {
 			currency = "USD"
 		}
-		result, err = s.registerPaid(ctx, userID, eventID, categoryID, category.Capacity, category.PriceCents, currency, participant)
+		result, err = s.registerPaid(ctx, userID, eventID, categoryID, category.Capacity, category.PriceCents, currency, participant, idemKey, requestHash)
 	}
 	if err != nil {
+		switch {
+		case errors.Is(err, ErrCapacityFull):
+			metrics.RegistrationSoldOutTotal.Inc()
+		case errors.Is(err, ErrDuplicateRegistration):
+			metrics.RegistrationConflictTotal.Inc()
+		}
 		return nil, err
 	}
+	metrics.RegistrationSuccessTotal.Inc()
 
 	if s.availCache != nil {
 		_ = s.availCache.Invalidate(ctx, categoryID)
@@ -250,16 +296,32 @@ func (s *Service) checkRegistrationOpen(event *events.Event, category *events.Ev
 	return nil
 }
 
-func (s *Service) registerFree(ctx context.Context, userID, eventID, categoryID uuid.UUID, capacity int, participant ParticipantInfo) (*RegisterResult, error) {
+func (s *Service) registerFree(ctx context.Context, userID, eventID, categoryID uuid.UUID, capacity int, participant ParticipantInfo, idemKey, requestHash string) (*RegisterResult, error) {
 	rawToken, tokenHash, err := generateTicketToken()
 	if err != nil {
 		return nil, err
 	}
 
-	res, err := s.repo.Create(ctx, CreateParams{
+	params := CreateParams{
 		UserID: userID, EventID: eventID, EventCategoryID: categoryID, Capacity: capacity,
 		Participant: participant, Confirm: true, TicketTokenHash: tokenHash,
-	})
+	}
+	if idemKey != "" && s.idemSvc != nil {
+		params.PostInsertHook = func(ctx context.Context, tx pgx.Tx, result *CreateResult) error {
+			body, err := json.Marshal(map[string]any{
+				"registration": result.Registration,
+				"ticket_token": rawToken,
+				"payment":      (*PaymentCheckout)(nil),
+			})
+			if err != nil {
+				return fmt.Errorf("registrations: encode idempotent response: %w", err)
+			}
+			// Stored in the same transaction as the registration/ticket insert: true atomicity.
+			return s.idemSvc.StoreOutcome(ctx, tx, userID, idempotencyRoute, idemKey, requestHash, http.StatusCreated, body)
+		}
+	}
+
+	res, err := s.repo.Create(ctx, params)
 	if err != nil {
 		return nil, err
 	}
@@ -271,7 +333,24 @@ func (s *Service) registerFree(ctx context.Context, userID, eventID, categoryID 
 	return &RegisterResult{Registration: res.Registration, TicketToken: rawToken}, nil
 }
 
-func (s *Service) registerPaid(ctx context.Context, userID, eventID, categoryID uuid.UUID, capacity, priceCents int, currency string, participant ParticipantInfo) (*RegisterResult, error) {
+// storeIdempotentOutcome persists a successful paid-path outcome as a
+// best-effort, non-transactional write (the outcome is only known after an
+// external payment-provider call, which must not run inside a DB
+// transaction). A failure here never fails an already-successful
+// registration — the partial unique index remains the real safety net for a
+// retried request that misses the replay.
+func (s *Service) storeIdempotentOutcome(ctx context.Context, userID uuid.UUID, idemKey, requestHash string, status int, data map[string]any) {
+	if idemKey == "" || s.idemSvc == nil || s.pool == nil {
+		return
+	}
+	body, err := json.Marshal(data)
+	if err != nil {
+		return
+	}
+	_ = s.idemSvc.StoreOutcome(ctx, s.pool, userID, idempotencyRoute, idemKey, requestHash, status, body)
+}
+
+func (s *Service) registerPaid(ctx context.Context, userID, eventID, categoryID uuid.UUID, capacity, priceCents int, currency string, participant ParticipantInfo, idemKey, requestHash string) (*RegisterResult, error) {
 	res, err := s.repo.Create(ctx, CreateParams{
 		UserID: userID, EventID: eventID, EventCategoryID: categoryID, Capacity: capacity,
 		Participant: participant, Confirm: false,
@@ -310,7 +389,11 @@ func (s *Service) registerPaid(ctx context.Context, userID, eventID, categoryID 
 		if payment.Status == payments.StatusFailed {
 			return nil, s.releaseFailedPaymentRegistration(ctx, reg.ID, ErrPaymentUnavailable)
 		}
-		return &RegisterResult{Registration: reg, Payment: checkout}, nil
+		result := &RegisterResult{Registration: reg, Payment: checkout}
+		s.storeIdempotentOutcome(ctx, userID, idemKey, requestHash, http.StatusCreated, map[string]any{
+			"registration": result.Registration, "ticket_token": "", "payment": result.Payment,
+		})
+		return result, nil
 	}
 
 	rawToken, tokenHash, err := generateTicketToken()
@@ -331,7 +414,11 @@ func (s *Service) registerPaid(ctx context.Context, userID, eventID, categoryID 
 		s.notifier.NotifyPaymentConfirmed(ctx, confirmed.Registration, priceCents)
 	}
 
-	return &RegisterResult{Registration: confirmed.Registration, TicketToken: rawToken}, nil
+	result := &RegisterResult{Registration: confirmed.Registration, TicketToken: rawToken}
+	s.storeIdempotentOutcome(ctx, userID, idemKey, requestHash, http.StatusCreated, map[string]any{
+		"registration": result.Registration, "ticket_token": result.TicketToken, "payment": result.Payment,
+	})
+	return result, nil
 }
 
 func (s *Service) releaseFailedPaymentRegistration(ctx context.Context, registrationID uuid.UUID, cause error) error {
@@ -379,8 +466,11 @@ func (s *Service) reconcilePayment(ctx context.Context, repo paymentReconciliati
 			categoryID, expired, expireErr := repo.ExpireClaimedPayment(ctx, stored.RegistrationID, stored.ID, workerID)
 			if expireErr != nil {
 				reschedule(time.Minute, expireErr.Error())
-			} else if expired && s.availCache != nil {
-				_ = s.availCache.Invalidate(ctx, categoryID)
+			} else if expired {
+				metrics.PaymentFailureTotal.Inc()
+				if s.availCache != nil {
+					_ = s.availCache.Invalidate(ctx, categoryID)
+				}
 			}
 			return
 		}
@@ -405,6 +495,9 @@ func (s *Service) reconcilePayment(ctx context.Context, repo paymentReconciliati
 	if err != nil {
 		reschedule(time.Minute, err.Error())
 		return
+	}
+	if newlyConfirmed {
+		metrics.PaymentSuccessTotal.Inc()
 	}
 	if s.availCache != nil {
 		_ = s.availCache.Invalidate(ctx, confirmed.EventCategoryID)
@@ -465,6 +558,7 @@ func (s *Service) VerifyPayment(ctx context.Context, callerID uuid.UUID, callerR
 	expired := stored.ExpiresAt != nil && s.now().After(*stored.ExpiresAt)
 	if stored.Provider != s.provider.Name() || stored.ProviderReference == "" {
 		if expired {
+			metrics.PaymentFailureTotal.Inc()
 			_ = s.expirePendingPayments(ctx)
 			return nil, ErrPaymentExpired
 		}
@@ -478,6 +572,7 @@ func (s *Service) VerifyPayment(ctx context.Context, callerID uuid.UUID, callerR
 	checkout.Status = string(providerPayment.Status)
 	if providerPayment.Status == payments.StatusPending {
 		if expired {
+			metrics.PaymentFailureTotal.Inc()
 			_ = s.expirePendingPayments(ctx)
 			return nil, ErrPaymentExpired
 		}
@@ -497,6 +592,9 @@ func (s *Service) VerifyPayment(ctx context.Context, callerID uuid.UUID, callerR
 	confirmed, newlyConfirmed, err := pr.ConfirmStoredPayment(ctx, registrationID, stored.ID, tokenHash)
 	if err != nil {
 		return nil, err
+	}
+	if newlyConfirmed {
+		metrics.PaymentSuccessTotal.Inc()
 	}
 	checkout.Status = string(payments.StatusSucceeded)
 	if s.availCache != nil {
@@ -611,8 +709,10 @@ func (s *Service) GetAvailability(ctx context.Context, eventID, categoryID uuid.
 
 	if s.availCache != nil {
 		if cached, err := s.availCache.Get(ctx, categoryID); err == nil && cached != nil {
+			metrics.RedisHitsTotal.Inc()
 			return cached, nil
 		}
+		metrics.RedisMissesTotal.Inc()
 	}
 
 	taken, err := s.repo.CountActive(ctx, categoryID)

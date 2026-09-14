@@ -18,7 +18,11 @@ const REDIRECT_URL = "unityrun://auth/callback";
  * code (see completeMobileGoogleLogin); we hand that code back to the backend to exchange it
  * for the actual bearer session (see MobileGoogleCallback).
  */
-export function GoogleSignInButton() {
+export function GoogleSignInButton({
+  disabled = false,
+}: {
+  disabled?: boolean;
+}) {
   const { session, apiOrigin } = useApi();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -28,7 +32,10 @@ export function GoogleSignInButton() {
     setError("");
     try {
       const startUrl = `${apiOrigin}/api/v1/auth/google?platform=mobile`;
-      const result = await WebBrowser.openAuthSessionAsync(startUrl, REDIRECT_URL);
+      const result = await WebBrowser.openAuthSessionAsync(
+        startUrl,
+        REDIRECT_URL,
+      );
       if (result.type !== "success") return; // user cancelled/dismissed
       const redirect = new URL(result.url);
       const code = redirect.searchParams.get("code");
@@ -39,7 +46,11 @@ export function GoogleSignInButton() {
       await session.loginWithGoogle(code);
       router.replace("/(tabs)/account");
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not sign in with Google.");
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "Could not sign in with Google.",
+      );
     } finally {
       setBusy(false);
     }
@@ -51,6 +62,7 @@ export function GoogleSignInButton() {
         secondary
         title="Continue with Google"
         busy={busy}
+        disabled={disabled}
         onPress={() => {
           void signIn();
         }}

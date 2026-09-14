@@ -4,6 +4,7 @@ import type {
   Availability,
   EventDetail,
   EventPage,
+  SiteConfig,
 } from "../../services/api/types";
 export function useEvents(statuses: string) {
   const { request } = useApi();
@@ -15,10 +16,24 @@ export function useEvents(statuses: string) {
         `/api/v1/events/?limit=20&offset=${pageParam}&statuses=${encodeURIComponent(statuses)}`,
         { signal },
       ),
-    getNextPageParam: (page) =>
-      page.offset + page.events.length < page.total && page.events.length > 0
-        ? page.offset + page.events.length
-        : undefined,
+    getNextPageParam: (page) => {
+      const count = page.events?.length ?? 0;
+      return page.offset + count < page.total && count > 0
+        ? page.offset + count
+        : undefined;
+    },
+  });
+}
+/** Same public GET /api/v1/site-config the web homepage carousel reads (see
+ * frontend/src/components/ClubCarousel.tsx) -- admin-managed hero imagery and
+ * copy, not mobile-only content. Rarely changes, so a long staleTime avoids
+ * refetching it every time the Events screen remounts. */
+export function useSiteConfig() {
+  const { request } = useApi();
+  return useQuery({
+    queryKey: ["site-config"],
+    staleTime: 5 * 60 * 1000,
+    queryFn: ({ signal }) => request<SiteConfig>("/api/v1/site-config", { signal }),
   });
 }
 export function useEvent(slug: string) {

@@ -7,8 +7,12 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/redis/go-redis/v9"
 
 	"github.com/unity-run-club/api/internal/admin"
 	"github.com/unity-run-club/api/internal/auditlog"
@@ -20,10 +24,14 @@ import (
 	"github.com/unity-run-club/api/internal/eventautomations"
 	"github.com/unity-run-club/api/internal/events"
 	apphttp "github.com/unity-run-club/api/internal/http"
+	"github.com/unity-run-club/api/internal/idempotency"
+	"github.com/unity-run-club/api/internal/liveactivities"
 	"github.com/unity-run-club/api/internal/logger"
+	"github.com/unity-run-club/api/internal/metrics"
 	"github.com/unity-run-club/api/internal/notifications"
 	"github.com/unity-run-club/api/internal/objectstore"
 	"github.com/unity-run-club/api/internal/payments"
+	"github.com/unity-run-club/api/internal/ratelimit"
 	"github.com/unity-run-club/api/internal/realtime"
 	"github.com/unity-run-club/api/internal/redisclient"
 	"github.com/unity-run-club/api/internal/registrations"
@@ -35,11 +43,9 @@ import (
 
 // Redis-backed registration tuning.
 const (
-	registrationLockTTL    = 5 * time.Second
-	availabilityCacheTTL   = 5 * time.Second
-	registrationRateLimit  = 5 // attempts
-	registrationRateWindow = time.Minute
-	telegramDeliveryPoll   = 5 * time.Second
+	registrationLockTTL  = 5 * time.Second
+	availabilityCacheTTL = 5 * time.Second
+	telegramDeliveryPoll = 5 * time.Second
 )
 
 func main() {
@@ -56,11 +62,18 @@ func run() error {
 	}
 
 	log := logger.New(cfg.LogLevel)
+	metrics.MustRegister()
 
 	connectCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	db, err := database.Connect(connectCtx, cfg.DatabaseURL, cfg.DatabaseMaxConn)
+	db, err := database.Connect(connectCtx, cfg.DatabaseURL, database.Options{
+		MaxConns:        cfg.DatabaseMaxConn,
+		MinConns:        cfg.DatabaseMinConn,
+		MaxConnLifetime: cfg.DatabaseMaxConnLifetime,
+		MaxConnIdleTime: cfg.DatabaseMaxConnIdleTime,
+		PgBouncerCompat: cfg.DatabasePgBouncerCompat,
+	})
 	if err != nil {
 		log.Error("database_connect_failed", "error", err)
 		return err
@@ -77,7 +90,7 @@ func run() error {
 	tokens := auth.NewTokenIssuer(cfg.JWTSecret, cfg.AccessTokenTTL)
 	authRepo := auth.NewRepository(db.Pool)
 	authSvc := auth.NewService(authRepo, tokens, cfg.BcryptCost, cfg.RefreshTokenTTL)
-	loginLimiter := auth.NewRedisAttemptLimiter(redisClient.Raw(), 10, 15*time.Minute)
+	loginLimiter := auth.NewRedisAttemptLimiter(redisClient.Raw(), cfg.RateLimitLoginMax, cfg.RateLimitLoginWindow)
 	authHandler := auth.NewHandler(authSvc, cfg.RefreshTokenTTL, cfg.AppEnv != "development", loginLimiter)
 	authHandler.ConfigureGoogle(auth.GoogleOAuthConfig{
 		ClientID: cfg.GoogleOAuthClientID, ClientSecret: cfg.GoogleOAuthClientSecret,
@@ -115,7 +128,8 @@ func run() error {
 
 	regLocker := registrations.NewLocker(redisClient.Raw(), registrationLockTTL)
 	regAvailCache := registrations.NewAvailabilityCache(redisClient.Raw(), availabilityCacheTTL)
-	regRateLimiter := registrations.NewRateLimiter(redisClient.Raw(), registrationRateLimit, registrationRateWindow)
+	regRateLimiter := registrations.NewRateLimiter(redisClient.Raw(), cfg.RateLimitRegistrationMax, cfg.RateLimitRegistrationWindow)
+	sharedRateLimiter := ratelimit.NewLimiter(redisClient.Raw())
 	if cfg.AppEnv == "production" && cfg.PaymentProvider == "mock" {
 		return errors.New("PAYMENT_PROVIDER=mock is not allowed in production")
 	}
@@ -125,8 +139,16 @@ func run() error {
 		return err
 	}
 	regNotifier := notifications.NewRegistrationNotifier(notifSvc)
-	regSvc := registrations.NewService(regRepo, eventsRepo, paymentProvider, regLocker, regAvailCache, regRateLimiter, regNotifier)
+	idemRepo := idempotency.NewRepository(db.Pool)
+	idemSvc := idempotency.NewService(idemRepo)
+	regSvc := registrations.NewService(regRepo, eventsRepo, paymentProvider, regLocker, regAvailCache, regRateLimiter, regNotifier, idemSvc, db.Pool)
 	regHandler := registrations.NewHandler(regSvc)
+
+	// No Publisher wired yet -- see internal/liveactivities package doc comment.
+	// Rows are recorded, nothing is pushed to APNs until real credentials exist.
+	liveActivitiesRepo := liveactivities.NewRepository(db.Pool)
+	liveActivitiesSvc := liveactivities.NewService(liveActivitiesRepo, nil)
+	liveActivitiesHandler := liveactivities.NewHandler(liveActivitiesSvc)
 
 	auditRepo := auditlog.NewRepository(db.Pool)
 	auditSvc := auditlog.NewService(auditRepo, log)
@@ -166,40 +188,78 @@ func run() error {
 
 	backgroundCtx, stopBackground := context.WithCancel(context.Background())
 	defer stopBackground()
+	var backgroundWG sync.WaitGroup
+
+	// Metrics gauges are sampled from every process (api replicas and the
+	// worker), since each has its own pgx pool and Redis view.
+	backgroundWG.Add(1)
+	go func() {
+		defer backgroundWG.Done()
+		runMetricsGaugeUpdater(backgroundCtx, db, redisClient.Raw(), 10*time.Second)
+	}()
+
 	if cfg.ProcessRole != "api" {
-		go notifWorker.Run(backgroundCtx)
-		go telegramWorker.Run(backgroundCtx)
-		go reminderScheduler.Run(backgroundCtx)
-		go eventAutomationScheduler.Run(backgroundCtx)
-		go paymentReconciler.Run(backgroundCtx)
+		for _, runWorker := range []func(context.Context){
+			notifWorker.Run,
+			telegramWorker.Run,
+			reminderScheduler.Run,
+			eventAutomationScheduler.Run,
+			paymentReconciler.Run,
+			func(ctx context.Context) { runIdempotencyCleanup(ctx, idemRepo, log, time.Hour) },
+		} {
+			backgroundWG.Add(1)
+			go func(run func(context.Context)) {
+				defer backgroundWG.Done()
+				run(backgroundCtx)
+			}(runWorker)
+		}
 		log.Info("background_jobs_started")
 	}
 
 	router := apphttp.NewRouter(apphttp.Deps{
-		Logger:                  log,
-		DB:                      db,
-		Redis:                   redisClient,
-		CORSAllowedOrigins:      cfg.CORSAllowedOrigins,
-		UploadDir:               cfg.UploadDir,
-		Tokens:                  tokens,
-		AuthHandler:             authHandler,
-		EventsHandler:           eventsHandler,
-		RegistrationsHandler:    regHandler,
-		CheckinHandler:          checkinHandler,
-		AdminHandler:            adminHandler,
-		StatsHandler:            statsHandler,
-		SiteConfigHandler:       siteConfigHandler,
-		SystemStatusHandler:     systemStatusHandler,
-		MediaHandler:            mediaHandler,
-		TelegramHandler:         telegramHandler,
-		AutomationHandler:       automationHandler,
-		EventAutomationsHandler: eventAutomationHandler,
+		Logger:                       log,
+		DB:                           db,
+		Redis:                        redisClient,
+		CORSAllowedOrigins:           cfg.CORSAllowedOrigins,
+		UploadDir:                    cfg.UploadDir,
+		Tokens:                       tokens,
+		AuthHandler:                  authHandler,
+		EventsHandler:                eventsHandler,
+		RegistrationsHandler:         regHandler,
+		LiveActivitiesHandler:        liveActivitiesHandler,
+		CheckinHandler:               checkinHandler,
+		AdminHandler:                 adminHandler,
+		StatsHandler:                 statsHandler,
+		SiteConfigHandler:            siteConfigHandler,
+		SystemStatusHandler:          systemStatusHandler,
+		MediaHandler:                 mediaHandler,
+		TelegramHandler:              telegramHandler,
+		AutomationHandler:            automationHandler,
+		EventAutomationsHandler:      eventAutomationHandler,
+		RateLimiter:                  sharedRateLimiter,
+		EventsReadRateLimitMax:       cfg.RateLimitEventsReadMax,
+		EventsReadRateLimitWindow:    cfg.RateLimitEventsReadWindow,
+		PaymentVerifyRateLimitMax:    cfg.RateLimitPaymentVerifyMax,
+		PaymentVerifyRateLimitWindow: cfg.RateLimitPaymentVerifyWindow,
 	})
 
 	if cfg.ProcessRole == "worker" {
 		router = apphttp.NewHealthRouter(apphttp.Deps{DB: db, Redis: redisClient})
 	}
 	srv := apphttp.NewServer(":"+cfg.Port, router)
+
+	// Metrics are served on a separate, Docker-network-only port (never
+	// published through Traefik's public entrypoint) — see docker-compose's
+	// api/worker `expose` (not `ports`) for METRICS_PORT, mirroring how
+	// Traefik's own control-plane health entrypoint is internal-only.
+	metricsMux := http.NewServeMux()
+	metricsMux.Handle("/metrics", promhttp.Handler())
+	metricsSrv := &http.Server{Addr: ":" + cfg.MetricsPort, Handler: metricsMux}
+	go func() {
+		if err := metricsSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Error("metrics_server_failed", "error", err)
+		}
+	}()
 
 	serverErrCh := make(chan error, 1)
 	go func() {
@@ -230,10 +290,75 @@ func run() error {
 			log.Error("server_shutdown_failed", "error", err)
 			return err
 		}
+		_ = metricsSrv.Shutdown(shutdownCtx)
+
+		// Stop background workers and wait (bounded) for their current unit of
+		// work to finish before the deferred db/redis closes run — otherwise a
+		// worker can still be mid-query when the connections underneath it close.
+		stopBackground()
+		waitCtx, waitCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer waitCancel()
+		done := make(chan struct{})
+		go func() {
+			backgroundWG.Wait()
+			close(done)
+		}()
+		select {
+		case <-done:
+			log.Info("background_jobs_stopped")
+		case <-waitCtx.Done():
+			log.Warn("background_jobs_stop_timeout")
+		}
+
 		log.Info("shutdown_complete")
 	}
 
 	return nil
+}
+
+// runMetricsGaugeUpdater periodically samples the pgx pool and the Redis
+// notification queue length into their Prometheus gauges. Runs until ctx is
+// cancelled.
+func runMetricsGaugeUpdater(ctx context.Context, db *database.DB, rdb *redis.Client, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if db != nil && db.Pool != nil {
+				stat := db.Pool.Stat()
+				metrics.DBPoolAcquiredConns.Set(float64(stat.AcquiredConns()))
+				metrics.DBPoolIdleConns.Set(float64(stat.IdleConns()))
+			}
+			if rdb != nil {
+				if depth, err := rdb.LLen(ctx, "notifications:queue").Result(); err == nil {
+					metrics.NotificationQueueDepth.Set(float64(depth))
+				}
+			}
+		}
+	}
+}
+
+// runIdempotencyCleanup periodically deletes expired idempotency records so
+// the table doesn't grow unbounded. Runs until ctx is cancelled.
+func runIdempotencyCleanup(ctx context.Context, repo *idempotency.Repository, log *slog.Logger, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			n, err := repo.DeleteExpired(ctx, time.Now())
+			if err != nil {
+				log.Warn("idempotency_cleanup_failed", "error", err)
+			} else if n > 0 {
+				log.Info("idempotency_cleanup", "deleted", n)
+			}
+		}
+	}
 }
 
 func buildPaymentProvider(cfg *config.Config) (payments.Provider, error) {

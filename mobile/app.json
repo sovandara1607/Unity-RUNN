@@ -5,11 +5,12 @@
     "version": "0.1.0",
     "scheme": "unityrun",
     "orientation": "portrait",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "icon": "./assets/icon.png",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.anonymous.unity-runn-mobile"
+      "bundleIdentifier": "com.anonymous.unity-runn-mobile",
+      "appleTeamId": "HGUTP4PBT7"
     },
     "android": {
       "predictiveBackGestureEnabled": true,
@@ -36,7 +37,15 @@
           "resizeMode": "contain",
           "backgroundColor": "#d9ff00"
         }
-      ]
+      ],
+      [
+        "expo-widgets",
+        {
+          "groupIdentifier": "group.com.anonymous.unity-runn-mobile",
+          "enablePushNotifications": true
+        }
+      ],
+      "./plugins/withRealCodeSignIdentity"
     ]
   }
 }

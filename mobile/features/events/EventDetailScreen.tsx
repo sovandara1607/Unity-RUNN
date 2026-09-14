@@ -29,7 +29,7 @@ export default function EventDetailScreen() {
   const [linkError, setLinkError] = useState("");
   const event = query.data;
   return (
-    <View style={{ flex: 1, backgroundColor: colors.white }}>
+    <View style={{ flex: 1, backgroundColor: colors.ink }}>
       <Stack.Screen
         options={{ title: "Race details", headerBackTitle: "Events" }}
       />
@@ -85,7 +85,7 @@ export default function EventDetailScreen() {
                 marginBottom: 14,
               }}
             >
-              <Eyebrow>{statusLabel[event.status]}</Eyebrow>
+              <Eyebrow style={{ color: colors.ink }}>{statusLabel[event.status]}</Eyebrow>
             </View>
             <Heading large>{event.name}</Heading>
             <Copy style={{ marginTop: 14, fontFamily: fonts.bold }}>
@@ -113,7 +113,19 @@ export default function EventDetailScreen() {
                   "The crew is getting the details ready. Check back closer to race day."}
               </Copy>
             </Section>
-            <Section title="Choose your distance">
+            {/* This is the one decision the whole screen exists to support, so it
+                does not sit inside the same heading+divider shell as the reference
+                sections below (About, Schedule, Rules, FAQ) -- it gets its own
+                weight only while there's actually something to decide. */}
+            <View style={{ paddingTop: 28, gap: 14 }}>
+              <View style={{ gap: 4 }}>
+                <Eyebrow>Pick your distance</Eyebrow>
+                <Heading style={{ fontSize: 24, lineHeight: 28 }}>
+                  {event.status === "REGISTRATION_OPEN"
+                    ? "Choose your entry"
+                    : "Distances"}
+                </Heading>
+              </View>
               {event.categories?.length ? (
                 event.categories.map((category) => (
                   <Pressable
@@ -170,14 +182,14 @@ export default function EventDetailScreen() {
               ) : (
                 <Copy>Distances will be announced soon.</Copy>
               )}
-            </Section>
+            </View>
             <Section title="Race-day schedule">
               {event.schedule?.length ? (
                 event.schedule.map((item) => (
                   <View key={item.id} style={{ flexDirection: "row", gap: 18 }}>
                     <Copy
                       style={{
-                        color: colors.blue,
+                        color: colors.blueText,
                         fontFamily: fonts.bold,
                         minWidth: 48,
                       }}

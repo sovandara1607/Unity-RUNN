@@ -4,6 +4,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/unity-run-club/api/internal/events"
 )
 
 // Status is a registration's lifecycle state.
@@ -14,6 +16,10 @@ const (
 	StatusConfirmed Status = "CONFIRMED"
 	StatusCancelled Status = "CANCELLED"
 	StatusRefunded  Status = "REFUNDED"
+	// StatusExpired marks a PENDING reservation whose payment window lapsed
+	// without a successful payment — distinct from StatusCancelled, which is
+	// always a genuine user/admin-initiated cancellation.
+	StatusExpired Status = "EXPIRED"
 )
 
 var activeStatuses = map[Status]bool{
@@ -47,6 +53,12 @@ type Registration struct {
 	CreatedAt             time.Time  `json:"created_at"`
 	UpdatedAt             time.Time  `json:"updated_at"`
 	CheckedInAt           *time.Time `json:"checked_in_at,omitempty"`
+	// Event/Category are populated by ListForUser only (see its own doc
+	// comment on why) -- other repository methods leave these nil, which is
+	// the correct "not fetched" signal, not "no event exists" (registrations
+	// always have one via the FK).
+	Event    *events.Event         `json:"event,omitempty"`
+	Category *events.EventCategory `json:"category,omitempty"`
 }
 
 // Payment records a payment attempt for a registration.

@@ -99,6 +99,7 @@ docs/        Architecture notes and integration guides
 - [Frontend README](./frontend/README.md) — notes specific to the website
 - [Google services](./docs/google-services.md) — Google sign-in and Gmail SMTP setup
 - [API load balancing](./deploy/load-balancing.md) — routing, background workers, and failover checks
+- [Scaling and registration-burst safety](./docs/scaling.md) — concurrency strategy, PgBouncer, rate limiting, and load testing
 - [Dokploy deployment](./deploy/dokploy.md) — deployment and API domain setup
 - [Backend configuration](./.env.example), [frontend configuration](./frontend/.env.example), and [mobile configuration](./mobile/.env.example) — environment variable examples
 

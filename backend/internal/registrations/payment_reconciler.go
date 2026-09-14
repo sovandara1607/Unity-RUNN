@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/unity-run-club/api/internal/metrics"
 )
 
 type PaymentReconciler struct {
@@ -35,6 +37,7 @@ func (r *PaymentReconciler) Run(ctx context.Context) {
 
 func (r *PaymentReconciler) reconcile(ctx context.Context) {
 	if err := r.service.ReconcilePendingPayments(ctx, r.workerID, 25); err != nil && ctx.Err() == nil {
+		metrics.WorkerFailuresTotal.WithLabelValues("payment_reconciler").Inc()
 		r.log.Error("payment_reconciliation_failed", "error", err)
 	}
 }

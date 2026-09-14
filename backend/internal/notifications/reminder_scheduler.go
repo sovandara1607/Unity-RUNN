@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/unity-run-club/api/internal/events"
+	"github.com/unity-run-club/api/internal/metrics"
 	"github.com/unity-run-club/api/internal/registrations"
 )
 
@@ -55,6 +56,7 @@ func (s *ReminderScheduler) Run(ctx context.Context) {
 func (s *ReminderScheduler) pollOnce(ctx context.Context) {
 	evts, _, err := s.events.List(ctx, events.ListFilter{Statuses: remindableStatuses, Limit: 1000})
 	if err != nil {
+		metrics.WorkerFailuresTotal.WithLabelValues("reminder_scheduler").Inc()
 		s.log.Error("reminder_scheduler_list_events_failed", "error", err)
 		return
 	}

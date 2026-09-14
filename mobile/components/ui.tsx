@@ -5,9 +5,7 @@ import {
   Pressable,
   StyleSheet,
   Text,
-  TextInput,
   View,
-  type TextInputProps,
   type TextProps,
   type ViewStyle,
 } from "react-native";
@@ -20,18 +18,22 @@ export function Copy({ style, ...props }: TextProps) {
 export function Heading({
   children,
   large = false,
-}: PropsWithChildren<{ large?: boolean }>) {
+  style,
+}: PropsWithChildren<{ large?: boolean; style?: TextProps["style"] }>) {
   return (
     <Text
       accessibilityRole="header"
-      style={[styles.heading, large && { fontSize: 52, lineHeight: 59 }]}
+      style={[styles.heading, large && { fontSize: 52, lineHeight: 59 }, style]}
     >
       {children}
     </Text>
   );
 }
-export function Eyebrow({ children }: PropsWithChildren) {
-  return <Copy style={styles.eyebrow}>{children}</Copy>;
+export function Eyebrow({
+  children,
+  style,
+}: PropsWithChildren<{ style?: TextProps["style"] }>) {
+  return <Copy style={[styles.eyebrow, style]}>{children}</Copy>;
 }
 export function Button({
   title,
@@ -62,7 +64,13 @@ export function Button({
       {busy ? (
         <ActivityIndicator color={colors.ink} />
       ) : (
-        <Copy style={{ fontFamily: fonts.bold, textAlign: "center" }}>
+        <Copy
+          style={{
+            fontFamily: fonts.bold,
+            textAlign: "center",
+            color: secondary ? colors.white : colors.ink,
+          }}
+        >
           {title}
         </Copy>
       )}
@@ -91,7 +99,10 @@ export function Feedback({
 export function OfflineNotice() {
   const online = useOnline();
   return online ? null : (
-    <Copy accessibilityRole="alert" style={styles.offline}>
+    <Copy
+      accessibilityRole="alert"
+      style={[styles.offline, { color: colors.ink }]}
+    >
       You’re offline. Reconnect to get the latest event details.
     </Copy>
   );
@@ -131,6 +142,14 @@ export function EventImage({
         />
       ) : (
         <View style={styles.imageFallback}>
+          <View
+            style={{
+              width: 36,
+              height: 4,
+              backgroundColor: colors.lime,
+              marginBottom: 12,
+            }}
+          />
           <Text
             style={{
               fontFamily: fonts.display,
@@ -138,7 +157,7 @@ export function EventImage({
               color: colors.white,
             }}
           >
-            UNITY RUNN
+            UNITY RUN
           </Text>
           <Copy style={{ color: colors.white }}>Phnom Penh · Run together</Copy>
         </View>
@@ -146,100 +165,15 @@ export function EventImage({
     </View>
   );
 }
-export function TextField({
-  label,
-  error,
-  hint,
-  style,
-  ...props
-}: TextInputProps & { label: string; error?: string; hint?: string }) {
-  return (
-    <View style={{ gap: 8 }}>
-      <View
-        style={{
-          flexDirection: "row",
-          justifyContent: "space-between",
-          alignItems: "flex-end",
-        }}
-      >
-        <Copy style={{ fontFamily: fonts.bold }}>{label}</Copy>
-        {hint && <Copy style={{ fontSize: 11, color: colors.muted }}>{hint}</Copy>}
-      </View>
-      <TextInput
-        accessibilityLabel={label}
-        placeholderTextColor={colors.muted}
-        {...props}
-        style={[
-          {
-            minHeight: 54,
-            borderWidth: 1,
-            borderColor: error ? colors.error : colors.line,
-            borderRadius: 14,
-            padding: 15,
-            backgroundColor: colors.canvas,
-            fontFamily: fonts.body,
-            fontSize: 16,
-            color: colors.ink,
-          },
-          style,
-        ]}
-      />
-      {Boolean(error) && (
-        <Copy accessibilityRole="alert" style={{ color: colors.error, fontSize: 13 }}>
-          {error}
-        </Copy>
-      )}
-    </View>
-  );
-}
-export function ChipGroup({
-  label,
-  options,
-  value,
-  onChange,
-}: {
-  label: string;
-  options: { value: string; label: string }[];
-  value: string;
-  onChange(value: string): void;
-}) {
-  return (
-    <View style={{ gap: 10 }}>
-      <Copy style={{ fontFamily: fonts.bold }}>{label}</Copy>
-      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-        {options.map((option) => {
-          const selected = option.value === value;
-          return (
-            <Pressable
-              key={option.value}
-              accessibilityRole="button"
-              accessibilityState={{ selected }}
-              onPress={() => onChange(option.value)}
-              style={{
-                paddingHorizontal: 16,
-                paddingVertical: 10,
-                borderRadius: 999,
-                borderWidth: 1,
-                borderColor: selected ? colors.ink : colors.line,
-                backgroundColor: selected ? colors.ink : colors.white,
-              }}
-            >
-              <Copy
-                style={{
-                  fontFamily: fonts.bold,
-                  fontSize: 13,
-                  color: selected ? colors.white : colors.ink,
-                }}
-              >
-                {option.label}
-              </Copy>
-            </Pressable>
-          );
-        })}
-      </View>
-    </View>
-  );
-}
+export {
+  TextField,
+  DateField,
+  ChipGroup,
+  FormSection,
+  FormNotice,
+  formLayout,
+} from "./forms";
+export type { TextFieldProps } from "./forms";
 export function LoadingCards() {
   return (
     <View
@@ -252,7 +186,7 @@ export function LoadingCards() {
           <View
             style={{
               height: 235,
-              backgroundColor: colors.line,
+              backgroundColor: colors.canvas,
               borderRadius: 20,
             }}
           />
@@ -260,7 +194,7 @@ export function LoadingCards() {
             style={{
               height: 25,
               width: "75%",
-              backgroundColor: colors.line,
+              backgroundColor: colors.canvas,
               borderRadius: 5,
             }}
           />
@@ -268,7 +202,7 @@ export function LoadingCards() {
             style={{
               height: 16,
               width: "50%",
-              backgroundColor: colors.line,
+              backgroundColor: colors.canvas,
               borderRadius: 5,
             }}
           />
@@ -282,19 +216,19 @@ const styles = StyleSheet.create({
     fontFamily: fonts.body,
     fontSize: 15,
     lineHeight: 23,
-    color: colors.ink,
+    color: colors.white,
   },
   heading: {
     fontFamily: fonts.display,
     fontSize: 29,
     lineHeight: 36,
-    color: colors.ink,
+    color: colors.white,
   },
   eyebrow: {
     fontFamily: fonts.bold,
     fontSize: 11,
     letterSpacing: 1.6,
-    color: colors.muted,
+    color: colors.lime,
     textTransform: "uppercase",
   },
   button: {
@@ -318,6 +252,10 @@ const styles = StyleSheet.create({
     borderColor: colors.line,
   },
   offline: { backgroundColor: colors.lime, padding: 14, fontSize: 13 },
-  image: { height: 250, overflow: "hidden", backgroundColor: colors.blue },
+  // Was `colors.blue` -- a full-bleed blue field reads as a second brand
+  // color competing with lime. The fallback now sits on the same dark
+  // surface as everything else; blue stays reserved for small,
+  // event-specific accents (status text, a filled badge), never a field.
+  image: { height: 250, overflow: "hidden", backgroundColor: colors.canvas },
   imageFallback: { flex: 1, justifyContent: "flex-end", padding: 24 },
 });

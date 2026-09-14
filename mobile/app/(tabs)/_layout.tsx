@@ -27,12 +27,12 @@ function tabIcon(
 export default function TabLayout() {
   return (
     <NativeTabs
-      backgroundColor={colors.white}
-      tintColor={colors.ink}
-      iconColor={{ default: colors.muted, selected: colors.ink }}
+      backgroundColor={colors.canvas}
+      tintColor={colors.lime}
+      iconColor={{ default: colors.muted, selected: colors.lime }}
       labelStyle={{
         default: { fontFamily: fonts.bold, fontSize: 11, color: colors.muted },
-        selected: { fontFamily: fonts.bold, fontSize: 11, color: colors.ink },
+        selected: { fontFamily: fonts.bold, fontSize: 11, color: colors.lime },
       }}
     >
       <Trigger name="index">
@@ -44,7 +44,7 @@ export default function TabLayout() {
         {tabIcon("ticket-outline", "ticket", { default: "ticket", selected: "ticket.fill" })}
       </Trigger>
       <Trigger name="account">
-        <Trigger.Label>Account</Trigger.Label>
+        <Trigger.Label>Profile</Trigger.Label>
         {tabIcon("person-outline", "person", { default: "person", selected: "person.fill" })}
       </Trigger>
     </NativeTabs>

@@ -4,7 +4,9 @@ import (
 	"context"
 	"io/fs"
 	"log/slog"
+	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -14,9 +16,11 @@ import (
 	"github.com/unity-run-club/api/internal/checkin"
 	"github.com/unity-run-club/api/internal/eventautomations"
 	"github.com/unity-run-club/api/internal/events"
+	"github.com/unity-run-club/api/internal/liveactivities"
 	"github.com/unity-run-club/api/internal/middleware"
 	"github.com/unity-run-club/api/internal/notifications"
 	"github.com/unity-run-club/api/internal/objectstore"
+	"github.com/unity-run-club/api/internal/ratelimit"
 	"github.com/unity-run-club/api/internal/registrations"
 	"github.com/unity-run-club/api/internal/siteconfig"
 	"github.com/unity-run-club/api/internal/stats"
@@ -62,6 +66,7 @@ type Deps struct {
 	AuthHandler             *auth.Handler
 	EventsHandler           *events.Handler
 	RegistrationsHandler    *registrations.Handler
+	LiveActivitiesHandler   *liveactivities.Handler
 	CheckinHandler          *checkin.Handler
 	AdminHandler            *admin.Handler
 	StatsHandler            *stats.Handler
@@ -72,8 +77,67 @@ type Deps struct {
 	AutomationHandler       *notifications.AdminHandler
 	EventAutomationsHandler *eventautomations.Handler
 
+	// RateLimiter, EventsReadRateLimit and PaymentVerifyRateLimit configure
+	// the path-based rate limits applied to public event reads and payment
+	// verification. RateLimiter may be nil (e.g. in tests), in which case
+	// these limits are skipped entirely.
+	RateLimiter                  *ratelimit.Limiter
+	EventsReadRateLimitMax       int
+	EventsReadRateLimitWindow    time.Duration
+	PaymentVerifyRateLimitMax    int
+	PaymentVerifyRateLimitWindow time.Duration
+
 	// ReadyTimeout bounds how long each dependency ping may take when handling /ready. Defaults to 2 seconds if zero
 	ReadyTimeout time.Duration
+}
+
+// byIP keys a rate limit by client IP. Traefik appends the immediate peer's
+// address to any inbound X-Forwarded-For, so the first entry is the original
+// client IP *only if* Traefik is configured to trust the upstream (e.g. via
+// entryPoints.*.forwardedHeaders.trustedIPs for Cloudflare's ranges) —
+// without that, every request looks like it comes from Traefik itself,
+// collapsing this into one shared bucket. See docs/scaling.md.
+func byIP(r *http.Request) string {
+	if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
+		if i := strings.IndexByte(fwd, ','); i >= 0 {
+			fwd = fwd[:i]
+		}
+		if ip := strings.TrimSpace(fwd); ip != "" {
+			return "ratelimit:ip:" + ip
+		}
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	return "ratelimit:ip:" + host
+}
+
+// byUser keys a rate limit by the authenticated caller, for routes that
+// already sit behind auth.RequireAuth.
+func byUser(r *http.Request) string {
+	if u, ok := auth.UserFromContext(r.Context()); ok {
+		return "ratelimit:user:" + u.ID.String()
+	}
+	return "ratelimit:anon"
+}
+
+// noopMiddleware passes every request through unchanged — used when a rate
+// limit isn't configured (e.g. deps.RateLimiter is nil in tests).
+func noopMiddleware(next http.Handler) http.Handler { return next }
+
+func eventsReadRateLimit(deps Deps) func(http.Handler) http.Handler {
+	if deps.RateLimiter == nil {
+		return noopMiddleware
+	}
+	return ratelimit.Middleware(deps.RateLimiter, byIP, deps.EventsReadRateLimitMax, deps.EventsReadRateLimitWindow)
+}
+
+func paymentVerifyRateLimit(deps Deps) func(http.Handler) http.Handler {
+	if deps.RateLimiter == nil {
+		return noopMiddleware
+	}
+	return ratelimit.Middleware(deps.RateLimiter, byUser, deps.PaymentVerifyRateLimitMax, deps.PaymentVerifyRateLimitWindow)
 }
 
 // NewRouter builds the chi router with global middleware and routes
@@ -142,8 +206,9 @@ func NewRouter(deps Deps) http.Handler {
 		api.Route("/events", func(ev chi.Router) {
 			ev.With(auth.RequireAuth(deps.Tokens, auth.RoleAdmin)).Post("/posters", deps.EventsHandler.UploadPoster)
 			// Public reads: OptionalAuth doesn't reject, it only attaches the caller's role when a valid bearer token is present, so STAFF+ can preview non-public events
-			ev.With(auth.OptionalAuth(deps.Tokens)).Get("/", deps.EventsHandler.List)
-			ev.With(auth.OptionalAuth(deps.Tokens)).Get("/{id}", deps.EventsHandler.GetBySlug)
+			eventsReadLimit := eventsReadRateLimit(deps)
+			ev.With(auth.OptionalAuth(deps.Tokens), eventsReadLimit).Get("/", deps.EventsHandler.List)
+			ev.With(auth.OptionalAuth(deps.Tokens), eventsReadLimit).Get("/{id}", deps.EventsHandler.GetBySlug)
 			ev.With(auth.RequireAuth(deps.Tokens, auth.RoleAdmin)).Get("/by-id/{id}", deps.EventsHandler.GetByID)
 
 			// Admin writes: Admin role or higher required
@@ -192,9 +257,17 @@ func NewRouter(deps Deps) http.Handler {
 			reg.Use(auth.RequireAuth(deps.Tokens, auth.RoleUser))
 			reg.Get("/{id}", deps.RegistrationsHandler.GetByID)
 			reg.Get("/{id}/payment", deps.RegistrationsHandler.Payment)
-			reg.Post("/{id}/payment/verify", deps.RegistrationsHandler.VerifyPayment)
+			reg.With(paymentVerifyRateLimit(deps)).Post("/{id}/payment/verify", deps.RegistrationsHandler.VerifyPayment)
 			reg.Post("/{id}/cancel", deps.RegistrationsHandler.Cancel)
 			reg.Post("/{id}/ticket", deps.RegistrationsHandler.Ticket)
+		})
+
+		api.Route("/live-activities", func(la chi.Router) {
+			la.Use(auth.RequireAuth(deps.Tokens, auth.RoleUser))
+			la.Get("/", deps.LiveActivitiesHandler.ListMine)
+			la.Post("/", deps.LiveActivitiesHandler.Create)
+			la.Patch("/{id}", deps.LiveActivitiesHandler.Update)
+			la.Delete("/{id}", deps.LiveActivitiesHandler.End)
 		})
 
 		api.With(auth.RequireAuth(deps.Tokens, auth.RoleStaff)).Post("/check-in", deps.CheckinHandler.CheckIn)

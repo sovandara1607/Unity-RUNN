@@ -53,3 +53,42 @@ func FromContext(ctx context.Context, base *slog.Logger) *slog.Logger {
 	}
 	return base
 }
+
+// RequestFields accumulates fields discovered as a request flows through the
+// middleware chain, so a value set deep inside the chain (e.g. the
+// authenticated user ID, set by auth middleware) can still reach a log line
+// written by an outer middleware after the inner handler returns.
+//
+// This only works because it's stored in the context as a pointer: a plain
+// context.WithValue call further down the chain can't propagate back up to
+// an outer middleware's own *http.Request variable once next.ServeHTTP
+// returns, but mutating the same struct through a shared pointer can.
+type RequestFields struct {
+	RequestID string
+	UserID    string
+}
+
+type fieldsCtxKey struct{}
+
+// WithFields returns a context carrying a pointer to fields, so later code
+// holding the same context can mutate it (see SetUserID) and have that
+// change observed by whoever stored it.
+func WithFields(ctx context.Context, fields *RequestFields) context.Context {
+	return context.WithValue(ctx, fieldsCtxKey{}, fields)
+}
+
+// FieldsFromContext returns the *RequestFields stored by WithFields, or nil
+// if none is present (e.g. a context that never passed through the request
+// logger, such as in most unit tests).
+func FieldsFromContext(ctx context.Context) *RequestFields {
+	f, _ := ctx.Value(fieldsCtxKey{}).(*RequestFields)
+	return f
+}
+
+// SetUserID records the authenticated user ID on the *RequestFields already
+// stored in ctx, if any. A no-op when ctx never went through WithFields.
+func SetUserID(ctx context.Context, userID string) {
+	if f := FieldsFromContext(ctx); f != nil {
+		f.UserID = userID
+	}
+}

@@ -43,7 +43,7 @@ export default function RegistrationDetailScreen() {
   if (query.isLoading) return <LoadingCards />;
   if (query.isError || !entry) {
     return (
-      <View style={{ flex: 1, backgroundColor: colors.white, paddingTop: 60 }}>
+      <View style={{ flex: 1, backgroundColor: colors.ink, paddingTop: 60 }}>
         <Stack.Screen options={{ title: "Entry" }} />
         <Feedback
           title="Could not load this entry"
@@ -70,7 +70,7 @@ export default function RegistrationDetailScreen() {
 
   return (
     <ScrollView
-      style={{ flex: 1, backgroundColor: colors.white }}
+      style={{ flex: 1, backgroundColor: colors.ink }}
       contentContainerStyle={{ padding: 24, gap: 20, paddingBottom: 60 }}
     >
       <Stack.Screen options={{ title: "Your entry" }} />
@@ -106,10 +106,10 @@ export default function RegistrationDetailScreen() {
           <View style={{ backgroundColor: colors.white, padding: 16, borderRadius: 18 }}>
             <QRCode value={entry.registration_number || entry.id} size={220} color={colors.ink} />
           </View>
-          <Copy style={{ fontFamily: fonts.bold }}>
+          <Copy style={{ fontFamily: fonts.bold, color: colors.ink }}>
             {entry.registration_number || entry.id.slice(0, 8)}
           </Copy>
-          <Copy style={{ fontSize: 12, textAlign: "center" }}>
+          <Copy style={{ fontSize: 12, textAlign: "center", color: colors.ink }}>
             Show this at race-day check-in.
           </Copy>
         </View>

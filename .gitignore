@@ -17,5 +17,10 @@ realtime/node_modules/
 tmp/
 output/
 
+# --- k6 load-test generated data (contains signed JWTs; regenerate per run) ---
+k6/users.json
+k6/event.json
+k6/*_report.json
+
 # --- OS ---
 .DS_Store

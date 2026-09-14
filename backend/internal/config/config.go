@@ -16,8 +16,17 @@ type Config struct {
 	LogLevel    string // "debug", "info", "warn", "error"
 	ProcessRole string // "all" (standalone), "api", or "worker"
 
-	DatabaseURL     string
-	DatabaseMaxConn int32
+	DatabaseURL             string
+	DatabaseMaxConn         int32
+	DatabaseMinConn         int32
+	DatabaseMaxConnLifetime time.Duration
+	DatabaseMaxConnIdleTime time.Duration
+	// DatabasePgBouncerCompat disables pgx's named prepared statement cache
+	// when DatabaseURL points at PgBouncer in transaction pool mode, where a
+	// statement prepared on one backend connection can go missing on the next.
+	DatabasePgBouncerCompat bool
+
+	MetricsPort string
 
 	RedisAddr           string
 	RedisPassword       string
@@ -73,6 +82,15 @@ type Config struct {
 	BakongPaymentTTL    time.Duration
 
 	ShutdownTimeout time.Duration
+
+	RateLimitLoginMax            int
+	RateLimitLoginWindow         time.Duration
+	RateLimitRegistrationMax     int
+	RateLimitRegistrationWindow  time.Duration
+	RateLimitEventsReadMax       int
+	RateLimitEventsReadWindow    time.Duration
+	RateLimitPaymentVerifyMax    int
+	RateLimitPaymentVerifyWindow time.Duration
 }
 
 // Load reads configuration from environment variables, applying defaults where sensible and returning an error if a required variable is missing or malformed
@@ -101,6 +119,21 @@ func Load() (*Config, error) {
 		ShutdownTimeout:           10 * time.Second,
 		UploadDir:                 "uploads",
 		ObjectStorageProvider:     "local",
+
+		DatabaseMaxConnLifetime: time.Hour,
+		DatabaseMaxConnIdleTime: 30 * time.Minute,
+		MetricsPort:             "9091",
+
+		// Defaults match the values already hardcoded at call sites before
+		// these became configurable, so setting none of these is a no-op.
+		RateLimitLoginMax:            10,
+		RateLimitLoginWindow:         15 * time.Minute,
+		RateLimitRegistrationMax:     5,
+		RateLimitRegistrationWindow:  time.Minute,
+		RateLimitEventsReadMax:       100,
+		RateLimitEventsReadWindow:    time.Minute,
+		RateLimitPaymentVerifyMax:    5,
+		RateLimitPaymentVerifyWindow: time.Minute,
 	}
 
 	dbURL, err := requireEnv("DATABASE_URL")
@@ -146,6 +179,29 @@ func Load() (*Config, error) {
 		}
 		cfg.DatabaseMaxConn = int32(n)
 	}
+	if v := os.Getenv("DATABASE_MIN_CONN"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return nil, fmt.Errorf("config: invalid DATABASE_MIN_CONN %q: %w", v, err)
+		}
+		cfg.DatabaseMinConn = int32(n)
+	}
+	if v := os.Getenv("DATABASE_MAX_CONN_LIFETIME"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			return nil, fmt.Errorf("config: invalid DATABASE_MAX_CONN_LIFETIME %q: %w", v, err)
+		}
+		cfg.DatabaseMaxConnLifetime = d
+	}
+	if v := os.Getenv("DATABASE_MAX_CONN_IDLE_TIME"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			return nil, fmt.Errorf("config: invalid DATABASE_MAX_CONN_IDLE_TIME %q: %w", v, err)
+		}
+		cfg.DatabaseMaxConnIdleTime = d
+	}
+	cfg.DatabasePgBouncerCompat = strings.EqualFold(strings.TrimSpace(os.Getenv("DATABASE_PGBOUNCER_COMPAT")), "true")
+	cfg.MetricsPort = getEnv("METRICS_PORT", cfg.MetricsPort)
 
 	cfg.RedisAddr = getEnv("REDIS_ADDR", "localhost:6379")
 	cfg.RedisPassword = os.Getenv("REDIS_PASSWORD")
@@ -250,6 +306,35 @@ func Load() (*Config, error) {
 		cfg.NotificationMaxAttempts = n
 	}
 
+	for env, dst := range map[string]*int{
+		"RATE_LIMIT_LOGIN_MAX":          &cfg.RateLimitLoginMax,
+		"RATE_LIMIT_REGISTRATION_MAX":   &cfg.RateLimitRegistrationMax,
+		"RATE_LIMIT_EVENTS_READ_MAX":    &cfg.RateLimitEventsReadMax,
+		"RATE_LIMIT_PAYMENT_VERIFY_MAX": &cfg.RateLimitPaymentVerifyMax,
+	} {
+		if v := os.Getenv(env); v != "" {
+			n, err := strconv.Atoi(v)
+			if err != nil {
+				return nil, fmt.Errorf("config: invalid %s %q: %w", env, v, err)
+			}
+			*dst = n
+		}
+	}
+	for env, dst := range map[string]*time.Duration{
+		"RATE_LIMIT_LOGIN_WINDOW":          &cfg.RateLimitLoginWindow,
+		"RATE_LIMIT_REGISTRATION_WINDOW":   &cfg.RateLimitRegistrationWindow,
+		"RATE_LIMIT_EVENTS_READ_WINDOW":    &cfg.RateLimitEventsReadWindow,
+		"RATE_LIMIT_PAYMENT_VERIFY_WINDOW": &cfg.RateLimitPaymentVerifyWindow,
+	} {
+		if v := os.Getenv(env); v != "" {
+			d, err := time.ParseDuration(v)
+			if err != nil {
+				return nil, fmt.Errorf("config: invalid %s %q: %w", env, v, err)
+			}
+			*dst = d
+		}
+	}
+
 	if err := validateRuntimeSecurity(cfg); err != nil {
 		return nil, err
 	}
@@ -267,6 +352,25 @@ func validateRuntimeSecurity(cfg *Config) error {
 	}
 	if cfg.DatabaseMaxConn < 1 {
 		return fmt.Errorf("config: DATABASE_MAX_CONN must be positive")
+	}
+	if cfg.DatabaseMinConn < 0 || cfg.DatabaseMinConn > cfg.DatabaseMaxConn {
+		return fmt.Errorf("config: DATABASE_MIN_CONN must be between 0 and DATABASE_MAX_CONN")
+	}
+	for name, n := range map[string]int{
+		"RATE_LIMIT_LOGIN_MAX": cfg.RateLimitLoginMax, "RATE_LIMIT_REGISTRATION_MAX": cfg.RateLimitRegistrationMax,
+		"RATE_LIMIT_EVENTS_READ_MAX": cfg.RateLimitEventsReadMax, "RATE_LIMIT_PAYMENT_VERIFY_MAX": cfg.RateLimitPaymentVerifyMax,
+	} {
+		if n < 1 {
+			return fmt.Errorf("config: %s must be positive", name)
+		}
+	}
+	for name, d := range map[string]time.Duration{
+		"RATE_LIMIT_LOGIN_WINDOW": cfg.RateLimitLoginWindow, "RATE_LIMIT_REGISTRATION_WINDOW": cfg.RateLimitRegistrationWindow,
+		"RATE_LIMIT_EVENTS_READ_WINDOW": cfg.RateLimitEventsReadWindow, "RATE_LIMIT_PAYMENT_VERIFY_WINDOW": cfg.RateLimitPaymentVerifyWindow,
+	} {
+		if d <= 0 {
+			return fmt.Errorf("config: %s must be positive", name)
+		}
 	}
 	if cfg.AccessTokenTTL <= 0 || cfg.RefreshTokenTTL <= 0 {
 		return fmt.Errorf("config: token TTLs must be positive")

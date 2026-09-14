@@ -7,6 +7,8 @@ import (
 
 	"github.com/google/uuid"
 
+	applogger "github.com/unity-run-club/api/internal/logger"
+
 	"github.com/unity-run-club/api/internal/httpresponse"
 )
 
@@ -42,6 +44,7 @@ func RequireAuth(tokens *TokenIssuer, minRole Role) func(http.Handler) http.Hand
 
 			u := &AuthenticatedUser{ID: claims.UserID, Role: claims.Role}
 			ctx := context.WithValue(r.Context(), userCtxKey, u)
+			applogger.SetUserID(ctx, claims.UserID.String())
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
@@ -54,6 +57,7 @@ func OptionalAuth(tokens *TokenIssuer) func(http.Handler) http.Handler {
 			if claims, err := parseBearer(r, tokens); err == nil {
 				u := &AuthenticatedUser{ID: claims.UserID, Role: claims.Role}
 				r = r.WithContext(context.WithValue(r.Context(), userCtxKey, u))
+				applogger.SetUserID(r.Context(), claims.UserID.String())
 			}
 			next.ServeHTTP(w, r)
 		})

@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Linking, Modal, Pressable, View } from "react-native";
+import {
+  ActivityIndicator,
+  Linking,
+  Modal,
+  Pressable,
+  View,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import QRCode from "react-native-qrcode-svg";
 import { Button, Copy, Eyebrow, Heading } from "../../components/ui";
@@ -55,11 +61,10 @@ export function BakongPayment({
   }, [checkout.expires_at]);
 
   const secondsLeft =
-    expiresAt === null ? null : Math.max(0, Math.ceil((expiresAt - now) / 1000));
+    expiresAt === null
+      ? null
+      : Math.max(0, Math.ceil((expiresAt - now) / 1000));
   const urgent = secondsLeft !== null && secondsLeft > 0 && secondsLeft <= 120;
-  // The device clock has run out but the server has not confirmed expiry yet. The API
-  // polls Bakong before trusting its own TTL, so a payment made at the last second
-  // still settles.
   const lapsed = secondsLeft === 0 && phase === "waiting";
 
   useEffect(() => {
@@ -118,9 +123,9 @@ export function BakongPayment({
       : phase === "expired"
         ? "This payment expired"
         : lapsed
-          ? "Time is up — making a final check with Bakong"
+          ? "Time is up. Making a final check with Bakong"
           : failedChecks > 0
-            ? "Could not check yet — your payment is still safe"
+            ? "Could not check yet. Your payment is still safe"
             : checking
               ? "Checking with Bakong"
               : "Waiting for payment";
@@ -135,7 +140,7 @@ export function BakongPayment({
       <View
         style={{
           flex: 1,
-          backgroundColor: colors.white,
+          backgroundColor: colors.ink,
           paddingTop: Math.max(24, insets.top),
           paddingBottom: Math.max(24, insets.bottom),
           paddingHorizontal: 24,
@@ -144,7 +149,11 @@ export function BakongPayment({
       >
         <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
           <Eyebrow>Bakong KHQR · Secure checkout</Eyebrow>
-          <Pressable onPress={onClose} accessibilityRole="button" accessibilityLabel="Close payment">
+          <Pressable
+            onPress={onClose}
+            accessibilityRole="button"
+            accessibilityLabel="Close payment"
+          >
             <Copy style={{ fontFamily: fonts.bold }}>Close</Copy>
           </Pressable>
         </View>
@@ -168,16 +177,20 @@ export function BakongPayment({
             }}
           >
             {checkout.qr_string ? (
-              <QRCode value={checkout.qr_string} size={240} color={colors.ink} />
+              <QRCode
+                value={checkout.qr_string}
+                size={240}
+                color={colors.ink}
+              />
             ) : (
               <View style={{ width: 240, height: 240 }} />
             )}
           </View>
-          <Copy style={{ marginTop: 14, fontFamily: fonts.bold, fontSize: 12 }}>
+          <Copy style={{ marginTop: 14, fontFamily: fonts.bold, fontSize: 12, color: colors.ink }}>
             {phase === "waiting"
               ? "Scan with your banking app"
               : phase === "confirmed"
-                ? "Paid — no need to scan"
+                ? "Paid. No need to scan"
                 : "This code is no longer valid"}
           </Copy>
         </View>
@@ -192,7 +205,13 @@ export function BakongPayment({
             paddingVertical: 14,
           }}
         >
-          <Copy style={{ color: colors.muted, fontFamily: fonts.bold, fontSize: 12 }}>
+          <Copy
+            style={{
+              color: colors.muted,
+              fontFamily: fonts.bold,
+              fontSize: 12,
+            }}
+          >
             Total due
           </Copy>
           <Copy style={{ fontFamily: fonts.bold, fontSize: 20 }}>{amount}</Copy>
@@ -214,7 +233,7 @@ export function BakongPayment({
               style={{
                 fontFamily: fonts.bold,
                 fontSize: 11,
-                color: urgent || lapsed ? colors.white : colors.ink,
+                color: colors.white,
               }}
             >
               {lapsed ? "Hold this code" : "Time to pay"}
@@ -223,7 +242,7 @@ export function BakongPayment({
               style={{
                 fontFamily: fonts.bold,
                 fontSize: 20,
-                color: urgent || lapsed ? colors.white : colors.ink,
+                color: colors.white,
               }}
             >
               {formatCountdown(secondsLeft)}
@@ -258,7 +277,7 @@ export function BakongPayment({
             padding: 14,
           }}
         >
-          {checking && <ActivityIndicator size="small" color={colors.ink} />}
+          {checking && <ActivityIndicator size="small" color={colors.white} />}
           <Copy style={{ flex: 1 }}>{status}</Copy>
           {phase === "waiting" && (
             <Pressable onPress={() => void verify()} disabled={checking}>
@@ -276,14 +295,15 @@ export function BakongPayment({
         </View>
         {failedChecks > 2 && (
           <Copy style={{ color: colors.muted, fontSize: 12 }}>
-            Bakong is taking longer to respond. Do not pay twice — you can reopen this
-            payment from your race wallet.
+            Bakong is taking longer to respond. Do not pay twice! You can reopen
+            this payment from your race wallet.
           </Copy>
         )}
         {phase === "expired" && (
           <Copy style={{ fontSize: 13 }}>
             Your place was released so someone else could take it. Nothing was
-            charged — if your bank shows a deduction, contact us before paying again.
+            charged. If your bank shows a deduction, contact us before paying
+            again.
           </Copy>
         )}
         <Copy style={{ color: colors.muted, fontSize: 11 }}>

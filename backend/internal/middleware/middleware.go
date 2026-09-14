@@ -4,13 +4,16 @@ import (
 	"log/slog"
 	"net/http"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 
 	applogger "github.com/unity-run-club/api/internal/logger"
+	"github.com/unity-run-club/api/internal/metrics"
 )
 
 // SecurityHeaders applies conservative response headers to every API
@@ -82,17 +85,37 @@ func RequestLogger(log *slog.Logger) func(http.Handler) http.Handler {
 			ww := chimiddleware.NewWrapResponseWriter(w, r.ProtoMajor)
 
 			reqID := chimiddleware.GetReqID(r.Context())
-			ctx := applogger.WithRequestID(r.Context(), reqID)
+			fields := &applogger.RequestFields{RequestID: reqID}
+			ctx := applogger.WithFields(applogger.WithRequestID(r.Context(), reqID), fields)
 			r = r.WithContext(ctx)
 
 			next.ServeHTTP(ww, r)
 
-			applogger.FromContext(r.Context(), log).Info("http_request",
+			duration := time.Since(start)
+
+			// Route pattern (e.g. "/events/{id}"), never the raw path — the raw
+			// path can contain UUIDs, which would blow up metric cardinality.
+			route := r.URL.Path
+			if rc := chi.RouteContext(r.Context()); rc != nil {
+				if pattern := rc.RoutePattern(); pattern != "" {
+					route = pattern
+				}
+			}
+			metrics.HTTPRequestsTotal.WithLabelValues(r.Method, route, strconv.Itoa(ww.Status())).Inc()
+			metrics.HTTPRequestDuration.WithLabelValues(r.Method, route).Observe(duration.Seconds())
+
+			// fields.UserID may have been set by inner auth middleware after this
+			// request's context was handed onward — see RequestFields' doc comment.
+			requestLog := applogger.FromContext(r.Context(), log)
+			if fields.UserID != "" {
+				requestLog = requestLog.With("user_id", fields.UserID)
+			}
+			requestLog.Info("http_request",
 				"method", r.Method,
 				"path", r.URL.Path,
 				"status", ww.Status(),
 				"bytes", ww.BytesWritten(),
-				"duration_ms", time.Since(start).Milliseconds(),
+				"duration_ms", duration.Milliseconds(),
 				"remote_addr", r.RemoteAddr,
 			)
 		})

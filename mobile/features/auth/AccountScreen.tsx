@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ScrollView, View } from "react-native";
+import { Pressable, ScrollView, View } from "react-native";
 import { router } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -11,9 +11,44 @@ import {
   Heading,
   OfflineNotice,
 } from "../../components/ui";
-import { colors } from "../../constants/theme";
+import { colors, fonts } from "../../constants/theme";
 import { useApi, useSession } from "../../services/api/provider";
 import type { Me } from "../../services/api/types";
+// Utility destinations (profile, browse, sign out) are low-frequency next to
+// "My race wallet" -- listing them as an equal-weight button stack would give
+// "Sign out" the same visual claim as the one thing people actually come back
+// for. A plain row list demotes them without hiding them.
+function NavRow({
+  title,
+  onPress,
+  disabled = false,
+}: {
+  title: string;
+  onPress(): void;
+  disabled?: boolean;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ disabled }}
+      disabled={disabled}
+      onPress={onPress}
+      style={({ pressed }) => ({
+        flexDirection: "row",
+        justifyContent: "space-between",
+        alignItems: "center",
+        paddingVertical: 18,
+        minHeight: 44,
+        borderTopWidth: 1,
+        borderColor: colors.line,
+        opacity: disabled ? 0.5 : pressed ? 0.6 : 1,
+      })}
+    >
+      <Copy style={{ fontFamily: fonts.bold }}>{title}</Copy>
+      <Copy style={{ color: colors.muted, fontSize: 18 }}>›</Copy>
+    </Pressable>
+  );
+}
 export default function AccountScreen() {
   const { session } = useApi();
   const state = useSession();
@@ -40,10 +75,10 @@ export default function AccountScreen() {
   };
   return (
     <View
-      style={{ flex: 1, paddingTop: insets.top, backgroundColor: colors.white }}
+      style={{ flex: 1, paddingTop: insets.top, backgroundColor: colors.ink }}
     >
       <OfflineNotice />
-      <ScrollView contentContainerStyle={{ padding: 26, gap: 24 }}>
+      <ScrollView contentContainerStyle={{ padding: 26, gap: 24, paddingBottom: 120 }}>
         <Eyebrow>Unity Runn Club</Eyebrow>
         <Heading large>{"YOUR RUN\nSTARTS HERE."}</Heading>
         {state.status === "loading" ? (
@@ -86,32 +121,34 @@ export default function AccountScreen() {
                 />
               </>
             )}
-            <Copy style={{ color: colors.muted }}>
-              Find your next event and get to know the route, the distance, and
-              the crew.
-            </Copy>
-            <Button
-              title="My race wallet"
+            <Pressable
+              accessibilityRole="button"
               onPress={() => router.navigate("/(tabs)/wallet")}
-            />
-            <Button
-              title="Edit profile"
-              secondary
-              onPress={() => router.push("/profile/edit")}
-            />
-            <Button
-              title="Explore events"
-              secondary
-              onPress={() => router.navigate("/(tabs)")}
-            />
-            <Button
-              title="Sign out"
-              secondary
-              busy={busy}
-              onPress={() => {
-                void logout();
-              }}
-            />
+              style={({ pressed }) => ({
+                backgroundColor: colors.lime,
+                borderRadius: 20,
+                padding: 22,
+                gap: 6,
+                opacity: pressed ? 0.85 : 1,
+              })}
+            >
+              <Eyebrow style={{ color: colors.ink }}>Race wallet</Eyebrow>
+              <Heading style={{ color: colors.ink, fontSize: 26, lineHeight: 30 }}>
+                Your entries &amp; race-day tickets
+              </Heading>
+              <Copy style={{ color: colors.ink }}>Open wallet →</Copy>
+            </Pressable>
+            <View>
+              <NavRow title="Edit profile" onPress={() => router.push("/profile/edit")} />
+              <NavRow title="Explore events" onPress={() => router.navigate("/(tabs)")} />
+              <NavRow
+                title={busy ? "Signing out…" : "Sign out"}
+                disabled={busy}
+                onPress={() => {
+                  void logout();
+                }}
+              />
+            </View>
           </>
         ) : (
           <>

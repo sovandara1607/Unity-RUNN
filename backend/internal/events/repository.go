@@ -58,7 +58,7 @@ func (r *Repository) List(ctx context.Context, filter ListFilter) ([]Event, int,
 	}
 	defer rows.Close()
 
-	var out []Event
+	out := []Event{}
 	for rows.Next() {
 		e, err := scanEvent(rows)
 		if err != nil {
@@ -293,7 +293,7 @@ func (r *Repository) listCategories(ctx context.Context, eventID uuid.UUID) ([]E
 	}
 	defer rows.Close()
 
-	var out []EventCategory
+	out := []EventCategory{}
 	for rows.Next() {
 		var c EventCategory
 		if err := rows.Scan(&c.ID, &c.EventID, &c.Name, &c.Distance, &c.PriceCents, &c.Currency,
@@ -430,7 +430,7 @@ func (r *Repository) listSchedule(ctx context.Context, eventID uuid.UUID) ([]Eve
 	}
 	defer rows.Close()
 
-	var out []EventSchedule
+	out := []EventSchedule{}
 	for rows.Next() {
 		var s EventSchedule
 		if err := rows.Scan(&s.ID, &s.EventID, &s.Time, &s.Title, &s.Description,
@@ -454,7 +454,7 @@ func (r *Repository) listFAQs(ctx context.Context, eventID uuid.UUID) ([]EventFA
 	}
 	defer rows.Close()
 
-	var out []EventFAQ
+	out := []EventFAQ{}
 	for rows.Next() {
 		var f EventFAQ
 		if err := rows.Scan(&f.ID, &f.EventID, &f.Question, &f.Answer,
@@ -478,7 +478,7 @@ func (r *Repository) listRules(ctx context.Context, eventID uuid.UUID) ([]EventR
 	}
 	defer rows.Close()
 
-	var out []EventRule
+	out := []EventRule{}
 	for rows.Next() {
 		var ru EventRule
 		if err := rows.Scan(&ru.ID, &ru.EventID, &ru.Rule, &ru.SortOrder,

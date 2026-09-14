@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/unity-run-club/api/internal/metrics"
 	"github.com/unity-run-club/api/internal/registrations"
 )
 
@@ -57,6 +58,7 @@ func (s *Scheduler) Run(ctx context.Context) {
 func (s *Scheduler) poll(ctx context.Context) {
 	items, err := s.repo.ClaimDue(ctx, 25)
 	if err != nil {
+		metrics.WorkerFailuresTotal.WithLabelValues("event_automation_scheduler").Inc()
 		s.log.Error("event_automation_claim_failed", "error", err)
 		return
 	}

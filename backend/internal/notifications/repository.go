@@ -371,7 +371,7 @@ func (r *Repository) ListPendingOlderThan(ctx context.Context, cutoff time.Time,
 	}
 	defer rows.Close()
 
-	var out []Notification
+	out := []Notification{}
 	for rows.Next() {
 		n, err := scanNotification(rows)
 		if err != nil {

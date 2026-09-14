@@ -1,5 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useApi } from "../../services/api/provider";
+import { raceLiveActivity, type LiveActivityRef } from "../../services/liveActivity/raceLiveActivity.service";
+import type { RaceLiveActivityData } from "../../services/liveActivity/types";
 import type {
   PaymentCheckout,
   PaymentVerificationResult,
@@ -75,6 +77,44 @@ export function useCancelRegistration() {
   });
 }
 
+/** What the runner is currently following -- backs each Race Wallet entry's
+ * Follow Live / Following / Live Now / Finished button state (item 9). A
+ * short staleTime keeps this from refetching on every render while the
+ * Wallet screen is open, without going stale across a whole session. */
+export function useActiveLiveActivities() {
+  const { session } = useApi();
+  return useQuery({
+    queryKey: ["live-activities", "mine"],
+    staleTime: 30_000,
+    queryFn: () => raceLiveActivity.getActive(session),
+  });
+}
+export function useFollowLive() {
+  const { session } = useApi();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      data,
+      registrationId,
+    }: {
+      data: RaceLiveActivityData;
+      registrationId: string;
+    }) => raceLiveActivity.start(session, data, { registrationId }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["live-activities", "mine"] });
+    },
+  });
+}
+export function useUnfollowLive() {
+  const { session } = useApi();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (ref: LiveActivityRef) => raceLiveActivity.end(session, ref),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["live-activities", "mine"] });
+    },
+  });
+}
 /** Reopen the payment sheet for a PENDING entry (e.g. after leaving and coming back). */
 export async function fetchRegistrationPayment(
   session: ReturnType<typeof useApi>["session"],

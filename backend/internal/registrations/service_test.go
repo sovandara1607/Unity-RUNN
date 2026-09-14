@@ -205,7 +205,7 @@ func (f *fakeRegRepo) ExpirePendingPayments(ctx context.Context, now time.Time) 
 		if !ok || reg.Status != StatusPending {
 			continue
 		}
-		reg.Status = StatusCancelled
+		reg.Status = StatusExpired
 		p.Status = string(payments.StatusFailed)
 		categories = append(categories, reg.EventCategoryID)
 	}
@@ -219,7 +219,7 @@ func (f *fakeRegRepo) ExpireClaimedPayment(ctx context.Context, registrationID, 
 	}
 	wasPending := reg.Status == StatusPending
 	if wasPending {
-		reg.Status = StatusCancelled
+		reg.Status = StatusExpired
 	}
 	for i := range f.payments {
 		if f.payments[i].ID == paymentID {
@@ -325,7 +325,7 @@ func (f *fakePaymentProvider) RefundPayment(ctx context.Context, ref string, amo
 func newTestSetup(provider *fakePaymentProvider) (*Service, *fakeRegRepo, *fakeEventsReader) {
 	repo := newFakeRegRepo()
 	er := newFakeEventsReader()
-	svc := NewService(repo, er, provider, nil, nil, nil, nil) // no Redis/notifier in unit tests
+	svc := NewService(repo, er, provider, nil, nil, nil, nil, nil, nil) // no Redis/notifier/idempotency in unit tests
 	return svc, repo, er
 }
 
@@ -351,7 +351,7 @@ func newTestSetupWithNotifier(provider *fakePaymentProvider) (*Service, *fakeEve
 	repo := newFakeRegRepo()
 	er := newFakeEventsReader()
 	notifier := &fakeRegistrationNotifier{}
-	svc := NewService(repo, er, provider, nil, nil, nil, notifier)
+	svc := NewService(repo, er, provider, nil, nil, nil, notifier, nil, nil)
 	return svc, er, notifier
 }
 
@@ -377,7 +377,7 @@ func TestService_Register_FreeCategoryConfirmsImmediately(t *testing.T) {
 	svc, _, er := newTestSetup(&fakePaymentProvider{status: payments.StatusSucceeded})
 	eventID, categoryID := seedEventAndCategory(er, 0, 10)
 
-	result, err := svc.Register(context.Background(), uuid.New(), eventID, validRegisterReq(categoryID))
+	result, err := svc.Register(context.Background(), uuid.New(), eventID, validRegisterReq(categoryID), "", "")
 	if err != nil {
 		t.Fatalf("Register() error = %v", err)
 	}
@@ -393,7 +393,7 @@ func TestService_Register_PaidCategoryConfirmsAfterPayment(t *testing.T) {
 	svc, _, er := newTestSetup(&fakePaymentProvider{status: payments.StatusSucceeded})
 	eventID, categoryID := seedEventAndCategory(er, 5000, 10)
 
-	result, err := svc.Register(context.Background(), uuid.New(), eventID, validRegisterReq(categoryID))
+	result, err := svc.Register(context.Background(), uuid.New(), eventID, validRegisterReq(categoryID), "", "")
 	if err != nil {
 		t.Fatalf("Register() error = %v", err)
 	}
@@ -409,7 +409,7 @@ func TestService_Register_PaidCategoryReleasesReservationOnPaymentFailure(t *tes
 	svc, repo, er := newTestSetup(&fakePaymentProvider{status: payments.StatusFailed})
 	eventID, categoryID := seedEventAndCategory(er, 5000, 10)
 
-	_, err := svc.Register(context.Background(), uuid.New(), eventID, validRegisterReq(categoryID))
+	_, err := svc.Register(context.Background(), uuid.New(), eventID, validRegisterReq(categoryID), "", "")
 	if !errors.Is(err, ErrPaymentUnavailable) {
 		t.Fatalf("Register() error = %v, want ErrPaymentUnavailable", err)
 	}
@@ -424,7 +424,7 @@ func TestService_Register_PaidReleasesReservationWhenProviderErrors(t *testing.T
 	provider := &fakePaymentProvider{err: errors.New("provider unavailable")}
 	svc, repo, er := newTestSetup(provider)
 	eventID, categoryID := seedEventAndCategory(er, 5000, 10)
-	if _, err := svc.Register(context.Background(), uuid.New(), eventID, validRegisterReq(categoryID)); err == nil {
+	if _, err := svc.Register(context.Background(), uuid.New(), eventID, validRegisterReq(categoryID), "", ""); err == nil {
 		t.Fatal("Register() expected provider error")
 	}
 	for _, registration := range repo.regs {
@@ -439,7 +439,7 @@ func TestService_Register_PaidReleasesReservationWhenPaymentPersistenceFails(t *
 	svc, repo, er := newTestSetup(provider)
 	repo.createPaymentErr = errors.New("database write failed")
 	eventID, categoryID := seedEventAndCategory(er, 5000, 10)
-	if _, err := svc.Register(context.Background(), uuid.New(), eventID, validRegisterReq(categoryID)); err == nil {
+	if _, err := svc.Register(context.Background(), uuid.New(), eventID, validRegisterReq(categoryID), "", ""); err == nil {
 		t.Fatal("Register() expected persistence error")
 	}
 	for _, registration := range repo.regs {
@@ -454,7 +454,7 @@ func TestService_Register_PaidUsesCategoryCurrency(t *testing.T) {
 	svc, _, er := newTestSetup(provider)
 	eventID, categoryID := seedEventAndCategory(er, 25000, 10)
 	er.categoriesByID[categoryID].Currency = "KHR"
-	if _, err := svc.Register(context.Background(), uuid.New(), eventID, validRegisterReq(categoryID)); err != nil {
+	if _, err := svc.Register(context.Background(), uuid.New(), eventID, validRegisterReq(categoryID), "", ""); err != nil {
 		t.Fatalf("Register() error = %v", err)
 	}
 	if provider.currency != "KHR" {
@@ -467,9 +467,9 @@ func TestService_ReconcilePendingPaymentConfirmsWithoutBrowser(t *testing.T) {
 	repo := newFakeRegRepo()
 	er := newFakeEventsReader()
 	notifier := &fakeRegistrationNotifier{}
-	svc := NewService(repo, er, provider, nil, nil, nil, notifier)
+	svc := NewService(repo, er, provider, nil, nil, nil, notifier, nil, nil)
 	eventID, categoryID := seedEventAndCategory(er, 2500, 10)
-	result, err := svc.Register(context.Background(), uuid.New(), eventID, validRegisterReq(categoryID))
+	result, err := svc.Register(context.Background(), uuid.New(), eventID, validRegisterReq(categoryID), "", "")
 	if err != nil {
 		t.Fatalf("Register() error = %v", err)
 	}
@@ -490,7 +490,7 @@ func TestService_ReconcileExpiredPendingPaymentReleasesCapacity(t *testing.T) {
 	provider := &fakePaymentProvider{status: payments.StatusPending}
 	svc, repo, er := newTestSetup(provider)
 	eventID, categoryID := seedEventAndCategory(er, 2500, 1)
-	result, err := svc.Register(context.Background(), uuid.New(), eventID, validRegisterReq(categoryID))
+	result, err := svc.Register(context.Background(), uuid.New(), eventID, validRegisterReq(categoryID), "", "")
 	if err != nil {
 		t.Fatalf("Register() error = %v", err)
 	}
@@ -499,8 +499,8 @@ func TestService_ReconcileExpiredPendingPaymentReleasesCapacity(t *testing.T) {
 	if err := svc.ReconcilePendingPayments(context.Background(), "worker-1", 25); err != nil {
 		t.Fatalf("ReconcilePendingPayments() error = %v", err)
 	}
-	if repo.regs[result.Registration.ID].Status != StatusCancelled {
-		t.Fatalf("registration status = %q, want CANCELLED", repo.regs[result.Registration.ID].Status)
+	if repo.regs[result.Registration.ID].Status != StatusExpired {
+		t.Fatalf("registration status = %q, want EXPIRED", repo.regs[result.Registration.ID].Status)
 	}
 }
 
@@ -509,11 +509,11 @@ func TestService_Register_DuplicateRejected(t *testing.T) {
 	eventID, categoryID := seedEventAndCategory(er, 0, 10)
 	userID := uuid.New()
 
-	if _, err := svc.Register(context.Background(), userID, eventID, validRegisterReq(categoryID)); err != nil {
+	if _, err := svc.Register(context.Background(), userID, eventID, validRegisterReq(categoryID), "", ""); err != nil {
 		t.Fatalf("first Register() error = %v", err)
 	}
 
-	_, err := svc.Register(context.Background(), userID, eventID, validRegisterReq(categoryID))
+	_, err := svc.Register(context.Background(), userID, eventID, validRegisterReq(categoryID), "", "")
 	if !errors.Is(err, ErrDuplicateRegistration) {
 		t.Fatalf("second Register() error = %v, want ErrDuplicateRegistration", err)
 	}
@@ -523,11 +523,11 @@ func TestService_Register_CapacityFullRejected(t *testing.T) {
 	svc, _, er := newTestSetup(&fakePaymentProvider{status: payments.StatusSucceeded})
 	eventID, categoryID := seedEventAndCategory(er, 0, 1)
 
-	if _, err := svc.Register(context.Background(), uuid.New(), eventID, validRegisterReq(categoryID)); err != nil {
+	if _, err := svc.Register(context.Background(), uuid.New(), eventID, validRegisterReq(categoryID), "", ""); err != nil {
 		t.Fatalf("first Register() error = %v", err)
 	}
 
-	_, err := svc.Register(context.Background(), uuid.New(), eventID, validRegisterReq(categoryID))
+	_, err := svc.Register(context.Background(), uuid.New(), eventID, validRegisterReq(categoryID), "", "")
 	if !errors.Is(err, ErrCapacityFull) {
 		t.Fatalf("second Register() error = %v, want ErrCapacityFull", err)
 	}
@@ -538,7 +538,7 @@ func TestService_Register_InvalidCategoryForEvent(t *testing.T) {
 	eventID, _ := seedEventAndCategory(er, 0, 10)
 	_, otherCategoryID := seedEventAndCategory(er, 0, 10) // belongs to a different event
 
-	_, err := svc.Register(context.Background(), uuid.New(), eventID, validRegisterReq(otherCategoryID))
+	_, err := svc.Register(context.Background(), uuid.New(), eventID, validRegisterReq(otherCategoryID), "", "")
 	if !errors.Is(err, ErrInvalidCategory) {
 		t.Fatalf("Register() error = %v, want ErrInvalidCategory", err)
 	}
@@ -549,7 +549,7 @@ func TestService_Register_ClosedEventRejected(t *testing.T) {
 	eventID, categoryID := seedEventAndCategory(er, 0, 10)
 	er.eventsByID[eventID].Status = events.StatusPublished // not REGISTRATION_OPEN
 
-	_, err := svc.Register(context.Background(), uuid.New(), eventID, validRegisterReq(categoryID))
+	_, err := svc.Register(context.Background(), uuid.New(), eventID, validRegisterReq(categoryID), "", "")
 	if !errors.Is(err, ErrRegistrationClosed) {
 		t.Fatalf("Register() error = %v, want ErrRegistrationClosed", err)
 	}
@@ -560,7 +560,7 @@ func TestService_Register_ClosedCategoryRejected(t *testing.T) {
 	eventID, categoryID := seedEventAndCategory(er, 0, 10)
 	er.categoriesByID[categoryID].Status = "CLOSED"
 
-	_, err := svc.Register(context.Background(), uuid.New(), eventID, validRegisterReq(categoryID))
+	_, err := svc.Register(context.Background(), uuid.New(), eventID, validRegisterReq(categoryID), "", "")
 	if !errors.Is(err, ErrRegistrationClosed) {
 		t.Fatalf("Register() error = %v, want ErrRegistrationClosed", err)
 	}
@@ -571,7 +571,7 @@ func TestService_Cancel_FreesCapacityForReRegistration(t *testing.T) {
 	eventID, categoryID := seedEventAndCategory(er, 0, 1)
 	userID := uuid.New()
 
-	result, err := svc.Register(context.Background(), userID, eventID, validRegisterReq(categoryID))
+	result, err := svc.Register(context.Background(), userID, eventID, validRegisterReq(categoryID), "", "")
 	if err != nil {
 		t.Fatalf("Register() error = %v", err)
 	}
@@ -582,7 +582,7 @@ func TestService_Cancel_FreesCapacityForReRegistration(t *testing.T) {
 
 	// Re-registering the same user should now succeed (capacity freed,
 	// duplicate check passes since the prior registration is cancelled).
-	if _, err := svc.Register(context.Background(), userID, eventID, validRegisterReq(categoryID)); err != nil {
+	if _, err := svc.Register(context.Background(), userID, eventID, validRegisterReq(categoryID), "", ""); err != nil {
 		t.Fatalf("re-Register() after cancel error = %v", err)
 	}
 }
@@ -592,7 +592,7 @@ func TestService_Cancel_AlreadyCancelledRejected(t *testing.T) {
 	eventID, categoryID := seedEventAndCategory(er, 0, 10)
 	userID := uuid.New()
 
-	result, err := svc.Register(context.Background(), userID, eventID, validRegisterReq(categoryID))
+	result, err := svc.Register(context.Background(), userID, eventID, validRegisterReq(categoryID), "", "")
 	if err != nil {
 		t.Fatalf("Register() error = %v", err)
 	}
@@ -611,7 +611,7 @@ func TestService_Cancel_ForbiddenForNonOwnerNonStaff(t *testing.T) {
 	eventID, categoryID := seedEventAndCategory(er, 0, 10)
 	owner := uuid.New()
 
-	result, err := svc.Register(context.Background(), owner, eventID, validRegisterReq(categoryID))
+	result, err := svc.Register(context.Background(), owner, eventID, validRegisterReq(categoryID), "", "")
 	if err != nil {
 		t.Fatalf("Register() error = %v", err)
 	}
@@ -626,7 +626,7 @@ func TestService_Cancel_CheckedInRegistrationRejected(t *testing.T) {
 	svc, repo, er := newTestSetup(&fakePaymentProvider{status: payments.StatusSucceeded})
 	eventID, categoryID := seedEventAndCategory(er, 0, 10)
 	owner := uuid.New()
-	result, err := svc.Register(context.Background(), owner, eventID, validRegisterReq(categoryID))
+	result, err := svc.Register(context.Background(), owner, eventID, validRegisterReq(categoryID), "", "")
 	if err != nil {
 		t.Fatalf("Register() error = %v", err)
 	}
@@ -643,7 +643,7 @@ func TestService_GetByID_StaffCanViewAnyRegistration(t *testing.T) {
 	eventID, categoryID := seedEventAndCategory(er, 0, 10)
 	owner := uuid.New()
 
-	result, err := svc.Register(context.Background(), owner, eventID, validRegisterReq(categoryID))
+	result, err := svc.Register(context.Background(), owner, eventID, validRegisterReq(categoryID), "", "")
 	if err != nil {
 		t.Fatalf("Register() error = %v", err)
 	}
@@ -657,7 +657,7 @@ func TestService_Register_Free_NotifiesConfirmedOnly(t *testing.T) {
 	svc, er, notifier := newTestSetupWithNotifier(&fakePaymentProvider{status: payments.StatusSucceeded})
 	eventID, categoryID := seedEventAndCategory(er, 0, 10)
 
-	if _, err := svc.Register(context.Background(), uuid.New(), eventID, validRegisterReq(categoryID)); err != nil {
+	if _, err := svc.Register(context.Background(), uuid.New(), eventID, validRegisterReq(categoryID), "", ""); err != nil {
 		t.Fatalf("Register() error = %v", err)
 	}
 
@@ -673,7 +673,7 @@ func TestService_Register_Paid_NotifiesConfirmedAndPaid(t *testing.T) {
 	svc, er, notifier := newTestSetupWithNotifier(&fakePaymentProvider{status: payments.StatusSucceeded})
 	eventID, categoryID := seedEventAndCategory(er, 5000, 10)
 
-	if _, err := svc.Register(context.Background(), uuid.New(), eventID, validRegisterReq(categoryID)); err != nil {
+	if _, err := svc.Register(context.Background(), uuid.New(), eventID, validRegisterReq(categoryID), "", ""); err != nil {
 		t.Fatalf("Register() error = %v", err)
 	}
 
@@ -689,7 +689,7 @@ func TestService_Register_PaymentFailure_NoNotification(t *testing.T) {
 	svc, er, notifier := newTestSetupWithNotifier(&fakePaymentProvider{status: payments.StatusFailed})
 	eventID, categoryID := seedEventAndCategory(er, 5000, 10)
 
-	if _, err := svc.Register(context.Background(), uuid.New(), eventID, validRegisterReq(categoryID)); !errors.Is(err, ErrPaymentUnavailable) {
+	if _, err := svc.Register(context.Background(), uuid.New(), eventID, validRegisterReq(categoryID), "", ""); !errors.Is(err, ErrPaymentUnavailable) {
 		t.Fatalf("Register() error = %v, want ErrPaymentUnavailable", err)
 	}
 
@@ -704,7 +704,7 @@ func TestService_Cancel_NotifiesCancellation(t *testing.T) {
 	eventID, categoryID := seedEventAndCategory(er, 0, 10)
 	userID := uuid.New()
 
-	result, err := svc.Register(context.Background(), userID, eventID, validRegisterReq(categoryID))
+	result, err := svc.Register(context.Background(), userID, eventID, validRegisterReq(categoryID), "", "")
 	if err != nil {
 		t.Fatalf("Register() error = %v", err)
 	}
@@ -730,7 +730,7 @@ func newExpiredPendingPayment(t *testing.T, provider *fakePaymentProvider) (*Ser
 	svc, repo, er := newTestSetup(provider)
 	eventID, categoryID := seedEventAndCategory(er, 2500, 10)
 	userID := uuid.New()
-	result, err := svc.Register(context.Background(), userID, eventID, validRegisterReq(categoryID))
+	result, err := svc.Register(context.Background(), userID, eventID, validRegisterReq(categoryID), "", "")
 	if err != nil {
 		t.Fatalf("Register() error = %v", err)
 	}
@@ -767,8 +767,8 @@ func TestService_VerifyPayment_ExpiresOnlyWhenProviderStillPending(t *testing.T)
 	if !errors.Is(err, ErrPaymentExpired) {
 		t.Fatalf("VerifyPayment() error = %v, want ErrPaymentExpired", err)
 	}
-	if repo.regs[result.Registration.ID].Status != StatusCancelled {
-		t.Fatalf("stored status = %q, want CANCELLED", repo.regs[result.Registration.ID].Status)
+	if repo.regs[result.Registration.ID].Status != StatusExpired {
+		t.Fatalf("stored status = %q, want EXPIRED", repo.regs[result.Registration.ID].Status)
 	}
 }
 

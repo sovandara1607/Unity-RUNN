@@ -12,6 +12,7 @@ import (
 
 	"github.com/unity-run-club/api/internal/email"
 	"github.com/unity-run-club/api/internal/events"
+	"github.com/unity-run-club/api/internal/metrics"
 	"github.com/unity-run-club/api/internal/registrations"
 )
 
@@ -93,6 +94,7 @@ func (w *Worker) Run(ctx context.Context) {
 				if ctx.Err() != nil {
 					return
 				}
+				metrics.WorkerFailuresTotal.WithLabelValues("notifications").Inc()
 				w.log.Error("notification_queue_pop_failed", "error", err)
 				continue
 			}
@@ -128,6 +130,7 @@ func (w *Worker) sweep(ctx context.Context) {
 	cutoff := time.Now().Add(-w.sweepAge)
 	pending, err := w.repo.ListPendingOlderThan(ctx, cutoff, 100)
 	if err != nil {
+		metrics.WorkerFailuresTotal.WithLabelValues("notifications").Inc()
 		w.log.Error("notification_sweep_failed", "error", err)
 		return
 	}

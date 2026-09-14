@@ -10,6 +10,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/unity-run-club/api/internal/events"
 )
 
 var ErrNotFound = errors.New("registrations: not found")
@@ -58,6 +60,11 @@ type CreateParams struct {
 	// TicketTokenHash, when Confirm is true, is the SHA-256 hash of the
 	// raw QR token to persist (the raw token itself is never stored).
 	TicketTokenHash string
+	// PostInsertHook, if set, runs inside the same transaction right after
+	// the registration (and ticket, if any) are inserted, before commit.
+	// Used to persist an idempotency record atomically with the free/instant
+	// registration path. Left nil, it's a no-op.
+	PostInsertHook func(ctx context.Context, tx pgx.Tx, result *CreateResult) error
 }
 
 func (r *Repository) Create(ctx context.Context, p CreateParams) (*CreateResult, error) {
@@ -140,6 +147,12 @@ func (r *Repository) Create(ctx context.Context, p CreateParams) (*CreateResult,
 			return nil, fmt.Errorf("registrations: insert ticket: %w", err)
 		}
 		result.Ticket = &ticket
+	}
+
+	if p.PostInsertHook != nil {
+		if err := p.PostInsertHook(ctx, tx, result); err != nil {
+			return nil, err
+		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {
@@ -299,7 +312,7 @@ func (r *Repository) ListAll(ctx context.Context, filter AdminListFilter) ([]Reg
 	}
 	defer rows.Close()
 
-	var out []Registration
+	out := []Registration{}
 	for rows.Next() {
 		var reg Registration
 		if err := rows.Scan(&reg.ID, &reg.RegistrationNumber, &reg.UserID, &reg.EventID,
@@ -314,15 +327,26 @@ func (r *Repository) ListAll(ctx context.Context, filter AdminListFilter) ([]Reg
 }
 
 // ListForUser returns all registrations belonging to userID, most
-// recent first.
+// recent first. Unlike GetByID/AdminList's narrower scans, this one joins
+// the full event + category so the mobile Wallet screen can render event
+// name/location/distance and (critically) build a Follow Live payload
+// without a second round-trip -- see WalletScreen.tsx's onFollowLive, which
+// no-ops without entry.event.
 func (r *Repository) ListForUser(ctx context.Context, userID uuid.UUID) ([]Registration, error) {
 	const query = `
 		SELECT r.id, r.registration_number, r.user_id, r.event_id, r.event_category_id, r.status,
 		       r.full_name, r.email, r.phone, r.date_of_birth, r.gender,
 		       r.emergency_contact_name, r.emergency_contact_phone, r.tshirt_size,
-		       r.created_at, r.updated_at, ci.checked_in_at
+		       r.created_at, r.updated_at, ci.checked_in_at,
+		       e.id, e.name, e.slug, e.description, e.cover_image, e.event_date, e.start_time,
+		       e.location, e.latitude, e.longitude, e.registration_open_at, e.registration_close_at,
+		       e.status, e.created_at, e.updated_at,
+		       ec.id, ec.event_id, ec.name, ec.distance, ec.price_cents, ec.currency, ec.capacity,
+		       ec.registration_deadline, ec.status, ec.created_at, ec.updated_at
 		FROM registrations r
 		LEFT JOIN check_ins ci ON ci.registration_id = r.id
+		JOIN events e ON e.id = r.event_id
+		JOIN event_categories ec ON ec.id = r.event_category_id
 		WHERE r.user_id = $1 ORDER BY r.created_at DESC`
 
 	rows, err := r.pool.Query(ctx, query, userID)
@@ -331,15 +355,27 @@ func (r *Repository) ListForUser(ctx context.Context, userID uuid.UUID) ([]Regis
 	}
 	defer rows.Close()
 
-	var out []Registration
+	out := []Registration{}
 	for rows.Next() {
 		var reg Registration
+		var ev events.Event
+		var cat events.EventCategory
 		if err := rows.Scan(&reg.ID, &reg.RegistrationNumber, &reg.UserID, &reg.EventID,
 			&reg.EventCategoryID, &reg.Status, &reg.FullName, &reg.Email, &reg.Phone,
 			&reg.DateOfBirth, &reg.Gender, &reg.EmergencyContactName, &reg.EmergencyContactPhone,
-			&reg.TshirtSize, &reg.CreatedAt, &reg.UpdatedAt, &reg.CheckedInAt); err != nil {
+			&reg.TshirtSize, &reg.CreatedAt, &reg.UpdatedAt, &reg.CheckedInAt,
+			&ev.ID, &ev.Name, &ev.Slug, &ev.Description, &ev.CoverImage, &ev.EventDate, &ev.StartTime,
+			&ev.Location, &ev.Latitude, &ev.Longitude, &ev.RegistrationOpenAt, &ev.RegistrationCloseAt,
+			&ev.Status, &ev.CreatedAt, &ev.UpdatedAt,
+			&cat.ID, &cat.EventID, &cat.Name, &cat.Distance, &cat.PriceCents, &cat.Currency, &cat.Capacity,
+			&cat.RegistrationDeadline, &cat.Status, &cat.CreatedAt, &cat.UpdatedAt,
+		); err != nil {
 			return nil, fmt.Errorf("registrations: scan: %w", err)
 		}
+		reg.EventName = ev.Name
+		reg.CategoryName = cat.Name
+		reg.Event = &ev
+		reg.Category = &cat
 		out = append(out, reg)
 	}
 	return out, rows.Err()
@@ -420,7 +456,7 @@ func (r *Repository) ClaimPendingPayments(ctx context.Context, workerID string, 
 		return nil, fmt.Errorf("registrations: claim pending payments: %w", err)
 	}
 	defer rows.Close()
-	var out []Payment
+	out := []Payment{}
 	for rows.Next() {
 		var p Payment
 		if err := scanPayment(rows, &p); err != nil {
@@ -455,7 +491,7 @@ func (r *Repository) ExpireClaimedPayment(ctx context.Context, registrationID, p
 		return categoryID, false, err
 	}
 	if status == StatusPending {
-		if _, err := tx.Exec(ctx, `UPDATE registrations SET status='CANCELLED', updated_at=now() WHERE id=$1`, registrationID); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE registrations SET status='EXPIRED', updated_at=now() WHERE id=$1`, registrationID); err != nil {
 			return categoryID, false, err
 		}
 	}
@@ -479,7 +515,7 @@ func (r *Repository) ExpirePendingPayments(ctx context.Context, now time.Time) (
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 	rows, err := tx.Query(ctx, `
-		UPDATE registrations r SET status='CANCELLED', updated_at=now()
+		UPDATE registrations r SET status='EXPIRED', updated_at=now()
 		WHERE r.status='PENDING' AND EXISTS (
 			SELECT 1 FROM payments p WHERE p.registration_id=r.id
 			AND p.status='PENDING' AND p.expires_at IS NOT NULL AND p.expires_at <= $1

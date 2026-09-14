@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/unity-run-club/api/internal/email"
+	"github.com/unity-run-club/api/internal/metrics"
 )
 
 type telegramDeliveryRepository interface {
@@ -63,6 +64,7 @@ func (w *TelegramWorker) sweep(ctx context.Context) {
 		deliveries, err := w.repo.ClaimTelegramDeliveries(ctx, 100)
 		if err != nil {
 			if ctx.Err() == nil {
+				metrics.WorkerFailuresTotal.WithLabelValues("telegram").Inc()
 				w.log.Error("telegram_delivery_claim_failed", "error", err)
 			}
 			return

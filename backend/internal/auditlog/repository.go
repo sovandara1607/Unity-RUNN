@@ -72,7 +72,7 @@ func (r *Repository) List(ctx context.Context, filter ListFilter) ([]Entry, erro
 	}
 	defer rows.Close()
 
-	var out []Entry
+	out := []Entry{}
 	for rows.Next() {
 		var e Entry
 		var raw []byte
@@ -100,7 +100,7 @@ func (r *Repository) ListByEntity(ctx context.Context, entityType string, entity
 	}
 	defer rows.Close()
 
-	var out []Entry
+	out := []Entry{}
 	for rows.Next() {
 		var e Entry
 		var raw []byte

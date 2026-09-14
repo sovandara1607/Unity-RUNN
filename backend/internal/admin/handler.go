@@ -175,7 +175,7 @@ func registrationFilter(r *http.Request) (registrations.AdminListFilter, error) 
 	if v := q.Get("status"); v != "" {
 		status := registrations.Status(v)
 		switch status {
-		case registrations.StatusPending, registrations.StatusConfirmed, registrations.StatusCancelled, registrations.StatusRefunded:
+		case registrations.StatusPending, registrations.StatusConfirmed, registrations.StatusCancelled, registrations.StatusRefunded, registrations.StatusExpired:
 		default:
 			return filter, errors.New("status is invalid")
 		}

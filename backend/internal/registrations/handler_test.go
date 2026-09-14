@@ -132,7 +132,7 @@ func TestHandler_Availability(t *testing.T) {
 
 	// Register one to move the counter.
 	userID := uuid.New()
-	if _, err := svc.Register(context.Background(), userID, eventID, validRegisterReq(categoryID)); err != nil {
+	if _, err := svc.Register(context.Background(), userID, eventID, validRegisterReq(categoryID), "", ""); err != nil {
 		t.Fatalf("Register() error = %v", err)
 	}
 

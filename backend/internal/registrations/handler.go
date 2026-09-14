@@ -3,7 +3,9 @@ package registrations
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -11,7 +13,11 @@ import (
 	"github.com/unity-run-club/api/internal/auth"
 	"github.com/unity-run-club/api/internal/events"
 	"github.com/unity-run-club/api/internal/httpresponse"
+	"github.com/unity-run-club/api/internal/idempotency"
 )
+
+// maxIdempotencyKeyLen bounds the Idempotency-Key header to a sane length.
+const maxIdempotencyKeyLen = 255
 
 type Handler struct {
 	svc *Service
@@ -62,8 +68,14 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		httpresponse.WriteError(w, http.StatusBadRequest, "invalid_body", "could not read request body")
+		return
+	}
+
 	var req RegisterRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.Unmarshal(body, &req); err != nil {
 		httpresponse.WriteError(w, http.StatusBadRequest, "invalid_body", "malformed JSON body")
 		return
 	}
@@ -72,8 +84,16 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := h.svc.Register(r.Context(), caller.ID, eventID, req)
+	idemKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	if len(idemKey) > maxIdempotencyKeyLen {
+		httpresponse.WriteError(w, http.StatusBadRequest, "invalid_idempotency_key", "Idempotency-Key must be 255 characters or fewer")
+		return
+	}
+
+	result, err := h.svc.Register(r.Context(), caller.ID, eventID, req, idemKey, idempotency.HashRequest(body))
 	switch {
+	case errors.Is(err, idempotency.ErrConflict):
+		httpresponse.WriteError(w, http.StatusUnprocessableEntity, "idempotency_key_conflict", "this idempotency key was already used with a different request")
 	case errors.Is(err, ErrInvalidCategory):
 		httpresponse.WriteError(w, http.StatusBadRequest, "invalid_category", "category does not belong to this event")
 	case errors.Is(err, ErrRegistrationClosed):
@@ -90,6 +110,8 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		httpresponse.WriteError(w, http.StatusBadGateway, "payment_unavailable", "payment could not be started; your place was released")
 	case err != nil:
 		httpresponse.WriteError(w, http.StatusInternalServerError, "internal_error", "failed to register")
+	case result.Replayed:
+		httpresponse.WriteData(w, result.ReplayStatus, result.ReplayBody)
 	default:
 		httpresponse.WriteData(w, http.StatusCreated, map[string]any{
 			"registration": result.Registration,

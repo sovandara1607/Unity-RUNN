@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -234,5 +235,136 @@ func TestRepository_ConcurrentRegistration_NeverExceedsCapacity(t *testing.T) {
 	}
 	if finalCount != capacity {
 		t.Errorf("final confirmed count in DB = %d, want %d", finalCount, capacity)
+	}
+}
+
+func TestRepository_ExpirePendingPayments_MarksExpiredAndFreesCapacity(t *testing.T) {
+	pool := testPool(t)
+	repo := NewRepository(pool)
+	ctx := context.Background()
+	eventID, categoryID := seedEventCategoryUser(t, pool, 1)
+	userID := seedUser(t, pool)
+
+	res, err := repo.Create(ctx, CreateParams{UserID: userID, EventID: eventID, EventCategoryID: categoryID,
+		Capacity: 1, Participant: testParticipant(), Confirm: false})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	past := time.Now().Add(-time.Minute)
+	payment := &Payment{RegistrationID: res.Registration.ID, Provider: "mock", ProviderReference: "ref-1",
+		AmountCents: 1000, Currency: "USD", Status: "PENDING", ExpiresAt: &past}
+	if err := repo.CreatePayment(ctx, payment); err != nil {
+		t.Fatalf("CreatePayment() error = %v", err)
+	}
+
+	categories, err := repo.ExpirePendingPayments(ctx, time.Now())
+	if err != nil {
+		t.Fatalf("ExpirePendingPayments() error = %v", err)
+	}
+	if len(categories) != 1 || categories[0] != categoryID {
+		t.Fatalf("ExpirePendingPayments() categories = %v, want [%v]", categories, categoryID)
+	}
+
+	reg, err := repo.GetByID(ctx, res.Registration.ID)
+	if err != nil {
+		t.Fatalf("GetByID() error = %v", err)
+	}
+	// A timed-out reservation is EXPIRED, distinct from a genuine user/admin CANCELLED.
+	if reg.Status != StatusExpired {
+		t.Fatalf("status = %q, want %q", reg.Status, StatusExpired)
+	}
+
+	active, err := repo.CountActive(ctx, categoryID)
+	if err != nil {
+		t.Fatalf("CountActive() error = %v", err)
+	}
+	if active != 0 {
+		t.Fatalf("CountActive() = %d, want 0 (EXPIRED must free the slot)", active)
+	}
+
+	// The freed slot must be immediately usable by a new registration.
+	other := seedUser(t, pool)
+	if _, err := repo.Create(ctx, CreateParams{UserID: other, EventID: eventID, EventCategoryID: categoryID,
+		Capacity: 1, Participant: testParticipant(), Confirm: true, TicketTokenHash: "hash-after-expiry"}); err != nil {
+		t.Fatalf("Create() after expiry error = %v", err)
+	}
+}
+
+// TestRepository_ConfirmStoredPayment_ConcurrentCallsConfirmExactlyOnce is the
+// direct proof behind the "one payment never produces two tickets" claim:
+// duplicate payment-provider confirmations (e.g. redundant webhook/poll
+// deliveries) must confirm the registration and issue a ticket exactly once,
+// no matter how many callers race to confirm the same payment.
+//
+// This is exercised here as a Go-level concurrency test against the real
+// repository, not as an HTTP/k6 scenario, because the bundled mock payment
+// provider's GetPaymentStatus never populates Verification — so
+// Service.VerifyPayment always returns payment_unavailable for a pending
+// mock payment and can never actually reach ConfirmStoredPayment over HTTP.
+// That's a property of the mock provider, not of the idempotency guarantee
+// itself, so this test targets the guarantee directly.
+func TestRepository_ConfirmStoredPayment_ConcurrentCallsConfirmExactlyOnce(t *testing.T) {
+	pool := testPool(t)
+	repo := NewRepository(pool)
+	ctx := context.Background()
+	eventID, categoryID := seedEventCategoryUser(t, pool, 1)
+	userID := seedUser(t, pool)
+
+	res, err := repo.Create(ctx, CreateParams{UserID: userID, EventID: eventID, EventCategoryID: categoryID,
+		Capacity: 1, Participant: testParticipant(), Confirm: false})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	var paymentID uuid.UUID
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO payments (registration_id, provider, provider_reference, amount_cents, currency, status)
+		VALUES ($1, 'mock', 'concurrent-confirm-ref', 1000, 'USD', 'PENDING') RETURNING id`,
+		res.Registration.ID).Scan(&paymentID); err != nil {
+		t.Fatalf("seed payment: %v", err)
+	}
+
+	const attempts = 20
+	var wg sync.WaitGroup
+	var newlyConfirmedCount int32
+	errCh := make(chan error, attempts)
+	for i := 0; i < attempts; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			_, newlyConfirmed, err := repo.ConfirmStoredPayment(ctx, res.Registration.ID, paymentID, fmt.Sprintf("concurrent-hash-%d", i))
+			if err != nil {
+				errCh <- err
+				return
+			}
+			if newlyConfirmed {
+				atomic.AddInt32(&newlyConfirmedCount, 1)
+			}
+		}(i)
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		t.Errorf("ConfirmStoredPayment() concurrent call error = %v", err)
+	}
+
+	if newlyConfirmedCount != 1 {
+		t.Fatalf("newlyConfirmed count = %d, want exactly 1 across %d concurrent confirmations", newlyConfirmedCount, attempts)
+	}
+
+	var ticketCount int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM tickets WHERE registration_id = $1`, res.Registration.ID).Scan(&ticketCount); err != nil {
+		t.Fatalf("count tickets: %v", err)
+	}
+	if ticketCount != 1 {
+		t.Fatalf("ticket count = %d, want exactly 1", ticketCount)
+	}
+
+	reg, err := repo.GetByID(ctx, res.Registration.ID)
+	if err != nil {
+		t.Fatalf("GetByID() error = %v", err)
+	}
+	if reg.Status != StatusConfirmed {
+		t.Fatalf("status = %q, want %q", reg.Status, StatusConfirmed)
 	}
 }

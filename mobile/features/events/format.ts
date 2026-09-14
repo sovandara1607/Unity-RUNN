@@ -14,6 +14,19 @@ export function eventDate(value: string, compact = false) {
         },
   ).format(new Date(`${day}T12:00:00Z`));
 }
+/** Month/day split for a stacked calendar-style badge ("JAN" over "01"), rather
+ * than the single-line "1 Jan" `eventDate(_, true)` reads as a sentence fragment. */
+export function eventDateParts(value: string): { month: string; day: string } | null {
+  const day = value.slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
+  const date = new Date(`${day}T12:00:00Z`);
+  return {
+    month: new Intl.DateTimeFormat("en-GB", { month: "short", timeZone: "UTC" })
+      .format(date)
+      .toUpperCase(),
+    day: new Intl.DateTimeFormat("en-GB", { day: "2-digit", timeZone: "UTC" }).format(date),
+  };
+}
 export function eventTime(value: string) {
   // SQL TIME is serialized by Go with a synthetic date. It is Cambodian wall time.
   return value.match(/(?:T|^)(\d{2}:\d{2})/)?.[1] ?? "Time to be announced";
