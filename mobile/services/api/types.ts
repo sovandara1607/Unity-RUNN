@@ -67,10 +67,17 @@ export type HeroSlide = {
   title: string;
   copy: string;
 };
-// Only the fields the app actually reads from GET /api/v1/site-config
-// (backend internal/siteconfig.Settings has more admin-editable fields --
-// club branding, announcement banner, mission copy -- not needed here yet).
+// The fields the app reads from GET /api/v1/site-config (backend internal/
+// siteconfig.Settings has more admin-editable fields -- announcement banner,
+// colors -- not needed here yet). club_name/location_label/mission_*/
+// value_messages back the Events home screen's header and mission strip.
 export type SiteConfig = {
+  club_name: string;
+  location_label: string;
+  mission_eyebrow: string;
+  mission_text: string;
+  mission_supporting_text: string;
+  value_messages: string[];
   hero_slides: HeroSlide[];
 };
 export type Profile = {

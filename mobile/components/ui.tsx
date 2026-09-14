@@ -19,11 +19,17 @@ export function Heading({
   children,
   large = false,
   style,
-}: PropsWithChildren<{ large?: boolean; style?: TextProps["style"] }>) {
+  numberOfLines,
+}: PropsWithChildren<{
+  large?: boolean;
+  style?: TextProps["style"];
+  numberOfLines?: TextProps["numberOfLines"];
+}>) {
   return (
     <Text
       accessibilityRole="header"
       style={[styles.heading, large && { fontSize: 52, lineHeight: 59 }, style]}
+      numberOfLines={numberOfLines}
     >
       {children}
     </Text>
