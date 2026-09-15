@@ -1,5 +1,4 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Camera, CameraOff, RefreshCw } from "lucide-react";
 import type { Html5Qrcode } from "html5-qrcode";
 
 interface QRCodeScannerProps {
@@ -13,6 +12,20 @@ function showCameraPreviewNormally(regionId: string) {
   if (!video) return;
   video.style.setProperty("transform", "none", "important");
   video.style.setProperty("-webkit-transform", "none", "important");
+}
+
+function cameraErrorMessage(error: unknown) {
+  const detail = error instanceof Error ? `${error.name} ${error.message}` : String(error || "");
+  if (/notallowed|permission|denied/i.test(detail)) {
+    return "Camera access is blocked. Allow camera permission in your browser settings, then retry.";
+  }
+  if (/notfound|devicesnotfound|no camera/i.test(detail)) {
+    return "No camera was found. Connect a camera or use ticket lookup below.";
+  }
+  if (/notreadable|trackstarterror|in use/i.test(detail)) {
+    return "The camera is already in use. Close the other camera app, then retry.";
+  }
+  return "The camera could not start. Retry it or use ticket lookup below.";
 }
 
 export function QRCodeScanner({ onScan, onError, paused = false }: QRCodeScannerProps) {
@@ -86,16 +99,8 @@ export function QRCodeScanner({ onScan, onError, paused = false }: QRCodeScanner
         setCameraError(null);
       } catch (err: unknown) {
         if (disposed) return;
-        // Permission denial is an expected station fallback, not an app crash.
-        console.warn("Camera scanner unavailable:", err);
-        const message = err instanceof Error
-          ? err.message
-          : typeof err === "string" && err.trim()
-            ? err
-            : "Could not start camera. Check permission or use the registration number below.";
-        setCameraError(
-          message
-        );
+        const message = cameraErrorMessage(err);
+        setCameraError(message);
         setCameraActive(false);
         onErrorRef.current?.(message);
       }
@@ -121,47 +126,44 @@ export function QRCodeScanner({ onScan, onError, paused = false }: QRCodeScanner
   }, [retryKey]);
 
   return (
-    <div className="relative flex min-h-[390px] flex-col items-center justify-center overflow-hidden rounded-[22px] border border-white/10 bg-black shadow-[inset_0_0_80px_rgba(0,0,0,.65)]">
+    <div className="relative flex min-h-[360px] flex-col items-center justify-center overflow-hidden rounded-lg border border-black bg-black sm:min-h-[430px]">
       <div id={regionId} className="w-full max-w-lg overflow-hidden" />
 
       {!cameraActive && !cameraError && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/90 p-6 text-center text-white/70 backdrop-blur-sm">
-          <span className="grid h-14 w-14 place-items-center rounded-full bg-[#d9ff00] text-black"><Camera className="h-6 w-6 animate-pulse" /></span>
-          <p className="mt-4 text-sm font-black uppercase tracking-[0.08em] text-white">Starting camera</p>
-          <p className="mt-1 text-xs text-white/35">Allow camera access to scan runner tickets.</p>
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-black p-6 text-center">
+          <div aria-hidden className="mb-5 h-8 w-8 border-2 border-white/25 border-t-[#d9ff00] motion-safe:animate-spin" />
+          <p className="text-base font-bold text-white">Connecting to camera</p>
+          <p className="mt-2 max-w-sm text-sm leading-5 text-white/60">Your browser may ask for camera permission.</p>
         </div>
       )}
 
       {cameraError && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center bg-black p-6 text-center text-white/70">
-          <CameraOff className="mb-3 h-10 w-10 text-rose-500" />
-          <p className="text-sm font-black uppercase tracking-[0.08em] text-rose-400">Camera unavailable</p>
-          <p className="mt-1 max-w-xs text-xs text-white/45">{cameraError}</p>
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-black p-6 text-center" role="alert">
+          <h3 className="text-lg font-bold text-white">Camera unavailable</h3>
+          <p className="mt-2 max-w-sm text-sm leading-6 text-white/65">{cameraError}</p>
           <button
             type="button"
             onClick={() => { setCameraError(null); setRetryKey((key) => key + 1); }}
-            className="mt-4 inline-flex items-center gap-2 rounded-full bg-[#d9ff00] px-4 py-2.5 text-xs font-black text-black transition hover:bg-white"
+            className="mt-6 min-h-11 rounded-md bg-[#d9ff00] px-5 py-2.5 text-sm font-bold text-black transition-colors hover:bg-white"
           >
-            <RefreshCw className="h-3.5 w-3.5" /> Try camera again
+            Retry camera
           </button>
-          <p className="mt-3 text-xs text-white/35">Use the desk lookup below while the camera is unavailable.</p>
+          <p className="mt-4 text-xs text-white/45">Ticket lookup remains available below.</p>
         </div>
       )}
 
-      {/* Targeting Overlay Frame */}
       {cameraActive && (
         <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-          <div className="relative h-60 w-60 rounded-[28px] border border-[#d9ff00]/35 shadow-[0_0_60px_rgba(217,255,0,.12)]">
-            <div className="absolute -left-1 -top-1 h-7 w-7 rounded-tl-xl border-l-4 border-t-4 border-[#d9ff00]" />
-            <div className="absolute -right-1 -top-1 h-7 w-7 rounded-tr-xl border-r-4 border-t-4 border-[#d9ff00]" />
-            <div className="absolute -bottom-1 -left-1 h-7 w-7 rounded-bl-xl border-b-4 border-l-4 border-[#d9ff00]" />
-            <div className="absolute -bottom-1 -right-1 h-7 w-7 rounded-br-xl border-b-4 border-r-4 border-[#d9ff00]" />
-            <div className="absolute inset-x-5 top-1/2 h-px bg-[#d9ff00] shadow-[0_0_14px_#d9ff00] animate-pulse" />
+          <div className="relative h-56 w-56 sm:h-64 sm:w-64">
+            <div className="absolute left-0 top-0 h-9 w-9 border-l-[3px] border-t-[3px] border-[#d9ff00]" />
+            <div className="absolute right-0 top-0 h-9 w-9 border-r-[3px] border-t-[3px] border-[#d9ff00]" />
+            <div className="absolute bottom-0 left-0 h-9 w-9 border-b-[3px] border-l-[3px] border-[#d9ff00]" />
+            <div className="absolute bottom-0 right-0 h-9 w-9 border-b-[3px] border-r-[3px] border-[#d9ff00]" />
           </div>
         </div>
       )}
 
-      {cameraActive && <div className="pointer-events-none absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full bg-black/65 px-3 py-1.5 font-mono text-[8px] font-black uppercase tracking-[0.16em] text-white/55 backdrop-blur">Hold QR inside the frame</div>}
+      {cameraActive && <div className="pointer-events-none absolute inset-x-0 bottom-0 border-t border-white/15 bg-black/85 px-4 py-3 text-center text-sm text-white/70">Hold the ticket QR inside the corners</div>}
     </div>
   );
 }

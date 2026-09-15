@@ -6,7 +6,7 @@ import { Activity, CalendarDays, ExternalLink, FileClock, Gauge, LogOut, Menu, M
 import { api } from "../../lib/api";
 import type { MeResponse, Role } from "../../types";
 
-interface AdminLayoutProps { children: React.ReactNode; title?: string; subtitle?: string; actions?: React.ReactNode; minRole?: Role; }
+interface AdminLayoutProps { children: React.ReactNode; title?: string; subtitle?: string; actions?: React.ReactNode; minRole?: Role; plainSurface?: boolean; }
 
 const roleHierarchy: Record<Role, number> = { USER: 0, STAFF: 1, ADMIN: 2, SUPER_ADMIN: 3 };
 const navigationItems = [
@@ -21,7 +21,7 @@ const navigationItems = [
   { label: "System", short: "Config & health", href: "/admin/system", icon: ServerCog, minRank: 3 },
 ];
 
-export function AdminLayout({ children, title, subtitle, actions, minRole = "STAFF" }: AdminLayoutProps) {
+export function AdminLayout({ children, title, subtitle, actions, minRole = "STAFF", plainSurface = false }: AdminLayoutProps) {
   const router = useRouter();
   const [currentUser, setCurrentUser] = useState<MeResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -102,7 +102,7 @@ export function AdminLayout({ children, title, subtitle, actions, minRole = "STA
             <div className={`mobile-scroll-row order-3 w-full shrink-0 items-center gap-2 overflow-x-auto pl-14 [&_a]:shrink-0 [&_a]:whitespace-nowrap [&_button]:shrink-0 [&_button]:whitespace-nowrap sm:order-none sm:flex sm:w-auto sm:overflow-visible sm:pl-0 ${actions ? "flex" : "hidden"}`}>{router.pathname !== "/admin/checkin" && <Link href="/admin/checkin" className="hidden items-center gap-2 rounded-full border border-black/15 bg-white px-4 py-2.5 text-[10px] font-black uppercase tracking-[0.1em] transition hover:border-black sm:inline-flex"><QrCode className="h-3.5 w-3.5 text-[#3155ff]" /> Launch scanner</Link>}{actions}</div>
           </div>
         </header>
-        <main className="admin-track-surface mx-auto min-h-[calc(100vh-88px)] w-full max-w-[1600px] p-4 sm:p-8 xl:p-10">{children}</main>
+        <main className={`${plainSurface ? "" : "admin-track-surface"} mx-auto min-h-[calc(100vh-88px)] w-full max-w-[1600px] p-4 sm:p-8 xl:p-10`}>{children}</main>
       </div>
     </div>
   );
