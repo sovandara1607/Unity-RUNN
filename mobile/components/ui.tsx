@@ -20,16 +20,22 @@ export function Heading({
   large = false,
   style,
   numberOfLines,
+  adjustsFontSizeToFit,
+  minimumFontScale,
 }: PropsWithChildren<{
   large?: boolean;
   style?: TextProps["style"];
   numberOfLines?: TextProps["numberOfLines"];
+  adjustsFontSizeToFit?: TextProps["adjustsFontSizeToFit"];
+  minimumFontScale?: TextProps["minimumFontScale"];
 }>) {
   return (
     <Text
       accessibilityRole="header"
       style={[styles.heading, large && { fontSize: 52, lineHeight: 59 }, style]}
       numberOfLines={numberOfLines}
+      adjustsFontSizeToFit={adjustsFontSizeToFit}
+      minimumFontScale={minimumFontScale}
     >
       {children}
     </Text>
@@ -116,9 +122,10 @@ export function OfflineNotice() {
 export function Section({
   title,
   children,
-}: PropsWithChildren<{ title: string }>) {
+  noTopBorder = false,
+}: PropsWithChildren<{ title: string; noTopBorder?: boolean }>) {
   return (
-    <View style={styles.section}>
+    <View style={[styles.section, noTopBorder && { borderTopWidth: 0, paddingTop: 0 }]}>
       <Heading>{title}</Heading>
       {children}
     </View>
@@ -242,7 +249,10 @@ const styles = StyleSheet.create({
     minHeight: 54,
     paddingHorizontal: 24,
     paddingVertical: 15,
-    borderRadius: 16,
+    // A full pill everywhere the button appears, not just on the screens
+    // that prompted this -- a shape decision applied to one screen and not
+    // its neighbors reads as inconsistent, not intentional.
+    borderRadius: 999,
     justifyContent: "center",
   },
   secondary: {

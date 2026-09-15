@@ -150,8 +150,8 @@ func TestService_Update_TransitionsStatusAndPublishesMappedEvent(t *testing.T) {
 	}
 
 	cases := []struct {
-		to       RaceStatus
-		wantEvt  DomainEvent
+		to      RaceStatus
+		wantEvt DomainEvent
 	}{
 		{RaceCheckIn, EventCheckInOpened},
 		{RaceStarting, EventStartingSoon},

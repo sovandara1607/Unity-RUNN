@@ -63,7 +63,7 @@ func TestHandler_Duplicate_RequiresAdminAndCreatesDraft(t *testing.T) {
 		t.Fatalf("Create() error = %v", err)
 	}
 	tokens := newTestTokens()
-	router := newTestRouter(NewHandler(NewService(repo, nil)), tokens)
+	router := newTestRouter(NewHandler(NewService(repo, nil, nil)), tokens)
 	body := `{"name":"Founders Run 2027","event_date":"2027-12-06"}`
 
 	forbidden := httptest.NewRequest(http.MethodPost, "/api/v1/events/"+source.ID.String()+"/duplicate", strings.NewReader(body))
@@ -128,7 +128,7 @@ func newPosterRequestWithFields(t *testing.T, content []byte, filename string, f
 func TestHandler_UploadPoster_SavesImage(t *testing.T) {
 	root := t.TempDir()
 	tokens := newTestTokens()
-	router := newTestRouter(NewHandler(NewService(newFakeRepo(), nil), root), tokens)
+	router := newTestRouter(NewHandler(NewService(newFakeRepo(), nil, nil), root), tokens)
 
 	var imageData bytes.Buffer
 	img := image.NewRGBA(image.Rect(0, 0, 2, 2))
@@ -207,7 +207,7 @@ func posterFileWithoutVariant(t *testing.T, files []string) string {
 func TestHandler_UploadPoster_UsesRequestedArtboard(t *testing.T) {
 	root := t.TempDir()
 	tokens := newTestTokens()
-	router := newTestRouter(NewHandler(NewService(newFakeRepo(), nil), root), tokens)
+	router := newTestRouter(NewHandler(NewService(newFakeRepo(), nil, nil), root), tokens)
 	var imageData bytes.Buffer
 	if err := png.Encode(&imageData, image.NewRGBA(image.Rect(0, 0, 20, 30))); err != nil {
 		t.Fatal(err)
@@ -237,7 +237,7 @@ func TestHandler_UploadPoster_UsesRequestedArtboard(t *testing.T) {
 // TestHandler_UploadPoster_RejectsNonImage tests the UploadPoster method that rejects a non-image
 func TestHandler_UploadPoster_RejectsNonImage(t *testing.T) {
 	tokens := newTestTokens()
-	router := newTestRouter(NewHandler(NewService(newFakeRepo(), nil), t.TempDir()), tokens)
+	router := newTestRouter(NewHandler(NewService(newFakeRepo(), nil, nil), t.TempDir()), tokens)
 	req := newPosterRequest(t, []byte("this is not an image"), "poster.txt")
 	req.Header.Set("Authorization", "Bearer "+bearerToken(t, tokens, auth.RoleAdmin))
 	rec := httptest.NewRecorder()
@@ -251,7 +251,7 @@ func TestHandler_UploadPoster_RejectsNonImage(t *testing.T) {
 // TestHandler_GetBySlug_HiddenForPublicWhenDraft tests the GetBySlug method that returns a 404 for a draft event
 func TestHandler_GetBySlug_HiddenForPublicWhenDraft(t *testing.T) {
 	repo := newFakeRepo()
-	svc := NewService(repo, nil)
+	svc := NewService(repo, nil, nil)
 	h := NewHandler(svc)
 	tokens := newTestTokens()
 	router := newTestRouter(h, tokens)
@@ -273,7 +273,7 @@ func TestHandler_GetBySlug_HiddenForPublicWhenDraft(t *testing.T) {
 // TestHandler_GetBySlug_VisibleForStaff tests the GetBySlug method that returns a 200 for a staff user
 func TestHandler_GetBySlug_VisibleForStaff(t *testing.T) {
 	repo := newFakeRepo()
-	svc := NewService(repo, nil)
+	svc := NewService(repo, nil, nil)
 	h := NewHandler(svc)
 	tokens := newTestTokens()
 	router := newTestRouter(h, tokens)
@@ -297,7 +297,7 @@ func TestHandler_GetBySlug_VisibleForStaff(t *testing.T) {
 func TestHandler_Create_RequiresAuth(t *testing.T) {
 	repo := newFakeRepo()
 	tokens := newTestTokens()
-	router := newTestRouter(NewHandler(NewService(repo, nil)), tokens)
+	router := newTestRouter(NewHandler(NewService(repo, nil, nil)), tokens)
 
 	body, _ := json.Marshal(validCreateReq("Founders Run"))
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/events/", bytes.NewReader(body))
@@ -313,7 +313,7 @@ func TestHandler_Create_RequiresAuth(t *testing.T) {
 func TestHandler_Create_InsufficientRoleForbidden(t *testing.T) {
 	repo := newFakeRepo()
 	tokens := newTestTokens()
-	router := newTestRouter(NewHandler(NewService(repo, nil)), tokens)
+	router := newTestRouter(NewHandler(NewService(repo, nil, nil)), tokens)
 
 	body, _ := json.Marshal(validCreateReq("Founders Run"))
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/events/", bytes.NewReader(body))
@@ -330,7 +330,7 @@ func TestHandler_Create_InsufficientRoleForbidden(t *testing.T) {
 func TestHandler_Create_ValidationFailure(t *testing.T) {
 	repo := newFakeRepo()
 	tokens := newTestTokens()
-	router := newTestRouter(NewHandler(NewService(repo, nil)), tokens)
+	router := newTestRouter(NewHandler(NewService(repo, nil, nil)), tokens)
 
 	// Missing required fields (name, event_date, start_time).
 	body, _ := json.Marshal(map[string]string{})
@@ -348,7 +348,7 @@ func TestHandler_Create_ValidationFailure(t *testing.T) {
 func TestHandler_Create_Success(t *testing.T) {
 	repo := newFakeRepo()
 	tokens := newTestTokens()
-	router := newTestRouter(NewHandler(NewService(repo, nil)), tokens)
+	router := newTestRouter(NewHandler(NewService(repo, nil, nil)), tokens)
 
 	body, _ := json.Marshal(validCreateReq("Founders Run"))
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/events/", bytes.NewReader(body))
@@ -365,7 +365,7 @@ func TestHandler_Create_Success(t *testing.T) {
 func TestHandler_Create_DuplicateSlugConflict(t *testing.T) {
 	repo := newFakeRepo()
 	tokens := newTestTokens()
-	router := newTestRouter(NewHandler(NewService(repo, nil)), tokens)
+	router := newTestRouter(NewHandler(NewService(repo, nil, nil)), tokens)
 	adminBearer := "Bearer " + bearerToken(t, tokens, auth.RoleAdmin)
 
 	req1 := validCreateReq("Founders Run")

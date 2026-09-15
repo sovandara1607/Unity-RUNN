@@ -122,8 +122,13 @@ func run() error {
 		mediaHandler = objectstore.NewMediaHandler(r2Store)
 	}
 
+	// Constructed here (rather than down by siteConfigSvc, where it used to
+	// live) so events.NewService and registrations.NewService below can share
+	// the same instance -- one Redis client, one publisher, three consumers.
+	realtimePublisher := realtime.NewPublisher(redisClient.Raw(), log)
+
 	eventNotifier := notifications.NewEventNotifier(notifSvc, regRepo, log)
-	eventsSvc := events.NewService(eventsRepo, eventNotifier)
+	eventsSvc := events.NewService(eventsRepo, eventNotifier, realtimePublisher)
 	eventsHandler := events.NewHandlerWithStore(eventsSvc, uploadStore)
 
 	regLocker := registrations.NewLocker(redisClient.Raw(), registrationLockTTL)
@@ -141,7 +146,7 @@ func run() error {
 	regNotifier := notifications.NewRegistrationNotifier(notifSvc)
 	idemRepo := idempotency.NewRepository(db.Pool)
 	idemSvc := idempotency.NewService(idemRepo)
-	regSvc := registrations.NewService(regRepo, eventsRepo, paymentProvider, regLocker, regAvailCache, regRateLimiter, regNotifier, idemSvc, db.Pool)
+	regSvc := registrations.NewService(regRepo, eventsRepo, paymentProvider, regLocker, regAvailCache, regRateLimiter, regNotifier, idemSvc, db.Pool, realtimePublisher)
 	regHandler := registrations.NewHandler(regSvc)
 
 	// No Publisher wired yet -- see internal/liveactivities package doc comment.
@@ -159,7 +164,6 @@ func run() error {
 
 	adminHandler := admin.NewHandler(regSvc, auditRepo, authSvc, auditSvc)
 	statsHandler := stats.NewHandler(stats.NewRepository(db.Pool))
-	realtimePublisher := realtime.NewPublisher(redisClient.Raw(), log)
 	siteConfigSvc := siteconfig.NewService(siteconfig.NewRepository(db.Pool), realtimePublisher)
 	siteConfigHandler := siteconfig.NewHandlerWithStore(siteConfigSvc, uploadStore, auditSvc)
 	storageHealth, _ := uploadStore.(systemstatus.HealthChecker)

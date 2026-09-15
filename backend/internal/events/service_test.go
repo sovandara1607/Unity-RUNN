@@ -345,7 +345,7 @@ func validCreateReq(name string) CreateEventRequest {
 
 // TestService_Create_GeneratesSlugFromName tests the Create method that generates a slug from the name
 func TestService_Create_GeneratesSlugFromName(t *testing.T) {
-	svc := NewService(newFakeRepo(), nil)
+	svc := NewService(newFakeRepo(), nil, nil)
 
 	e, err := svc.Create(context.Background(), validCreateReq("Unity Founders Run 2025"))
 	if err != nil {
@@ -361,7 +361,7 @@ func TestService_Create_GeneratesSlugFromName(t *testing.T) {
 
 // TestService_Create_DuplicateSlugRejected tests the Create method that rejects a duplicate slug
 func TestService_Create_DuplicateSlugRejected(t *testing.T) {
-	svc := NewService(newFakeRepo(), nil)
+	svc := NewService(newFakeRepo(), nil, nil)
 	ctx := context.Background()
 
 	req := validCreateReq("Founders Run")
@@ -388,7 +388,7 @@ func TestService_Duplicate_CopiesReusableSetupIntoSafeDraft(t *testing.T) {
 	repo.faqs[uuid.New()] = &EventFAQ{ID: uuid.New(), EventID: source.ID, Question: "Parking?", Answer: "North lot.", SortOrder: 1}
 	repo.rules[uuid.New()] = &EventRule{ID: uuid.New(), EventID: source.ID, Rule: "Wear a bib.", SortOrder: 1}
 
-	clone, err := NewService(repo, nil).Duplicate(context.Background(), source.ID, DuplicateEventRequest{Name: "Riverside Run 2026", EventDate: "2027-10-18"})
+	clone, err := NewService(repo, nil, nil).Duplicate(context.Background(), source.ID, DuplicateEventRequest{Name: "Riverside Run 2026", EventDate: "2027-10-18"})
 	if err != nil {
 		t.Fatalf("Duplicate() error = %v", err)
 	}
@@ -445,14 +445,14 @@ func TestService_Duplicate_RejectsBlankName(t *testing.T) {
 	repo := newFakeRepo()
 	source := &Event{ID: uuid.New()}
 	repo.events[source.ID] = source
-	if _, err := NewService(repo, nil).Duplicate(context.Background(), source.ID, DuplicateEventRequest{Name: "   ", EventDate: "2027-10-18"}); err == nil {
+	if _, err := NewService(repo, nil, nil).Duplicate(context.Background(), source.ID, DuplicateEventRequest{Name: "   ", EventDate: "2027-10-18"}); err == nil {
 		t.Fatal("Duplicate() accepted a whitespace-only name")
 	}
 }
 
 // TestService_Create_RequiresCompleteMapPin tests the Create method that requires a complete map pin
 func TestService_Create_RequiresCompleteMapPin(t *testing.T) {
-	svc := NewService(newFakeRepo(), nil)
+	svc := NewService(newFakeRepo(), nil, nil)
 	req := validCreateReq("Incomplete map pin")
 	latitude := 11.5564
 	req.Latitude = &latitude
@@ -465,7 +465,7 @@ func TestService_Create_RequiresCompleteMapPin(t *testing.T) {
 // TestService_Update_CanRemoveMapPin tests the Update method that can remove a map pin
 func TestService_Update_CanRemoveMapPin(t *testing.T) {
 	repo := newFakeRepo()
-	svc := NewService(repo, nil)
+	svc := NewService(repo, nil, nil)
 	latitude, longitude := 11.5564, 104.9282
 	req := validCreateReq("Mapped run")
 	req.Latitude, req.Longitude = &latitude, &longitude
@@ -486,7 +486,7 @@ func TestService_Update_CanRemoveMapPin(t *testing.T) {
 // TestService_Update_StatusTransition tests the Update method that can transition the status
 func TestService_Update_StatusTransition(t *testing.T) {
 	repo := newFakeRepo()
-	svc := NewService(repo, nil)
+	svc := NewService(repo, nil, nil)
 	ctx := context.Background()
 
 	e, err := svc.Create(ctx, validCreateReq("Founders Run"))
@@ -507,7 +507,7 @@ func TestService_Update_StatusTransition(t *testing.T) {
 // TestService_Update_InvalidStatusTransitionRejected tests the Update method that rejects an invalid status transition
 func TestService_Update_InvalidStatusTransitionRejected(t *testing.T) {
 	repo := newFakeRepo()
-	svc := NewService(repo, nil)
+	svc := NewService(repo, nil, nil)
 	ctx := context.Background()
 
 	e, err := svc.Create(ctx, validCreateReq("Founders Run"))
@@ -526,7 +526,7 @@ func TestService_Update_InvalidStatusTransitionRejected(t *testing.T) {
 // TestService_Delete_OnlyAllowedWhileDraft tests the Delete method that only allows deletion while the event is draft
 func TestService_Delete_OnlyAllowedWhileDraft(t *testing.T) {
 	repo := newFakeRepo()
-	svc := NewService(repo, nil)
+	svc := NewService(repo, nil, nil)
 	ctx := context.Background()
 
 	e, err := svc.Create(ctx, validCreateReq("Founders Run"))
@@ -547,7 +547,7 @@ func TestService_Delete_OnlyAllowedWhileDraft(t *testing.T) {
 // TestService_Delete_AllowedWhileDraft tests the Delete method that allows deletion while the event is draft
 func TestService_Delete_AllowedWhileDraft(t *testing.T) {
 	repo := newFakeRepo()
-	svc := NewService(repo, nil)
+	svc := NewService(repo, nil, nil)
 	ctx := context.Background()
 
 	e, err := svc.Create(ctx, validCreateReq("Founders Run"))
@@ -567,7 +567,7 @@ func TestService_Delete_AllowedWhileDraft(t *testing.T) {
 // TestService_GetDetailBySlug_HidesNonPublicStatusFromPublic tests the GetDetailBySlug method that hides non-public status from public
 func TestService_GetDetailBySlug_HidesNonPublicStatusFromPublic(t *testing.T) {
 	repo := newFakeRepo()
-	svc := NewService(repo, nil)
+	svc := NewService(repo, nil, nil)
 	ctx := context.Background()
 
 	e, err := svc.Create(ctx, validCreateReq("Founders Run")) // starts DRAFT
@@ -587,7 +587,7 @@ func TestService_GetDetailBySlug_HidesNonPublicStatusFromPublic(t *testing.T) {
 // TestService_List_PublicFilterCannotIncludeDraft tests the List method that cannot include draft in the public filter
 func TestService_List_PublicFilterCannotIncludeDraft(t *testing.T) {
 	repo := newFakeRepo()
-	svc := NewService(repo, nil)
+	svc := NewService(repo, nil, nil)
 	filter := &ListFilter{Statuses: []Status{StatusDraft, StatusRegistrationOpen}}
 
 	if _, _, err := svc.List(context.Background(), filter, false); err != nil {
@@ -603,7 +603,7 @@ func TestService_CreateCategory_PersistsRegistrationDeadline(t *testing.T) {
 	repo := newFakeRepo()
 	event := &Event{ID: uuid.New()}
 	repo.events[event.ID] = event
-	svc := NewService(repo, nil)
+	svc := NewService(repo, nil, nil)
 	deadline := time.Now().Add(24 * time.Hour).UTC().Truncate(time.Second)
 
 	category, err := svc.CreateCategory(context.Background(), event.ID, CreateCategoryRequest{
@@ -621,7 +621,7 @@ func TestService_UpdateCategory_ClearsRegistrationDeadline(t *testing.T) {
 	repo := newFakeRepo()
 	event := &Event{ID: uuid.New()}
 	repo.events[event.ID] = event
-	svc := NewService(repo, nil)
+	svc := NewService(repo, nil, nil)
 	deadline := time.Now().Add(24 * time.Hour).UTC().Truncate(time.Second)
 	category, err := svc.CreateCategory(context.Background(), event.ID, CreateCategoryRequest{Name: "10K", Distance: "10K", Capacity: 50, RegistrationDeadline: &deadline})
 	if err != nil {
@@ -647,7 +647,7 @@ func TestService_RunnerGuideCRUDPreservesOwnership(t *testing.T) {
 	otherEvent := &Event{ID: uuid.New()}
 	repo.events[event.ID] = event
 	repo.events[otherEvent.ID] = otherEvent
-	svc := NewService(repo, nil)
+	svc := NewService(repo, nil, nil)
 	ctx := context.Background()
 
 	faq, err := svc.CreateFAQ(ctx, event.ID, CreateFAQRequest{Question: "  Where is parking?  ", Answer: "  Use the north gate.  ", SortOrder: 2})
@@ -693,7 +693,7 @@ func TestService_RunnerGuideRejectsBlankUpdates(t *testing.T) {
 	repo := newFakeRepo()
 	event := &Event{ID: uuid.New()}
 	repo.events[event.ID] = event
-	svc := NewService(repo, nil)
+	svc := NewService(repo, nil, nil)
 	ctx := context.Background()
 	faq, _ := svc.CreateFAQ(ctx, event.ID, CreateFAQRequest{Question: "Parking?", Answer: "North gate."})
 	rule, _ := svc.CreateRule(ctx, event.ID, CreateRuleRequest{Rule: "Wear a bib."})
@@ -748,7 +748,7 @@ func (f *fakeEventNotifier) NotifyEventCancelled(ctx context.Context, ev Event) 
 func TestService_Update_NotifiesOnDateChange(t *testing.T) {
 	repo := newFakeRepo()
 	notifier := &fakeEventNotifier{}
-	svc := NewService(repo, notifier)
+	svc := NewService(repo, notifier, nil)
 	ctx := context.Background()
 
 	e, err := svc.Create(ctx, validCreateReq("Founders Run"))
@@ -776,7 +776,7 @@ func TestService_Update_NotifiesOnDateChange(t *testing.T) {
 func TestService_Update_NoNotificationForUnrelatedFieldChange(t *testing.T) {
 	repo := newFakeRepo()
 	notifier := &fakeEventNotifier{}
-	svc := NewService(repo, notifier)
+	svc := NewService(repo, notifier, nil)
 	ctx := context.Background()
 
 	e, err := svc.Create(ctx, validCreateReq("Founders Run"))
@@ -798,7 +798,7 @@ func TestService_Update_NoNotificationForUnrelatedFieldChange(t *testing.T) {
 func TestService_Update_NotifiesCancellationNotUpdate(t *testing.T) {
 	repo := newFakeRepo()
 	notifier := &fakeEventNotifier{}
-	svc := NewService(repo, notifier)
+	svc := NewService(repo, notifier, nil)
 	ctx := context.Background()
 
 	e, err := svc.Create(ctx, validCreateReq("Founders Run")) // starts DRAFT
@@ -821,7 +821,7 @@ func TestService_Update_NotifiesCancellationNotUpdate(t *testing.T) {
 
 func TestService_Update_NilNotifierIsSafe(t *testing.T) {
 	repo := newFakeRepo()
-	svc := NewService(repo, nil)
+	svc := NewService(repo, nil, nil)
 	ctx := context.Background()
 
 	e, err := svc.Create(ctx, validCreateReq("Founders Run"))

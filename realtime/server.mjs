@@ -2,9 +2,9 @@ import { createServer } from "node:http";
 import { createAdapter } from "@socket.io/redis-adapter";
 import Redis from "ioredis";
 import { Server } from "socket.io";
+import { siteConfigChannel, eventsChannel, registrationsChannel, relayDomainEvent } from "./domain-events.mjs";
 
 const port = Number.parseInt(process.env.PORT || "8081", 10);
-const siteConfigChannel = "unity:realtime:site-config";
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || "http://localhost:3000")
   .split(",")
   .map((origin) => origin.trim())
@@ -51,7 +51,20 @@ const io = new Server(httpServer, {
   },
   allowRequest: (request, callback) => {
     const origin = request.headers.origin;
-    callback(null, !origin || allowedOrigins.includes(origin));
+    if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+    // A non-browser client (React Native's WebSocket, socket.io-client on
+    // mobile) has no real page origin to report, so it sets Origin to the
+    // socket's own target URL -- which makes it equal to this request's own
+    // Host. A genuine cross-origin browser request's Origin names a
+    // DIFFERENT site than the one being asked to serve it, so this still
+    // rejects that case exactly as before; it only additionally accepts the
+    // self-origin case, without hardcoding a dev host/port/LAN IP that would
+    // vary per machine and per device.
+    try {
+      return callback(null, new URL(origin).host === request.headers.host);
+    } catch {
+      return callback(null, false);
+    }
   },
 });
 
@@ -65,13 +78,12 @@ io.on("connection", (socket) => {
   socket.onAny(() => socket.disconnect(true));
 });
 
-await domainSubscriber.subscribe(siteConfigChannel);
+await domainSubscriber.subscribe(siteConfigChannel, eventsChannel, registrationsChannel);
 domainSubscriber.on("message", (channel, rawPayload) => {
-  if (channel !== siteConfigChannel) return;
   try {
-    io.emit("site-config:updated", JSON.parse(rawPayload));
+    relayDomainEvent(io, channel, rawPayload);
   } catch (error) {
-    console.error(JSON.stringify({ event: "realtime_invalid_payload", error: String(error) }));
+    console.error(JSON.stringify({ event: "realtime_invalid_payload", channel, error: String(error) }));
   }
 });
 

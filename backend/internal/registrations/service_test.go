@@ -325,7 +325,7 @@ func (f *fakePaymentProvider) RefundPayment(ctx context.Context, ref string, amo
 func newTestSetup(provider *fakePaymentProvider) (*Service, *fakeRegRepo, *fakeEventsReader) {
 	repo := newFakeRegRepo()
 	er := newFakeEventsReader()
-	svc := NewService(repo, er, provider, nil, nil, nil, nil, nil, nil) // no Redis/notifier/idempotency in unit tests
+	svc := NewService(repo, er, provider, nil, nil, nil, nil, nil, nil, nil) // no Redis/notifier/idempotency in unit tests
 	return svc, repo, er
 }
 
@@ -351,7 +351,7 @@ func newTestSetupWithNotifier(provider *fakePaymentProvider) (*Service, *fakeEve
 	repo := newFakeRegRepo()
 	er := newFakeEventsReader()
 	notifier := &fakeRegistrationNotifier{}
-	svc := NewService(repo, er, provider, nil, nil, nil, notifier, nil, nil)
+	svc := NewService(repo, er, provider, nil, nil, nil, notifier, nil, nil, nil)
 	return svc, er, notifier
 }
 
@@ -467,7 +467,7 @@ func TestService_ReconcilePendingPaymentConfirmsWithoutBrowser(t *testing.T) {
 	repo := newFakeRegRepo()
 	er := newFakeEventsReader()
 	notifier := &fakeRegistrationNotifier{}
-	svc := NewService(repo, er, provider, nil, nil, nil, notifier, nil, nil)
+	svc := NewService(repo, er, provider, nil, nil, nil, notifier, nil, nil, nil)
 	eventID, categoryID := seedEventAndCategory(er, 2500, 10)
 	result, err := svc.Register(context.Background(), uuid.New(), eventID, validRegisterReq(categoryID), "", "")
 	if err != nil {

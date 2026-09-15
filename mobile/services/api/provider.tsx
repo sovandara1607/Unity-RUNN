@@ -18,6 +18,8 @@ import { createTransport, ApiError } from "./client";
 import { Session } from "../auth/session";
 import { tokenStorage } from "../storage/tokens";
 import { readConfig } from "../../constants/config";
+import { createRealtimeSocket } from "../realtime/socket";
+import { subscribeToRealtime } from "../realtime/invalidation";
 function createRuntime(config: ReturnType<typeof readConfig>) {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -57,12 +59,26 @@ export function ApiProvider({
       .then(network)
       .catch(() => undefined);
     const connection = Network.addNetworkStateListener(network);
+
+    const socket = createRealtimeSocket(runtime.realtimeOrigin);
+    const unsubscribe = socket
+      ? subscribeToRealtime(socket, runtime.queryClient, () => Boolean(runtime.session.snapshot().user))
+      : undefined;
+    if (AppState.currentState === "active") socket?.connect();
+
     const app = AppState.addEventListener("change", (state) => {
-      if (Platform.OS !== "web") focusManager.setFocused(state === "active");
+      const active = state === "active";
+      if (Platform.OS !== "web") focusManager.setFocused(active);
+      // Don't hold a live socket open while backgrounded -- reconnect picks
+      // up right where the pull-based refresh above already would.
+      if (active) socket?.connect();
+      else socket?.disconnect();
     });
     return () => {
       connection.remove();
       app.remove();
+      unsubscribe?.();
+      socket?.disconnect();
     };
   }, [runtime]);
   return (

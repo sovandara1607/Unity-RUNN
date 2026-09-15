@@ -67,12 +67,22 @@ type RegistrationNotifier interface {
 	NotifyRegistrationCancelled(ctx context.Context, reg Registration)
 }
 
+// RegistrationsBroadcaster is implemented by internal/realtime (wired in from
+// main.go) to tell connected clients that a specific user's registrations may
+// have changed, so a client refetches instead of waiting out its own cache
+// staleness window. Same consumer-side-interface pattern as EventNotifier in
+// internal/events/service.go. Nil-safe.
+type RegistrationsBroadcaster interface {
+	PublishRegistrationsChanged(ctx context.Context)
+}
+
 // Service implements registration business rules.
 type Service struct {
 	repo        regRepository
 	eventsRepo  eventsReader
 	provider    payments.Provider
 	notifier    RegistrationNotifier
+	broadcaster RegistrationsBroadcaster
 	locker      *Locker
 	availCache  *AvailabilityCache
 	rateLimiter *RateLimiter
@@ -88,18 +98,25 @@ type Service struct {
 
 func NewService(repo regRepository, eventsRepo eventsReader, provider payments.Provider,
 	locker *Locker, availCache *AvailabilityCache, rateLimiter *RateLimiter, notifier RegistrationNotifier,
-	idemSvc *idempotency.Service, pool *pgxpool.Pool) *Service {
+	idemSvc *idempotency.Service, pool *pgxpool.Pool, broadcaster RegistrationsBroadcaster) *Service {
 	return &Service{
 		repo:        repo,
 		eventsRepo:  eventsRepo,
 		provider:    provider,
 		notifier:    notifier,
+		broadcaster: broadcaster,
 		locker:      locker,
 		availCache:  availCache,
 		rateLimiter: rateLimiter,
 		idemSvc:     idemSvc,
 		pool:        pool,
 		now:         time.Now,
+	}
+}
+
+func (s *Service) broadcastRegistrationsChanged(ctx context.Context) {
+	if s.broadcaster != nil {
+		s.broadcaster.PublishRegistrationsChanged(ctx)
 	}
 }
 
@@ -272,6 +289,7 @@ func (s *Service) Register(ctx context.Context, userID, eventID uuid.UUID, req R
 	if s.availCache != nil {
 		_ = s.availCache.Invalidate(ctx, categoryID)
 	}
+	s.broadcastRegistrationsChanged(ctx)
 
 	return result, nil
 }
@@ -502,9 +520,12 @@ func (s *Service) reconcilePayment(ctx context.Context, repo paymentReconciliati
 	if s.availCache != nil {
 		_ = s.availCache.Invalidate(ctx, confirmed.EventCategoryID)
 	}
-	if newlyConfirmed && s.notifier != nil {
-		s.notifier.NotifyRegistrationConfirmed(ctx, *confirmed)
-		s.notifier.NotifyPaymentConfirmed(ctx, *confirmed, stored.AmountCents)
+	if newlyConfirmed {
+		if s.notifier != nil {
+			s.notifier.NotifyRegistrationConfirmed(ctx, *confirmed)
+			s.notifier.NotifyPaymentConfirmed(ctx, *confirmed, stored.AmountCents)
+		}
+		s.broadcastRegistrationsChanged(ctx)
 	}
 }
 
@@ -600,9 +621,12 @@ func (s *Service) VerifyPayment(ctx context.Context, callerID uuid.UUID, callerR
 	if s.availCache != nil {
 		_ = s.availCache.Invalidate(ctx, confirmed.EventCategoryID)
 	}
-	if newlyConfirmed && s.notifier != nil {
-		s.notifier.NotifyRegistrationConfirmed(ctx, *confirmed)
-		s.notifier.NotifyPaymentConfirmed(ctx, *confirmed, stored.AmountCents)
+	if newlyConfirmed {
+		if s.notifier != nil {
+			s.notifier.NotifyRegistrationConfirmed(ctx, *confirmed)
+			s.notifier.NotifyPaymentConfirmed(ctx, *confirmed, stored.AmountCents)
+		}
+		s.broadcastRegistrationsChanged(ctx)
 	}
 	return &RegisterResult{Registration: *confirmed, Payment: checkout}, nil
 }
@@ -690,6 +714,7 @@ func (s *Service) Cancel(ctx context.Context, callerID uuid.UUID, callerRole aut
 	if s.notifier != nil {
 		s.notifier.NotifyRegistrationCancelled(ctx, *reg)
 	}
+	s.broadcastRegistrationsChanged(ctx)
 	return nil
 }
 

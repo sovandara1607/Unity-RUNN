@@ -48,6 +48,14 @@ export type NativeBridge = {
   update(activityId: string, input: NativeUpdateInput): Promise<void>;
   end(activityId: string): Promise<void>;
   getPushToken(activityId: string): Promise<string | null>;
+  /** Every Live Activity id ActivityKit currently has running on-device,
+   * regardless of whether this app process has any record of it -- backs
+   * orphan cleanup (see raceLiveActivity.service.ts's reconcile()): a
+   * device-side activity whose backend row was deleted out from under it
+   * (an admin removing the event, a cleared dev database) has no other way
+   * to ever be told to end, since this app has no APNs push credentials to
+   * reach it remotely. Empty on every platform without real ActivityKit. */
+  getRunningActivityIds(): Promise<string[]>;
 };
 /** Thrown by every method on the stub bridge, and by the real bridge when
  * ActivityKit itself reports it can't do Live Activities, so callers get

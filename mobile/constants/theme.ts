@@ -14,7 +14,12 @@ export const colors = {
   // it already passes) and `blueText` for the accent color itself as text.
   blueText: "#7c93ff",
   white: "#ffffff",
-  canvas: "#171717",
+  // Was #171717 -- a real drop shadow is invisible on this near-black page
+  // background regardless of opacity (shadow and background are the same
+  // hue family), so depth here has to come from surface contrast instead.
+  // #171717 vs ink's #0c0c0c was too close to read as a distinct raised
+  // surface; this is a real, visible step up.
+  canvas: "#202020",
   // Warm gray, not the cooler blue-tinted gray this replaced: measured
   // 7.76:1 on `ink`, 7.11:1 on `canvas`.
   muted: "#a8a29e",

@@ -12,6 +12,14 @@ import (
 
 const SiteConfigChannel = "unity:realtime:site-config"
 
+// EventsChannel and RegistrationsChannel carry coarse "something changed, go
+// refetch" signals rather than the changed row itself -- unlike site config
+// (intentionally public data, broadcast in full), an event can be a
+// not-yet-public DRAFT and a registration always carries another user's PII.
+// The public socket carries no event, registration, or user identifiers.
+const EventsChannel = "unity:realtime:events"
+const RegistrationsChannel = "unity:realtime:registrations"
+
 type Publisher struct {
 	redis *redis.Client
 	log   *slog.Logger
@@ -29,5 +37,23 @@ func (p *Publisher) PublishSiteConfig(ctx context.Context, settings siteconfig.S
 	}
 	if err := p.redis.Publish(ctx, SiteConfigChannel, payload).Err(); err != nil {
 		p.log.Warn("realtime_site_config_publish_failed", "error", err)
+	}
+}
+
+// PublishEventsChanged tells connected clients the public events list may
+// have changed (created, updated, deleted, or a status transition) so they
+// refetch instead of waiting out their own cache staleness window. No event
+// data is carried -- a DRAFT event isn't public, so the payload stays empty
+// and clients just re-run their existing, already-scoped GET.
+func (p *Publisher) PublishEventsChanged(ctx context.Context) {
+	if err := p.redis.Publish(ctx, EventsChannel, []byte("{}")).Err(); err != nil {
+		p.log.Warn("realtime_events_publish_failed", "error", err)
+	}
+}
+
+// Clients refetch through the authenticated API; public notifications carry no identity.
+func (p *Publisher) PublishRegistrationsChanged(ctx context.Context) {
+	if err := p.redis.Publish(ctx, RegistrationsChannel, []byte("{}")).Err(); err != nil {
+		p.log.Warn("realtime_registrations_publish_failed", "error", err)
 	}
 }

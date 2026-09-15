@@ -124,3 +124,27 @@ test("update() calls the native bridge before ever touching the backend", async 
   );
   assert.equal(backendCalls, 0);
 });
+test("reconcileOrphans() never throws, and touches no backend call, against the honest stub bridge", async () => {
+  // tsx --test resolves the plain nativeBridge.ts stub (no Metro platform
+  // resolution here -- see that file's own doc comment), whose
+  // getRunningActivityIds() always reports [] since there's no real
+  // ActivityKit to ask. That makes every backend-known activity trivially
+  // "not orphaned" in this environment; the real orphan-filtering logic
+  // only runs against nativeBridge.ios.ts on-device. What this test can
+  // honestly cover is the contract every caller actually depends on: it's
+  // safe to call unconditionally and never touches the network itself.
+  const active = [
+    {
+      id: "a1",
+      user_id: "u1",
+      event_id: "e1",
+      activity_id: "act-1",
+      platform: "ios" as const,
+      status: "ACTIVE" as const,
+      race_status: "LIVE" as const,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    },
+  ];
+  await assert.doesNotReject(raceLiveActivity.reconcileOrphans(active));
+});

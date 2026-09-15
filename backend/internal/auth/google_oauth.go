@@ -53,8 +53,8 @@ func (h *Handler) ConfigureGoogle(config GoogleOAuthConfig) {
 	}
 	client := &http.Client{Timeout: 10 * time.Second}
 	h.google = &googleOAuthFlow{
-		config: config,
-		client: client,
+		config:   config,
+		client:   client,
 		verifier: newGoogleIDTokenVerifier(client, config.ClientID),
 	}
 }

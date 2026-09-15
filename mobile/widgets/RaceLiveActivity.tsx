@@ -4,6 +4,11 @@ import {
   background,
   font,
   foregroundStyle,
+  frame,
+  layoutPriority,
+  lineLimit,
+  minimumScaleFactor,
+  monospacedDigit,
   padding,
   shapes,
 } from "@expo/ui/swift-ui/modifiers";
@@ -11,12 +16,7 @@ import { createLiveActivity, type LiveActivityEnvironment } from "expo-widgets";
 import type { SFSymbol } from "sf-symbols-typescript";
 
 export type RaceActivityStatus =
-  | "upcoming"
-  | "check_in"
-  | "starting"
-  | "live"
-  | "finished"
-  | "cancelled";
+  "upcoming" | "check_in" | "starting" | "live" | "finished" | "cancelled";
 
 export type RaceActivityProps = {
   eventName: string;
@@ -32,7 +32,10 @@ export type RaceActivityProps = {
   finishTime?: string;
 };
 
-const RaceLiveActivityLayout = (props: RaceActivityProps, environment: LiveActivityEnvironment) => {
+const RaceLiveActivityLayout = (
+  props: RaceActivityProps,
+  environment: LiveActivityEnvironment,
+) => {
   "widget";
   // Everything the layout needs -- brand colors, status metadata, the timer
   // and badge helpers -- is declared INSIDE this function on purpose. Code
@@ -49,7 +52,10 @@ const RaceLiveActivityLayout = (props: RaceActivityProps, environment: LiveActiv
   const BLUE_TEXT = "#7c93ff";
   const MUTED = "#a8a29e";
 
-  const STATUS_META: Record<RaceActivityStatus, { label: string; icon: SFSymbol; tint: string }> = {
+  const STATUS_META: Record<
+    RaceActivityStatus,
+    { label: string; icon: SFSymbol; tint: string }
+  > = {
     upcoming: { label: "Upcoming", icon: "calendar", tint: LIME },
     check_in: { label: "Check-in", icon: "checkmark.circle.fill", tint: LIME },
     starting: { label: "Starting soon", icon: "hourglass", tint: LIME },
@@ -63,33 +69,60 @@ const RaceLiveActivityLayout = (props: RaceActivityProps, environment: LiveActiv
    * "update on domain events, not on a clock" rule (see
    * raceLiveActivity.service.ts's doc comment on item 12/14). Only valid
    * while status is "live". */
-  function ElapsedTimer({ elapsedSeconds, size }: { elapsedSeconds: number; size: number }) {
+  function ElapsedTimer({
+    elapsedSeconds,
+    size,
+    compact = false,
+  }: {
+    elapsedSeconds: number;
+    size: number;
+    compact?: boolean;
+  }) {
     const start = new Date(Date.now() - elapsedSeconds * 1000);
     const farFuture = new Date(start.getTime() + 1000 * 60 * 60 * 24);
     return (
       <Text
         timerInterval={{ lower: start, upper: farFuture }}
         countsDown={false}
-        modifiers={[font({ weight: "bold", design: "rounded", size }), foregroundStyle(INK)]}
+        modifiers={[
+          font({ weight: "bold", design: "rounded", size }),
+          monospacedDigit(),
+          foregroundStyle(compact ? accent : INK),
+          lineLimit(1),
+          minimumScaleFactor(0.8),
+          frame({
+            minWidth: 0,
+            maxWidth: compact ? 52 : 88,
+            alignment: "trailing",
+          }),
+          layoutPriority(1),
+        ]}
       />
     );
   }
 
-  /** A small pill badge -- the "A10" gate-style chip from the reference
-   * design this layout follows: solid accent fill, dark text, capsule
-   * shape. Used for bib/gate/distance callouts. */
+  // Expo UI applies Text modifiers twice; keep badge padding/background on a stack.
   function Badge({ children }: { children: string }) {
     return (
-      <Text
+      <HStack
+        spacing={0}
         modifiers={[
-          font({ weight: "bold", size: 12 }),
-          foregroundStyle(INK),
-          padding({ horizontal: 9, vertical: 4 }),
+          padding({ horizontal: 10, vertical: 5 }),
           background(accent, shapes.capsule()),
+          frame({ maxWidth: 104, alignment: "trailing" }),
         ]}
       >
-        {children}
-      </Text>
+        <Text
+          modifiers={[
+            font({ weight: "bold", size: 12 }),
+            foregroundStyle(INK),
+            lineLimit(1),
+            minimumScaleFactor(0.85),
+          ]}
+        >
+          {children}
+        </Text>
+      </HStack>
     );
   }
 
@@ -97,86 +130,165 @@ const RaceLiveActivityLayout = (props: RaceActivityProps, environment: LiveActiv
   const accent = environment.isLuminanceReduced ? "#ffffff" : meta.tint;
   const isLive = props.status === "live" && props.elapsedSeconds !== undefined;
   const isFinished = props.status === "finished" && Boolean(props.finishTime);
-  const secondary = props.raceDistance ? `${props.location} · ${props.raceDistance}` : props.location;
-  const badgeText = props.gate ? `Gate ${props.gate}` : (props.raceDistance ?? meta.label);
+  const secondary = props.raceDistance
+    ? `${props.location} · ${props.raceDistance}`
+    : props.location;
+  const badgeText = props.gate
+    ? `Gate ${props.gate}`
+    : (props.raceDistance ?? meta.label);
+  const raceDetail = props.bibNumber ? `Bib ${props.bibNumber}` : secondary;
+  const compactLabel = {
+    upcoming: "Soon",
+    check_in: "Check-in",
+    starting: "Soon",
+    live: "Live",
+    finished: "Done",
+    cancelled: "Ended",
+  }[props.status];
 
-  // The colored status row -- a small dot + label, mirroring the
-  // reference's green "On Time" row.
   const statusRow = (
     <HStack spacing={6}>
       <Image systemName="circle.fill" color={accent} size={8} />
-      <Text modifiers={[font({ weight: "bold", size: 11 }), foregroundStyle(accent)]}>
+      <Text
+        modifiers={[
+          font({ weight: "bold", size: 11 }),
+          foregroundStyle(accent),
+          lineLimit(1),
+          minimumScaleFactor(0.85),
+        ]}
+      >
         {meta.label.toUpperCase()}
       </Text>
     </HStack>
   );
 
-  // The full-width accent banner at the bottom -- the reference's orange
-  // "Gate A10 · Departs in 45m" bar. Icon + two-line text, right-aligned
-  // live timer when the race is actually running.
+  // The accent strip prioritizes race status and the live clock.
   const bottomBanner = (
-    <HStack spacing={10} modifiers={[padding({ horizontal: 14, vertical: 10 }), background(accent, shapes.roundedRectangle({ cornerRadius: 14 }))]}>
+    <HStack
+      spacing={8}
+      modifiers={[
+        padding({ horizontal: 12, vertical: 8 }),
+        background(accent, shapes.roundedRectangle({ cornerRadius: 12 })),
+      ]}
+    >
       <Image systemName={meta.icon} color={INK} size={16} />
       <VStack alignment="leading" spacing={1}>
-        <Text modifiers={[font({ weight: "bold", size: 13 }), foregroundStyle(INK)]}>
+        <Text
+          modifiers={[
+            font({ weight: "bold", size: 13 }),
+            foregroundStyle(INK),
+            lineLimit(1),
+            minimumScaleFactor(0.85),
+          ]}
+        >
           {isLive ? "Live now" : isFinished ? "Finished" : meta.label}
         </Text>
-        <Text modifiers={[font({ size: 11 }), foregroundStyle(INK)]}>
+        <Text
+          modifiers={[
+            font({ size: 11 }),
+            foregroundStyle(INK),
+            lineLimit(1),
+            minimumScaleFactor(0.85),
+          ]}
+        >
           {isLive
             ? props.pace
               ? `${props.pace}/km pace`
-              : secondary
+              : raceDetail
             : isFinished
               ? `Finished in ${props.finishTime}`
-              : secondary}
+              : raceDetail}
         </Text>
       </VStack>
       <Spacer />
-      {isLive && <ElapsedTimer elapsedSeconds={props.elapsedSeconds!} size={16} />}
+      {isLive && (
+        <ElapsedTimer elapsedSeconds={props.elapsedSeconds!} size={16} />
+      )}
     </HStack>
+  );
+
+  // Full-width details live below the sensor, never in its narrow center region.
+  const eventDetails = (
+    <VStack alignment="leading" spacing={2}>
+      <Text
+        modifiers={[
+          font({ weight: "bold", size: 16 }),
+          foregroundStyle("#ffffff"),
+          lineLimit(2),
+          minimumScaleFactor(0.85),
+        ]}
+      >
+        {props.eventName}
+      </Text>
+      <Text
+        modifiers={[font({ size: 12 }), foregroundStyle(MUTED), lineLimit(1)]}
+      >
+        {secondary}
+      </Text>
+    </VStack>
   );
 
   return {
     banner: (
-      <VStack alignment="leading" spacing={10} modifiers={[padding({ all: 16 }), activityBackgroundTint(INK)]}>
-        <HStack>
+      <VStack
+        alignment="leading"
+        spacing={8}
+        modifiers={[
+          padding({ horizontal: 12, vertical: 10 }),
+          activityBackgroundTint(INK),
+        ]}
+      >
+        <HStack spacing={8}>
           {statusRow}
           <Spacer />
           <Badge>{badgeText}</Badge>
         </HStack>
-        <VStack alignment="leading" spacing={2}>
-          <Text modifiers={[font({ weight: "bold", size: 18 })]}>{props.eventName}</Text>
-          <Text modifiers={[font({ size: 13 }), foregroundStyle(MUTED)]}>{secondary}</Text>
-        </VStack>
+        {eventDetails}
         {bottomBanner}
       </VStack>
     ),
-    compactLeading: <Image systemName="circle.fill" color={accent} size={10} />,
+    compactLeading: <Image systemName={meta.icon} color={accent} size={16} />,
     compactTrailing: isLive ? (
-      <ElapsedTimer elapsedSeconds={props.elapsedSeconds!} size={13} />
+      <ElapsedTimer elapsedSeconds={props.elapsedSeconds!} size={12} compact />
     ) : (
-      <Badge>{badgeText}</Badge>
+      <Text
+        modifiers={[
+          font({ weight: "semibold", size: 12 }),
+          foregroundStyle(accent),
+          lineLimit(1),
+          minimumScaleFactor(0.8),
+          frame({ maxWidth: 52 }),
+        ]}
+      >
+        {compactLabel}
+      </Text>
     ),
-    minimal: <Image systemName="circle.fill" color={accent} size={10} />,
+    minimal: <Image systemName={meta.icon} color={accent} size={16} />,
     expandedLeading: (
-      <VStack alignment="leading" spacing={3}>
-        <Image systemName={meta.icon} color={accent} size={16} />
-        {props.bibNumber && (
-          <Text modifiers={[font({ weight: "bold", size: 11 }), foregroundStyle(MUTED)]}>
-            Bib {props.bibNumber}
-          </Text>
-        )}
+      <HStack modifiers={[padding({ leading: 8, top: 2 })]}>
+        <Image systemName={meta.icon} color={accent} size={20} />
+      </HStack>
+    ),
+    expandedTrailing: (
+      <HStack modifiers={[padding({ trailing: 8, top: 2 })]}>
+        <Badge>{badgeText}</Badge>
+      </HStack>
+    ),
+    expandedBottom: (
+      <VStack
+        alignment="leading"
+        spacing={6}
+        // Reserve space outside the backgrounds for the Island's curved edges.
+        modifiers={[padding({ horizontal: 8, top: 2, bottom: 8 })]}
+      >
+        {eventDetails}
+        {bottomBanner}
       </VStack>
     ),
-    expandedTrailing: <Badge>{badgeText}</Badge>,
-    expandedCenter: (
-      <VStack alignment="leading" spacing={3}>
-        <Text modifiers={[font({ weight: "bold", size: 15 })]}>{props.eventName}</Text>
-        <Text modifiers={[font({ size: 12 }), foregroundStyle(MUTED)]}>{secondary}</Text>
-      </VStack>
-    ),
-    expandedBottom: <VStack modifiers={[padding({ top: 6 })]}>{bottomBanner}</VStack>,
   };
 };
 
-export default createLiveActivity<RaceActivityProps>("RaceLiveActivity", RaceLiveActivityLayout);
+export default createLiveActivity<RaceActivityProps>(
+  "RaceLiveActivity",
+  RaceLiveActivityLayout,
+);

@@ -167,4 +167,16 @@ export const nativeBridge: NativeBridge = {
     if (!instance) return null;
     return instance.getPushToken();
   },
+
+  async getRunningActivityIds(): Promise<string[]> {
+    try {
+      // Asks ActivityKit directly, not the `instances` cache -- an activity
+      // this app process never touched (e.g. one started before the most
+      // recent cold-start reconciliation ran) is still real and still
+      // showing on the device, and orphan cleanup needs to see it too.
+      return raceActivity.getInstances().map((instance) => instance.getId());
+    } catch {
+      return [];
+    }
+  },
 };

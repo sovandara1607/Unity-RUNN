@@ -4,9 +4,12 @@ import {
   Pressable,
   RefreshControl,
   ScrollView,
+  Share,
+  StyleSheet,
   View,
 } from "react-native";
 import { router, Stack, useLocalSearchParams } from "expo-router";
+import Ionicons from "@expo/vector-icons/Ionicons";
 import {
   Button,
   Copy,
@@ -19,19 +22,40 @@ import {
   Section,
 } from "../../components/ui";
 import { colors, fonts } from "../../constants/theme";
+import { useApi } from "../../services/api/provider";
 import { useEvent } from "./queries";
 import { eventDate, eventTime, money, statusLabel } from "./format";
 export default function EventDetailScreen() {
   const params = useLocalSearchParams<{ slug: string }>();
   const slug = Array.isArray(params.slug) ? params.slug[0] : params.slug;
   const query = useEvent(slug ?? "");
+  const { webOrigin } = useApi();
   const [openFAQ, setOpenFAQ] = useState<string | null>(null);
   const [linkError, setLinkError] = useState("");
   const event = query.data;
+  const onShare = () => {
+    if (!event) return;
+    const url = `${webOrigin}/events/${event.slug}`;
+    void Share.share({ message: `${event.name} · Unity Runn Club\n${url}`, url });
+  };
   return (
     <View style={{ flex: 1, backgroundColor: colors.ink }}>
       <Stack.Screen
-        options={{ title: "Race details", headerBackTitle: "Events" }}
+        options={{
+          title: "Race details",
+          headerBackTitle: "Events",
+          headerRight: () =>
+            event ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Share this race"
+                onPress={onShare}
+                hitSlop={10}
+              >
+                <Ionicons name="share-outline" size={22} color={colors.white} />
+              </Pressable>
+            ) : null,
+        }}
       />
       <OfflineNotice />
       {!event ? (
@@ -69,45 +93,119 @@ export default function EventDetailScreen() {
           }
           contentContainerStyle={{ paddingBottom: 40 }}
         >
-          <EventImage
-            path={event.cover_image}
-            label={event.name}
-            style={{ height: 340 }}
-          />
-          <View style={{ paddingHorizontal: 24, paddingTop: 24 }}>
+          <View style={{ height: 280 }}>
+            {/* Photo, then the name in a plain text block below it -- not
+                overlaid on a scrim. The overlay treatment this replaced
+                needed the subject framed low enough in the shot for the
+                scrim to sit behind the text; Events home's NextUpCard hit
+                that exact problem (confirmed by screenshot: a real cover
+                photo cropped mostly-sky at the top), and got the same fix.
+                One photo-card language for the whole app now: photo + a
+                corner status pill, text below. */}
+            <EventImage
+              path={event.cover_image}
+              label={event.name}
+              style={{ height: 280 }}
+            />
             <View
               style={{
-                alignSelf: "flex-start",
-                backgroundColor: colors.lime,
-                borderRadius: 7,
-                paddingHorizontal: 10,
-                paddingVertical: 5,
-                marginBottom: 14,
+                position: "absolute",
+                top: 16,
+                right: 16,
+                backgroundColor: event.status === "REGISTRATION_OPEN" ? colors.blue : "rgba(23,23,23,0.85)",
+                borderRadius: 999,
+                paddingHorizontal: 12,
+                paddingVertical: 6,
               }}
             >
-              <Eyebrow style={{ color: colors.ink }}>{statusLabel[event.status]}</Eyebrow>
+              <Copy style={{ color: colors.white, fontSize: 12, fontFamily: fonts.bold }}>
+                {statusLabel[event.status]}
+              </Copy>
             </View>
-            <Heading large>{event.name}</Heading>
-            <Copy style={{ marginTop: 14, fontFamily: fonts.bold }}>
-              {eventDate(event.event_date)}
-            </Copy>
-            <Copy>{eventTime(event.start_time)} · Cambodia time</Copy>
-            <Copy style={{ color: colors.muted, marginTop: 4, marginBottom: 24 }}>
-              {event.location || "Location to be announced"}
-            </Copy>
+          </View>
+          <View style={{ paddingHorizontal: 24, paddingTop: 20 }}>
+            {/* One line, not a wrap -- a long real event name (e.g.
+                "Riverside Sunset 5K") otherwise breaks mid-title at this
+                size. adjustsFontSizeToFit scales the glyph down to fit,
+                same technique already used for the Events home numeral. */}
+            {/* Deliberate rhythm, not a flat stack of same-size gaps: the
+                name/chips/meta row are one tight cluster (what, at what
+                distance, when, where -- all facts about the same race, 12px
+                apart), then a clear break before the CTA (24px -- this is
+                the one decision the screen exists for, not another fact),
+                then a bigger break after it (28px) before the reading
+                content below, so "act now" and "read later" don't blur
+                together the way a single uniform gap would. */}
+            <Heading
+              large
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.5}
+              style={{ marginBottom: 12 }}
+            >
+              {event.name}
+            </Heading>
+            {Boolean(event.categories?.length) && (
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
+                {Array.from(new Set(event.categories.map((c) => c.distance))).map((distance) => (
+                  <View
+                    key={distance}
+                    style={{
+                      borderWidth: 1,
+                      borderColor: colors.line,
+                      borderRadius: 999,
+                      paddingHorizontal: 12,
+                      paddingVertical: 6,
+                    }}
+                  >
+                    <Copy style={{ fontSize: 12, fontFamily: fonts.bold }}>{distance}</Copy>
+                  </View>
+                ))}
+              </View>
+            )}
+            <View style={{ gap: 8, marginBottom: 24 }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <Ionicons name="calendar-outline" size={16} color={colors.muted} />
+                <Copy style={{ color: colors.muted, fontSize: 13 }}>
+                  {eventDate(event.event_date)} · {eventTime(event.start_time)} (Cambodia time)
+                </Copy>
+              </View>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <Ionicons name="location-outline" size={16} color={colors.muted} />
+                <Copy style={{ color: colors.muted, fontSize: 13 }}>
+                  {event.location || "Location to be announced"}
+                </Copy>
+              </View>
+            </View>
             {event.status === "REGISTRATION_OPEN" &&
               Boolean(event.categories?.some((c) => c.status === "OPEN")) && (
-                <Button
-                  title="Claim your place"
-                  onPress={() => router.push(`/events/${event.slug}/register`)}
-                />
+                <View style={{ marginBottom: 28 }}>
+                  <Button
+                    title="Claim your place"
+                    onPress={() => router.push(`/events/${event.slug}/register`)}
+                  />
+                </View>
               )}
             {query.isError && (
-              <Copy accessibilityRole="alert" style={{ color: colors.error }}>
+              <Copy
+                accessibilityRole="alert"
+                style={{ color: colors.error, marginBottom: 20 }}
+              >
                 Could not refresh. Showing the last loaded details.
               </Copy>
             )}
-            <Section title="About the run">
+            {/* noTopBorder: Section's usual top hairline sat directly against
+                whatever came right before it -- the "Claim your place"
+                button when registration is open, or (as reported: a
+                screenshot of exactly this) the plain meta rows with no
+                button in between for a completed race, where the line
+                landed close enough to read as a stray artifact rather than
+                a deliberate divider. The header block above already has
+                real visual weight (photo, headline, chips), so this first
+                section doesn't need its own separator; the ones between
+                About/Schedule/Meet-us-here further down still do the real
+                job of separating otherwise-identical text blocks. */}
+            <Section title="About the run" noTopBorder>
               <Copy>
                 {event.description ||
                   "The crew is getting the details ready. Check back closer to race day."}
@@ -245,11 +343,10 @@ export default function EventDetailScreen() {
               </Section>
             )}
             <Section title="Meet us here">
-              <Copy>{event.location || "Meeting point to be announced"}</Copy>
-              {event.latitude != null && event.longitude != null && (
-                <Button
-                  secondary
-                  title="Open location in Maps"
+              {event.latitude != null && event.longitude != null ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Open location in Maps"
                   onPress={() => {
                     setLinkError("");
                     void Linking.openURL(
@@ -258,7 +355,39 @@ export default function EventDetailScreen() {
                       setLinkError("Could not open Maps. Please try again."),
                     );
                   }}
-                />
+                  style={({ pressed }) => ({
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 14,
+                    backgroundColor: colors.canvas,
+                    borderRadius: 16,
+                    padding: 16,
+                    opacity: pressed ? 0.8 : 1,
+                  })}
+                >
+                  <View
+                    style={{
+                      width: 40,
+                      height: 40,
+                      borderRadius: 20,
+                      backgroundColor: colors.ink,
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    <Ionicons name="location" size={20} color={colors.lime} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Copy style={{ fontFamily: fonts.bold }}>
+                      {event.location || "Meeting point to be announced"}
+                    </Copy>
+                    <Copy style={{ color: colors.blueText, fontSize: 12, marginTop: 2 }}>
+                      Open in Maps →
+                    </Copy>
+                  </View>
+                </Pressable>
+              ) : (
+                <Copy>{event.location || "Meeting point to be announced"}</Copy>
               )}
               {Boolean(linkError) && (
                 <Copy accessibilityRole="alert">{linkError}</Copy>

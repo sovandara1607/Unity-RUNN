@@ -55,4 +55,7 @@ export const nativeBridge: NativeBridge = {
   async getPushToken() {
     return null;
   },
+  async getRunningActivityIds() {
+    return [];
+  },
 };

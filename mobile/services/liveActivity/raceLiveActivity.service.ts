@@ -167,6 +167,31 @@ export const raceLiveActivity = {
   async restore(session: Session): Promise<LiveActivityRecord[]> {
     return raceLiveActivity.getActive(session);
   },
+  /** Ends any on-device Live Activity that ActivityKit is still running but
+   * that isn't in `active` (the caller's already-fetched getActive() list --
+   * taken as a parameter rather than re-fetched here, so this never costs a
+   * second network round trip on top of the query that already needed one).
+   * This app has no APNs push credentials (see internal/liveactivities'
+   * own doc comment), so once an activity's backend row disappears out
+   * from under it -- an admin deleting the event, a cleared dev database,
+   * a row expiring server-side -- there is no remote way to ever tell the
+   * device to end it; it would otherwise sit on the Lock Screen / Dynamic
+   * Island indefinitely showing stale data until iOS's own multi-hour
+   * system timeout eventually clears it. Called once whenever the Wallet
+   * screen's active-activities query runs (see queries.ts), so it's
+   * best-effort and silent: a failure here must never block the screen
+   * that surfaces real follow/unfollow state. */
+  async reconcileOrphans(active: LiveActivityRecord[]): Promise<void> {
+    try {
+      const runningIds = await nativeBridge.getRunningActivityIds().catch(() => [] as string[]);
+      const knownIds = new Set(active.map((record) => record.activity_id));
+      const orphaned = runningIds.filter((id) => !knownIds.has(id));
+      await Promise.all(orphaned.map((id) => nativeBridge.end(id).catch(() => {})));
+    } catch {
+      // Best-effort only, per the doc comment above.
+    }
+  },
+
   /** The activity's own APNs push-to-update token, for debugging/support --
    * normal app code never needs this (start() already sends it to the
    * backend). Returns null on Android, on unsupported devices, or if the

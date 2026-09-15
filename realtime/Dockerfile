@@ -8,7 +8,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
 
-COPY server.mjs ./
+COPY server.mjs domain-events.mjs ./
 
 USER node
 EXPOSE 8081

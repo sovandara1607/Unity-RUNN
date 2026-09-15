@@ -61,15 +61,30 @@ type EventNotifier interface {
 	NotifyEventCancelled(ctx context.Context, ev Event)
 }
 
-// Service implements event business rules on top of a repository
-type Service struct {
-	repo     eventRepository
-	notifier EventNotifier
+// EventsBroadcaster is implemented by internal/realtime (wired in from main.go)
+// to tell connected clients the public events list may have changed, so a
+// client refetches instead of waiting out its own cache staleness window.
+// Same consumer-side-interface pattern as EventNotifier above. Nil-safe.
+type EventsBroadcaster interface {
+	PublishEventsChanged(ctx context.Context)
 }
 
-// NewService builds a Service backed by repo. notifier may be nil (no emails sent — used by unit tests)
-func NewService(repo eventRepository, notifier EventNotifier) *Service {
-	return &Service{repo: repo, notifier: notifier}
+// Service implements event business rules on top of a repository
+type Service struct {
+	repo        eventRepository
+	notifier    EventNotifier
+	broadcaster EventsBroadcaster
+}
+
+// NewService builds a Service backed by repo. notifier and broadcaster may be nil (no emails sent / nothing broadcast — used by unit tests)
+func NewService(repo eventRepository, notifier EventNotifier, broadcaster EventsBroadcaster) *Service {
+	return &Service{repo: repo, notifier: notifier, broadcaster: broadcaster}
+}
+
+func (s *Service) broadcastEventsChanged(ctx context.Context) {
+	if s.broadcaster != nil {
+		s.broadcaster.PublishEventsChanged(ctx)
+	}
 }
 
 const (
@@ -172,6 +187,7 @@ func (s *Service) Create(ctx context.Context, req CreateEventRequest) (*Event, e
 	if err := s.repo.Create(ctx, e); err != nil {
 		return nil, err
 	}
+	s.broadcastEventsChanged(ctx)
 	return e, nil
 }
 
@@ -206,6 +222,7 @@ func (s *Service) Duplicate(ctx context.Context, sourceID uuid.UUID, req Duplica
 	if err := s.repo.Duplicate(ctx, sourceID, clone); err != nil {
 		return nil, err
 	}
+	s.broadcastEventsChanged(ctx)
 	return clone, nil
 }
 
@@ -312,6 +329,7 @@ func (s *Service) Update(ctx context.Context, id uuid.UUID, req UpdateEventReque
 	}
 
 	s.notifyOfChange(ctx, before, *e)
+	s.broadcastEventsChanged(ctx)
 
 	return e, nil
 }
@@ -358,7 +376,11 @@ func (s *Service) Delete(ctx context.Context, id uuid.UUID) error {
 	if e.Status != StatusDraft {
 		return ErrDeleteNotAllowed
 	}
-	return s.repo.Delete(ctx, id)
+	if err := s.repo.Delete(ctx, id); err != nil {
+		return err
+	}
+	s.broadcastEventsChanged(ctx)
+	return nil
 }
 
 // slugify converts a name into a URL-safe slug: lowercase, non-alphanumerics collapsed to single hyphens, trimmed
