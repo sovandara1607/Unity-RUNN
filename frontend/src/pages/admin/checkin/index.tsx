@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle, AlertTriangle, CheckCircle, Clock, Volume2, VolumeX,
 } from "lucide-react";
@@ -89,6 +89,25 @@ export default function AdminCheckinPage() {
     void loadStation();
   }, [loadStation]);
 
+  // Scanning happens once per runner at the gate -- potentially hundreds of times per
+  // session -- so this indexes id/registration_number/email once per data change instead
+  // of re-scanning the full registrations array on every single scan.
+  const registrationIndex = useMemo(() => {
+    const index = new Map<string, Registration>();
+    for (const registration of registrations) {
+      if (registration.event_id !== selectedEventId) continue;
+      index.set(registration.id, registration);
+      if (registration.registration_number) index.set(registration.registration_number.toLowerCase(), registration);
+      if (registration.email) index.set(registration.email.toLowerCase(), registration);
+    }
+    return index;
+  }, [registrations, selectedEventId]);
+
+  const resolveScanTarget = useCallback(
+    (token: string) => registrationIndex.get(token) ?? registrationIndex.get(token.toLowerCase()),
+    [registrationIndex],
+  );
+
   const handleProcessScan = async (tokenOrId: string) => {
     const raw = tokenOrId.trim();
     if (!raw || processing) return;
@@ -99,11 +118,7 @@ export default function AdminCheckinPage() {
 
     setProcessing(true); setManualToken("");
     try {
-      const match = registrations.find((registration) => registration.event_id === selectedEventId && (
-        registration.id === raw ||
-        registration.registration_number?.toLowerCase() === raw.toLowerCase() ||
-        registration.email?.toLowerCase() === raw.toLowerCase()
-      ));
+      const match = resolveScanTarget(raw);
       const response = await api.checkIn({ eventId: selectedEventId, qrToken: match?.registration_number || raw });
       if (soundEnabled) playSound("success");
       const scannedRegistration = response.registration;
@@ -123,7 +138,7 @@ export default function AdminCheckinPage() {
         setLastResult({
           status: "already_checked_in",
           message: "This runner was admitted earlier. Do not issue another kit.",
-          registration: registrations.find((registration) => registration.event_id === selectedEventId && [registration.registration_number, registration.email, registration.id].some((value) => value?.toLowerCase() === raw.toLowerCase())),
+          registration: resolveScanTarget(raw),
           timestamp: new Date().toLocaleTimeString(),
         });
       } else {
