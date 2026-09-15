@@ -25,38 +25,53 @@ export default function EventsPage() {
   const acid = config.primary_color;
   const [events, setEvents] = useState<Event[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [filterSyncError, setFilterSyncError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [reloadKey, setReloadKey] = useState(0);
-  const [query, setQuery] = useState("");
-  const [tab, setTab] = useState<"ALL" | EventStatus>("ALL");
-  const [month, setMonth] = useState("ALL");
-  const [location, setLocation] = useState("ALL");
+  const [query, setQueryValue] = useState("");
+  const [tab, setTabValue] = useState<"ALL" | EventStatus>("ALL");
+  const [month, setMonthValue] = useState("ALL");
+  const [location, setLocationValue] = useState("ALL");
   const router = useRouter();
-  const seeded = useRef(false);
+  const lastWrittenURL = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!router.isReady || seeded.current) return;
-    seeded.current = true;
+    if (!router.isReady) return;
+    if (lastWrittenURL.current === router.asPath) {
+      lastWrittenURL.current = null;
+      return;
+    }
     const { status, month: qMonth, location: qLocation, q } = router.query;
-    if (typeof status === "string") setTab(status as "ALL" | EventStatus);
-    if (typeof qMonth === "string") setMonth(qMonth);
-    if (typeof qLocation === "string") setLocation(qLocation);
-    if (typeof q === "string") setQuery(q);
-  }, [router.isReady, router.query]);
+    setTabValue(filterTabs.some((item) => item.value === status) ? status as "ALL" | EventStatus : "ALL");
+    setMonthValue(typeof qMonth === "string" ? qMonth : "ALL");
+    setLocationValue(typeof qLocation === "string" ? qLocation : "ALL");
+    setQueryValue(typeof q === "string" ? q : "");
+  }, [router.isReady, router.query, router.asPath]);
 
-  useEffect(() => {
-    if (!seeded.current) return;
+  function updateFilters(patch: Partial<{ tab: "ALL" | EventStatus; month: string; location: string; query: string }>) {
+    const filters = { tab, month, location, query, ...patch };
+    setTabValue(filters.tab);
+    setMonthValue(filters.month);
+    setLocationValue(filters.location);
+    setQueryValue(filters.query);
     const next: Record<string, string> = {};
-    if (tab !== "ALL") next.status = tab;
-    if (month !== "ALL") next.month = month;
-    if (location !== "ALL") next.location = location;
-    if (query.trim()) next.q = query.trim();
-    const current = new URLSearchParams(router.asPath.split("?")[1] || "").toString();
-    const desired = new URLSearchParams(next).toString();
-    if (current === desired) return;
-    router.replace({ pathname: "/events", query: next }, undefined, { shallow: true });
-    
-  }, [tab, month, location, query]);
+    if (filters.tab !== "ALL") next.status = filters.tab;
+    if (filters.month !== "ALL") next.month = filters.month;
+    if (filters.location !== "ALL") next.location = filters.location;
+    if (filters.query.trim()) next.q = filters.query.trim();
+    const search = new URLSearchParams(next).toString();
+    const url = search ? `/events?${search}` : "/events";
+    if (url === router.asPath) return;
+    lastWrittenURL.current = url;
+    void router.replace(url, undefined, { shallow: true, scroll: false }).catch((error: unknown) => {
+      if (!(error && typeof error === "object" && "cancelled" in error && error.cancelled))
+        setFilterSyncError("Could not save these filters in the URL.");
+    });
+  }
+  const setTab = (tab: "ALL" | EventStatus) => updateFilters({ tab });
+  const setMonth = (month: string) => updateFilters({ month });
+  const setLocation = (location: string) => updateFilters({ location });
+  const setQuery = (query: string) => updateFilters({ query });
 
   useEffect(() => {
     setLoading(true);
@@ -98,10 +113,7 @@ export default function EventsPage() {
     .sort((a, b) => a.localeCompare(b)), [events]);
   const hasFilters = tab !== "ALL" || month !== "ALL" || location !== "ALL" || Boolean(query.trim());
   const clearFilters = () => {
-    setTab("ALL");
-    setMonth("ALL");
-    setLocation("ALL");
-    setQuery("");
+    updateFilters({ tab: "ALL", month: "ALL", location: "ALL", query: "" });
   };
 
   return (

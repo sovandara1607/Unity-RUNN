@@ -12,6 +12,9 @@ type Session = ReturnType<typeof useApi>["session"];
  * string here would silently target the wrong one of the two; callers
  * already have both from the `LiveActivityRecord` they're acting on. */
 export type LiveActivityRef = { id: string; activityId: string };
+let startsInFlight = 0;
+let startGeneration = 0;
+
 const STATE_TO_BACKEND: Record<RaceLiveActivityData["status"], RaceLiveActivityStatus> = {
   upcoming: "UPCOMING",
   check_in: "CHECK_IN",
@@ -55,6 +58,9 @@ export const raceLiveActivity = {
     data: RaceLiveActivityData,
     opts: { registrationId?: string; deviceId?: string } = {},
   ): Promise<LiveActivityRecord> {
+    let nativeActivityId: string | undefined;
+    startsInFlight++;
+    startGeneration++;
     try {
       // nativeBridge.isSupported() is the single source of truth for
       // platform/OS-version support (including "this isn't iOS at all") --
@@ -74,7 +80,12 @@ export const raceLiveActivity = {
         bibNumber: data.bibNumber,
         gate: data.gate,
         status: data.status,
+        elapsedSeconds: data.elapsedSeconds,
+        distanceKm: data.distanceKm,
+        pace: data.pace,
+        finishTime: data.finishTime,
       });
+      nativeActivityId = native.activityId;
       return await session.request<LiveActivityRecord>("/api/v1/live-activities", {
         method: "POST",
         body: {
@@ -87,7 +98,14 @@ export const raceLiveActivity = {
         },
       });
     } catch (error) {
+      if (nativeActivityId) {
+        // A rejected follow must not leave a second activity visible on the phone.
+        await nativeBridge.end(nativeActivityId).catch(() => undefined);
+      }
       throw wrap(error);
+    } finally {
+      startsInFlight--;
+      startGeneration++;
     }
   },
   /** Patch race status (and, per item 6/14, native-timer-driven progress
@@ -135,9 +153,7 @@ export const raceLiveActivity = {
     try {
       await nativeBridge.end(ref.activityId);
     } catch {
-      // Native end() failures don't block the backend record from closing --
-      // an orphaned on-device activity that outlives its backend row just
-      // stops receiving pushes, which is the same as ending, functionally.
+      // Close the backend record even if native dismissal needs a later retry.
     }
     try {
       await session.request<void>(`/api/v1/live-activities/${ref.id}`, {
@@ -152,9 +168,16 @@ export const raceLiveActivity = {
    * case: the backend row is the source of truth, not local device state). */
   async getActive(session: Session): Promise<LiveActivityRecord[]> {
     try {
+      const generation = startGeneration;
+      const runningIds = await nativeBridge.getRunningActivityIds().catch(() => [] as string[]);
       const result = await session.request<{ live_activities: LiveActivityRecord[] }>(
         "/api/v1/live-activities",
       );
+      // Only compare activities that existed before this backend snapshot.
+      // A concurrent follow may not have reached the server yet.
+      if (startsInFlight === 0 && generation === startGeneration) {
+        void raceLiveActivity.reconcileOrphans(result.live_activities, runningIds);
+      }
       return result.live_activities;
     } catch (error) {
       throw wrap(error);
@@ -167,23 +190,10 @@ export const raceLiveActivity = {
   async restore(session: Session): Promise<LiveActivityRecord[]> {
     return raceLiveActivity.getActive(session);
   },
-  /** Ends any on-device Live Activity that ActivityKit is still running but
-   * that isn't in `active` (the caller's already-fetched getActive() list --
-   * taken as a parameter rather than re-fetched here, so this never costs a
-   * second network round trip on top of the query that already needed one).
-   * This app has no APNs push credentials (see internal/liveactivities'
-   * own doc comment), so once an activity's backend row disappears out
-   * from under it -- an admin deleting the event, a cleared dev database,
-   * a row expiring server-side -- there is no remote way to ever tell the
-   * device to end it; it would otherwise sit on the Lock Screen / Dynamic
-   * Island indefinitely showing stale data until iOS's own multi-hour
-   * system timeout eventually clears it. Called once whenever the Wallet
-   * screen's active-activities query runs (see queries.ts), so it's
-   * best-effort and silent: a failure here must never block the screen
-   * that surfaces real follow/unfollow state. */
-  async reconcileOrphans(active: LiveActivityRecord[]): Promise<void> {
+  /** End activities absent from a backend snapshot, using only device IDs
+   * captured before that request and after checking for concurrent starts. */
+  async reconcileOrphans(active: LiveActivityRecord[], runningIds: string[]): Promise<void> {
     try {
-      const runningIds = await nativeBridge.getRunningActivityIds().catch(() => [] as string[]);
       const knownIds = new Set(active.map((record) => record.activity_id));
       const orphaned = runningIds.filter((id) => !knownIds.has(id));
       await Promise.all(orphaned.map((id) => nativeBridge.end(id).catch(() => {})));

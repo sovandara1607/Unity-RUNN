@@ -27,6 +27,7 @@ export type RaceActivityProps = {
   bibNumber?: string;
   gate?: string;
   elapsedSeconds?: number;
+  elapsedStartedAt?: number;
   distanceKm?: number;
   pace?: string;
   finishTime?: string;
@@ -78,7 +79,7 @@ const RaceLiveActivityLayout = (
     size: number;
     compact?: boolean;
   }) {
-    const start = new Date(Date.now() - elapsedSeconds * 1000);
+    const start = new Date(props.elapsedStartedAt ?? Date.now() - elapsedSeconds * 1000);
     const farFuture = new Date(start.getTime() + 1000 * 60 * 60 * 24);
     return (
       <Text

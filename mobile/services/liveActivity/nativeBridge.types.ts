@@ -20,6 +20,10 @@ export type NativeStartInput = {
   startTime: string;
   bibNumber?: string;
   gate?: string;
+  elapsedSeconds?: number;
+  distanceKm?: number;
+  pace?: string;
+  finishTime?: string;
   status:
     | "upcoming"
     | "check_in"

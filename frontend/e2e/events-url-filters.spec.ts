@@ -26,3 +26,27 @@ test("filters survive the URL and the back button", async ({ page }) => {
   await page.getByPlaceholder("Search by name or location").fill("temple");
   await expect(page).toHaveURL(/q=temple/);
 });
+
+test("a shared URL keeps every filter through hydration and reload", async ({ page }) => {
+  await page.route(/\/api\/v1\/events\/\?/, (route) => route.fulfill({
+    contentType: "application/json",
+    body: JSON.stringify({ data: { events, total: events.length } }),
+  }));
+  const url = "/events?status=PUBLISHED&month=2026-11&location=Temple+Road&q=Temple";
+  await page.goto(url);
+  await expect(page.getByRole("link", { name: /Temple Trail Half/ })).toBeVisible();
+  await expect(page).toHaveURL(/status=PUBLISHED.*month=2026-11.*location=Temple\+Road.*q=Temple/);
+  await expect(page.getByLabel("Race month")).toHaveValue("2026-11");
+  await expect(page.getByLabel("Start location")).toHaveValue("Temple Road");
+  await page.reload();
+  await expect(page.getByPlaceholder("Search by name or location")).toHaveValue("Temple");
+  await expect(page.getByRole("link", { name: /Riverside 10K/ })).toHaveCount(0);
+  await page.getByRole("button", { name: "Clear all", exact: true }).click();
+  await expect(page).toHaveURL(/\/events$/);
+  await expect(page.getByRole("link", { name: /Riverside 10K/ })).toBeVisible();
+  await expect(page.getByLabel("Race month")).toHaveValue("ALL");
+  await expect(page.getByLabel("Start location")).toHaveValue("ALL");
+  await page.getByPlaceholder("Search by name or location").pressSequentially("Temple Trail", { delay: 30 });
+  await expect(page.getByPlaceholder("Search by name or location")).toHaveValue("Temple Trail");
+  await expect(page).toHaveURL(/q=Temple\+Trail/);
+});

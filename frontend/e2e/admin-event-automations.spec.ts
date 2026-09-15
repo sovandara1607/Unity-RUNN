@@ -2,6 +2,10 @@ import { expect, test } from "@playwright/test";
 
 const now = "2026-08-29T08:00:00Z";
 
+test.beforeEach(async ({ page }) => {
+  await page.clock.setFixedTime(new Date(now));
+});
+
 test("an admin schedules a confirmed-runner event transmission", async ({ page }) => {
   const event = { id: "event-1", name: "Riverside Run", slug: "riverside-run", description: "", cover_image: "", event_date: "2026-10-18T00:00:00Z", start_time: "0000-01-01T06:00:00Z", location: "Riverside", status: "REGISTRATION_OPEN", created_at: now, updated_at: now };
   let payload: Record<string, unknown> | null = null;

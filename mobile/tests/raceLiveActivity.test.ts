@@ -3,12 +3,88 @@ import { test } from "node:test";
 import { raceLiveActivity } from "../services/liveActivity/raceLiveActivity.service";
 import { LiveActivityError } from "../services/liveActivity/types";
 import { ApiError } from "../services/api/client";
+import { nativeBridge } from "../services/liveActivity/nativeBridge";
+import type { NativeStartInput } from "../services/liveActivity/nativeBridge.types";
 // A minimal fake matching only the `.request` surface raceLiveActivity
 // actually calls -- see services/auth/session.ts's real Session class for
 // the full shape this stands in for.
 function fakeSession(handler: (path: string, options?: any) => Promise<any>) {
   return { request: handler } as any;
 }
+test("a stale backend snapshot cannot dismiss a concurrently started activity", async (t) => {
+  t.mock.method(nativeBridge, "isSupported", async () => true);
+  t.mock.method(nativeBridge, "getRunningActivityIds", async () => ["native-1"]);
+  t.mock.method(nativeBridge, "start", async () => ({ activityId: "native-1", pushToken: "" }));
+  const end = t.mock.method(nativeBridge, "end", async () => {});
+  let resolveSnapshot!: (value: unknown) => void;
+  const snapshot = new Promise((resolve) => { resolveSnapshot = resolve; });
+  let requestStarted!: () => void;
+  const requestReady = new Promise<void>((resolve) => { requestStarted = resolve; });
+  const fetch = raceLiveActivity.getActive(fakeSession(async () => {
+    requestStarted();
+    return snapshot;
+  }));
+  await requestReady;
+  await raceLiveActivity.start(fakeSession(async () => ({ activity_id: "native-1" })), {
+    eventId: "event-1", eventName: "Test race", location: "Test start", startTime: "2026-10-01T00:00:00Z", status: "live", elapsedSeconds: 90,
+  });
+  resolveSnapshot({ live_activities: [] });
+  await fetch;
+  assert.equal(end.mock.callCount(), 0);
+});
+
+test("a follow awaiting backend registration is protected from orphan cleanup", async (t) => {
+  t.mock.method(nativeBridge, "isSupported", async () => true);
+  t.mock.method(nativeBridge, "getRunningActivityIds", async () => ["native-new"]);
+  const start = t.mock.method(nativeBridge, "start", async (_input: NativeStartInput) => ({ activityId: "native-new", pushToken: "" }));
+  const end = t.mock.method(nativeBridge, "end", async () => {});
+  let resolveFollow!: (value: unknown) => void;
+  const followRequest = new Promise((resolve) => { resolveFollow = resolve; });
+  let requestStarted!: () => void;
+  const requestReady = new Promise<void>((resolve) => { requestStarted = resolve; });
+  const follow = raceLiveActivity.start(fakeSession(async () => {
+    requestStarted();
+    return followRequest;
+  }), {
+    eventId: "event-1", eventName: "Test race", location: "Test start", startTime: "2026-10-01T00:00:00Z", status: "live", elapsedSeconds: 90,
+  });
+  await requestReady;
+  await raceLiveActivity.getActive(fakeSession(async () => ({ live_activities: [] })));
+  assert.equal(end.mock.callCount(), 0);
+  assert.equal(start.mock.calls[0].arguments[0].elapsedSeconds, 90);
+  resolveFollow({ activity_id: "native-new" });
+  await follow;
+});
+
+test("a stable snapshot dismisses an existing orphan", async (t) => {
+  t.mock.method(nativeBridge, "getRunningActivityIds", async () => ["old-orphan"]);
+  const end = t.mock.method(nativeBridge, "end", async () => {});
+  await raceLiveActivity.getActive(fakeSession(async () => ({ live_activities: [] })));
+  assert.deepEqual(end.mock.calls.map((call) => call.arguments), [["old-orphan"]]);
+});
+
+test("a rejected follow closes the newly started native activity", async (t) => {
+  t.mock.method(nativeBridge, "isSupported", async () => true);
+  t.mock.method(nativeBridge, "start", async () => ({ activityId: "new-native-id", pushToken: "" }));
+  const end = t.mock.method(nativeBridge, "end", async () => {});
+  const session = fakeSession(async () => {
+    throw new ApiError("Already following", 409, "already_following");
+  });
+  await assert.rejects(raceLiveActivity.start(session, {
+    eventId: "event-1", eventName: "Test race", location: "Test start", startTime: "2026-10-01T00:00:00Z", status: "upcoming",
+  }), (error: unknown) => error instanceof LiveActivityError && error.reason === "already_following");
+  assert.deepEqual(end.mock.calls.map((call) => call.arguments), [["new-native-id"]]);
+});
+
+test("native cleanup failure preserves the original backend failure", async (t) => {
+  t.mock.method(nativeBridge, "isSupported", async () => true);
+  t.mock.method(nativeBridge, "start", async () => ({ activityId: "new-native-id", pushToken: "" }));
+  t.mock.method(nativeBridge, "end", async () => { throw new Error("Native cleanup failed"); });
+  const session = fakeSession(async () => { throw new ApiError("Offline", 0, "network_error"); });
+  await assert.rejects(raceLiveActivity.start(session, {
+    eventId: "event-1", eventName: "Test race", location: "Test start", startTime: "2026-10-01T00:00:00Z", status: "upcoming",
+  }), (error: unknown) => error instanceof LiveActivityError && error.message === "Offline");
+});
 test("start() reports unsupported_device when the native bridge has no real implementation yet", async () => {
   const session = fakeSession(async () => {
     throw new Error("should never reach the backend if native start fails first");
@@ -146,5 +222,5 @@ test("reconcileOrphans() never throws, and touches no backend call, against the 
       updated_at: "2026-01-01T00:00:00Z",
     },
   ];
-  await assert.doesNotReject(raceLiveActivity.reconcileOrphans(active));
+  await assert.doesNotReject(raceLiveActivity.reconcileOrphans(active, []));
 });

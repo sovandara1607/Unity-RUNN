@@ -86,14 +86,7 @@ export function useActiveLiveActivities() {
   return useQuery({
     queryKey: ["live-activities", "mine"],
     staleTime: 30_000,
-    queryFn: async () => {
-      const active = await raceLiveActivity.getActive(session);
-      // Fire-and-forget: cleans up any on-device activity this fetch just
-      // proved is orphaned (see reconcileOrphans' own doc comment). Never
-      // awaited -- a slow/failed cleanup must not delay the Wallet screen.
-      void raceLiveActivity.reconcileOrphans(active);
-      return active;
-    },
+    queryFn: () => raceLiveActivity.getActive(session),
   });
 }
 export function useFollowLive() {

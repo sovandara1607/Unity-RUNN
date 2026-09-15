@@ -91,6 +91,58 @@ func TestRepository_Create_ThenEnd_AllowsANewActiveRow(t *testing.T) {
 	}
 }
 
+func TestRepository_Create_ExpiresAfterActivityKitLimit(t *testing.T) {
+	pool := testPool(t)
+	repo := NewRepository(pool)
+	userID, eventID := seedUserAndEvent(t, pool)
+	before := time.Now()
+	activity, err := repo.Create(context.Background(), userID, CreateInput{
+		EventID: eventID, ActivityID: "activity-1", Platform: "ios",
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if activity.ExpiresAt == nil {
+		t.Fatal("expires_at is nil")
+	}
+	want := before.Add(8 * time.Hour)
+	if delta := activity.ExpiresAt.Sub(want); delta < -10*time.Second || delta > 10*time.Second {
+		t.Fatalf("expires_at = %v, want near %v", activity.ExpiresAt, want)
+	}
+}
+
+func TestRepository_Create_ReplacesExpiredActiveRowBeforeSweep(t *testing.T) {
+	pool := testPool(t)
+	repo := NewRepository(pool)
+	userID, eventID := seedUserAndEvent(t, pool)
+	first, err := repo.Create(context.Background(), userID, CreateInput{
+		EventID: eventID, ActivityID: "old", Platform: "ios",
+	})
+	if err != nil {
+		t.Fatalf("first Create: %v", err)
+	}
+	if _, err := pool.Exec(context.Background(),
+		`UPDATE live_activities SET expires_at = now() - interval '1 second' WHERE id = $1`, first.ID); err != nil {
+		t.Fatalf("expire row: %v", err)
+	}
+	second, err := repo.Create(context.Background(), userID, CreateInput{
+		EventID: eventID, ActivityID: "new", Platform: "ios",
+	})
+	if err != nil {
+		t.Fatalf("Create after expiry: %v", err)
+	}
+	if second.ActivityID != "new" {
+		t.Fatalf("activity_id = %q, want new", second.ActivityID)
+	}
+	active, err := repo.ListActiveForUser(context.Background(), userID)
+	if err != nil {
+		t.Fatalf("ListActiveForUser: %v", err)
+	}
+	if len(active) != 1 || active[0].ID != second.ID {
+		t.Fatalf("active = %#v, want only new activity", active)
+	}
+}
+
 func TestRepository_UpdateRaceStatus_OnEndedActivity_ReturnsNotFound(t *testing.T) {
 	pool := testPool(t)
 	repo := NewRepository(pool)

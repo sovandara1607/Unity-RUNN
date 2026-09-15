@@ -1,4 +1,7 @@
 import { Platform } from "react-native";
+import { awaitPushToken } from "./pushToken";
+import { initialContent, parseSavedContent, updatedContent } from "./contentState";
+import * as SecureStore from "expo-secure-store";
 import type { LiveActivity } from "expo-widgets";
 import raceActivity, { type RaceActivityProps } from "../../widgets/RaceLiveActivity";
 import {
@@ -31,14 +34,11 @@ export { LiveActivityUnsupportedError };
 // patch, but raceLiveActivity.service.ts.update() only ever hands this
 // bridge a partial NativeUpdateInput -- so every running activity's last-
 // known full props are cached here, patched in place, and re-sent whole.
-// KNOWN GAP: an activity recovered by the cold-start reconciliation below
-// (app relaunch) has no cached entry until its first update() call after
-// relaunch -- a patch arriving before that loses whichever fields the patch
-// didn't include, since ActivityKit has no "give me the current state" API
-// for the JS side to read back. Not solved here: fixing it means the Wallet
-// screen re-sending full RaceLiveActivityData on restore, not this file.
+// Persist the full state so patches after an app restart retain the race details.
 const instances = new Map<string, LiveActivity<RaceActivityProps>>();
 const lastProps = new Map<string, RaceActivityProps>();
+const contentKey = (id: string) => `live-activity.${id}`;
+const storageOptions = { keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY };
 
 // Cold-start restore (item 15): an app relaunch loses the two maps above,
 // but ActivityKit itself keeps activities running system-wide -- ask it
@@ -62,37 +62,6 @@ function findInstance(activityId: string): LiveActivity<RaceActivityProps> | und
   return found;
 }
 
-const PUSH_TOKEN_TIMEOUT_MS = 4000;
-
-/** Races getPushToken() against addPushTokenListener() with a timeout --
- * ActivityKit hands the token back asynchronously and, on the Simulator (no
- * APNs connectivity) or with push notifications off, sometimes never at
- * all. start() still has to return *something*; the backend's push_token
- * field is optional for exactly this reason (see
- * backend/internal/liveactivities/model.go's CreateInput.PushToken). */
-function awaitPushToken(instance: LiveActivity<RaceActivityProps>): Promise<string> {
-  return new Promise((resolve) => {
-    let settled = false;
-    const subscription = instance.addPushTokenListener((event) => finish(event.pushToken));
-    function finish(token: string) {
-      if (settled) return;
-      settled = true;
-      subscription.remove();
-      resolve(token);
-    }
-    instance
-      .getPushToken()
-      .then((token) => {
-        if (token) finish(token);
-      })
-      .catch(() => {
-        // getPushToken() failing doesn't change the outcome -- the timeout
-        // below still resolves with "" the same as a token that never came.
-      });
-    setTimeout(() => finish(""), PUSH_TOKEN_TIMEOUT_MS);
-  });
-}
-
 export const nativeBridge: NativeBridge = {
   async isSupported() {
     // Real ActivityKit requires iOS 16.2+ for start()/update(); this app's
@@ -105,15 +74,7 @@ export const nativeBridge: NativeBridge = {
   },
 
   async start(input: NativeStartInput): Promise<NativeStartResult> {
-    const props: RaceActivityProps = {
-      eventName: input.eventName,
-      location: input.location,
-      raceDistance: input.raceDistance,
-      startTime: input.startTime,
-      status: input.status,
-      bibNumber: input.bibNumber,
-      gate: input.gate,
-    };
+    const props = initialContent(input);
     let instance: LiveActivity<RaceActivityProps>;
     try {
       instance = raceActivity.start(props);
@@ -127,6 +88,14 @@ export const nativeBridge: NativeBridge = {
     const activityId = instance.getId();
     instances.set(activityId, instance);
     lastProps.set(activityId, props);
+    try {
+      await SecureStore.setItemAsync(contentKey(activityId), JSON.stringify(props), storageOptions);
+    } catch (error) {
+      await instance.end("immediate").catch(() => undefined);
+      instances.delete(activityId);
+      lastProps.delete(activityId);
+      throw error;
+    }
     const pushToken = await awaitPushToken(instance);
     return { activityId, pushToken };
   },
@@ -136,16 +105,18 @@ export const nativeBridge: NativeBridge = {
     if (!instance) {
       throw new LiveActivityUnsupportedError(`No running Live Activity with id ${activityId}.`);
     }
-    const merged: RaceActivityProps = {
-      ...(lastProps.get(activityId) as RaceActivityProps | undefined),
-      ...(input.raceStatus !== undefined ? { status: input.raceStatus } : {}),
-      ...(input.distanceKm !== undefined ? { distanceKm: input.distanceKm } : {}),
-      ...(input.elapsedSeconds !== undefined ? { elapsedSeconds: input.elapsedSeconds } : {}),
-      ...(input.pace !== undefined ? { pace: input.pace } : {}),
-      ...(input.finishTime !== undefined ? { finishTime: input.finishTime } : {}),
-    } as RaceActivityProps;
+    const previous = lastProps.get(activityId) ?? parseSavedContent(
+      await SecureStore.getItemAsync(contentKey(activityId), storageOptions),
+    );
+    if (!previous) {
+      throw new Error("Cannot update a restored Live Activity without its saved content.");
+    }
+    const merged = updatedContent(previous, input);
     await instance.update(merged);
     lastProps.set(activityId, merged);
+    // Best-effort cache for cold-start recovery only -- a write failure here must not
+    // undo the on-device update that already succeeded, or block the caller's backend PATCH.
+    await SecureStore.setItemAsync(contentKey(activityId), JSON.stringify(merged), storageOptions).catch(() => undefined);
   },
 
   async end(activityId: string): Promise<void> {
@@ -153,12 +124,12 @@ export const nativeBridge: NativeBridge = {
     // Safe no-op if nothing's running under this id -- matches the backend's
     // own End() idempotency and raceLiveActivity.service.ts's documented
     // "safe to call unconditionally" contract.
-    if (!instance) return;
     try {
-      await instance.end("default");
+      if (instance) await instance.end("immediate");
     } finally {
       instances.delete(activityId);
       lastProps.delete(activityId);
+      await SecureStore.deleteItemAsync(contentKey(activityId), storageOptions).catch(() => undefined);
     }
   },
 

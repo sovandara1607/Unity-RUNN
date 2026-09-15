@@ -45,9 +45,17 @@ func scan(row pgx.Row) (*LiveActivity, error) {
 // Create inserts a new ACTIVE live activity. Returns ErrDuplicateActive if
 // userID already has one for eventID (see the partial unique index).
 func (r *Repository) Create(ctx context.Context, userID uuid.UUID, in CreateInput) (*LiveActivity, error) {
+	// ActivityKit ends activities after eight hours. Expire an old row before
+	// inserting so a delayed worker sweep cannot prevent the user refollowing.
+	if _, err := r.pool.Exec(ctx, `
+		UPDATE live_activities SET status = 'EXPIRED', updated_at = now()
+		WHERE user_id = $1 AND event_id = $2 AND status = 'ACTIVE'
+		  AND expires_at <= now()`, userID, in.EventID); err != nil {
+		return nil, fmt.Errorf("liveactivities: expire before create: %w", err)
+	}
 	const query = `
-		INSERT INTO live_activities (user_id, event_id, registration_id, activity_id, device_id, push_token, platform)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO live_activities (user_id, event_id, registration_id, activity_id, device_id, push_token, platform, expires_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, now() + interval '8 hours')
 		RETURNING ` + selectColumns
 	row := r.pool.QueryRow(ctx, query,
 		userID, in.EventID, in.RegistrationID, in.ActivityID, in.DeviceID, in.PushToken, in.Platform)
@@ -78,7 +86,9 @@ func (r *Repository) GetByID(ctx context.Context, id uuid.UUID) (*LiveActivity, 
 // ListActiveForUser returns userID's currently-followed activities, newest first.
 func (r *Repository) ListActiveForUser(ctx context.Context, userID uuid.UUID) ([]LiveActivity, error) {
 	rows, err := r.pool.Query(ctx,
-		`SELECT `+selectColumns+` FROM live_activities WHERE user_id = $1 AND status = 'ACTIVE' ORDER BY created_at DESC`,
+		`SELECT `+selectColumns+` FROM live_activities
+		 WHERE user_id = $1 AND status = 'ACTIVE' AND expires_at > now()
+		 ORDER BY created_at DESC`,
 		userID)
 	if err != nil {
 		return nil, fmt.Errorf("liveactivities: list: %w", err)
@@ -133,9 +143,7 @@ func (r *Repository) End(ctx context.Context, id uuid.UUID) error {
 
 // ExpireStale flips ACTIVE rows whose expires_at has passed to EXPIRED --
 // see item 13, "expired tokens should not remain active indefinitely." A
-// scheduled job calls this; nothing wires it to a scheduler yet (see
-// package doc comment on the same "not implemented until there's a real
-// APNs integration to drive it" basis).
+// The worker calls this regularly so expired rows cannot block refollowing.
 func (r *Repository) ExpireStale(ctx context.Context) (int64, error) {
 	tag, err := r.pool.Exec(ctx,
 		`UPDATE live_activities SET status = 'EXPIRED', updated_at = now()

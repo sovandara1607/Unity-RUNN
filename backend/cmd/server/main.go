@@ -209,6 +209,7 @@ func run() error {
 			reminderScheduler.Run,
 			eventAutomationScheduler.Run,
 			paymentReconciler.Run,
+			func(ctx context.Context) { runLiveActivityExpiry(ctx, liveActivitiesRepo, log, time.Minute) },
 			func(ctx context.Context) { runIdempotencyCleanup(ctx, idemRepo, log, time.Hour) },
 		} {
 			backgroundWG.Add(1)
@@ -318,6 +319,30 @@ func run() error {
 	}
 
 	return nil
+}
+
+func runLiveActivityExpiry(ctx context.Context, repo *liveactivities.Repository, log *slog.Logger, interval time.Duration) {
+	sweep := func() {
+		n, err := repo.ExpireStale(ctx)
+		if err != nil {
+			if !errors.Is(err, context.Canceled) {
+				log.Warn("live_activity_expiry_failed", "error", err)
+			}
+		} else if n > 0 {
+			log.Info("live_activity_expiry", "expired", n)
+		}
+	}
+	sweep()
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			sweep()
+		}
+	}
 }
 
 // runMetricsGaugeUpdater periodically samples the pgx pool and the Redis
