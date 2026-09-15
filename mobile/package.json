@@ -53,7 +53,7 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test tests/*.test.ts",
+    "test": "tsx --experimental-test-module-mocks --test tests/*.test.ts",
     "export": "expo export --platform ios --platform android"
   },
   "private": true

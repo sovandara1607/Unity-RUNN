@@ -130,6 +130,15 @@ export default function EventsPage() {
           <p className="mt-3 max-w-lg text-sm leading-6 text-white/65">Browse every Unity Runn Club event: search by name, then narrow the board by entry status, month, or start location.</p>
         </div>
 
+        {filterSyncError && !loading && !error && (
+          <div className="mb-6 flex items-center justify-between gap-4 border border-white/15 bg-white/5 px-4 py-3 text-xs text-white/70">
+            <span>{filterSyncError}</span>
+            <button type="button" onClick={() => setFilterSyncError(null)} className="shrink-0 text-white/50 hover:text-white">
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        )}
+
         {loading ? (
           <Loading />
         ) : error ? (
