@@ -9,7 +9,6 @@ import Animated, {
   FadeInDown,
   useAnimatedStyle,
   useSharedValue,
-  withDelay,
   withTiming,
   interpolateColor,
 } from "react-native-reanimated";
@@ -23,6 +22,7 @@ import {
   LoadingCards,
   OfflineNotice,
 } from "../../components/ui";
+import { cardEntering } from "../../components/motion";
 import { useApi } from "../../services/api/provider";
 import { useEvent, useEvents, useSiteConfig } from "./queries";
 import {
@@ -42,25 +42,6 @@ import type { HeroSlide, RunEvent, SiteConfig } from "../../services/api/types";
 // already happened would be nonsensical, not just imprecise.
 const AHEAD_STATUSES = "PUBLISHED,REGISTRATION_OPEN,REGISTRATION_CLOSED";
 const PAST_STATUSES = "COMPLETED";
-
-// A single custom entering animation (scale 0.97 -> 1, fade in) shared by
-// every timeline item, staggered by list position. Fast (220ms) and eased
-// out, not a floaty spring -- matches a sports-brand feel rather than a
-// soft consumer-app one. Unchanged from the previous screen.
-function cardEntering(index: number) {
-  const delay = Math.min(index, 6) * 40;
-  return () => {
-    "worklet";
-    const timing = { duration: 220, easing: Easing.out(Easing.quad) };
-    return {
-      initialValues: { opacity: 0, transform: [{ scale: 0.97 }] },
-      animations: {
-        opacity: withDelay(delay, withTiming(1, timing)),
-        transform: [{ scale: withDelay(delay, withTiming(1, timing)) }],
-      },
-    };
-  };
-}
 
 function FilterChip({
   label,

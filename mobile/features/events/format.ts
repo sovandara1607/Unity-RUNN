@@ -83,6 +83,19 @@ export function eventDateShort(value: string): string {
     .format(new Date(`${day}T12:00:00Z`))
     .toUpperCase();
 }
+/** "Member since Jan '26" -- for the Wallet header's identity meta line.
+ * Unlike eventDate/eventDateParts, `value` here is a real created_at
+ * timestamp (a genuine instant, not a wall-clock date-only field), so this
+ * formats in the viewer's local time rather than forcing UTC. */
+export function memberSinceLabel(value: string): string {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "Member since";
+  const formatted = new Intl.DateTimeFormat("en-GB", {
+    month: "short",
+    year: "2-digit",
+  }).format(date);
+  return `Member since ${formatted.replace(" ", " '")}`;
+}
 export function eventTime(value: string) {
   // SQL TIME is serialized by Go with a synthetic date. It is Cambodian wall time.
   return value.match(/(?:T|^)(\d{2}:\d{2})/)?.[1] ?? "Time to be announced";
