@@ -19,7 +19,7 @@ The client-facing name is **Unity RUNN Preview**. The test link is
 3. Create a `Unity-RUNN` project with a `client-preview` environment in Dokploy.
    Add a Docker Compose service named `Unity RUNN Preview` from this repository's
    `client-preview` branch. Set the Compose path to `./docker-compose.dokploy.yml` and
-   leave Dokploy's Git-push autodeploy off. The Compose file defines a
+   set Dokploy's trigger type to **On Tag**. The Compose file defines a
    project-scoped `runn` network; leave Dokploy's deprecated isolated-deployment
    switch off.
 4. Copy [`dokploy.client-preview.env.example`](./dokploy.client-preview.env.example)
@@ -35,9 +35,11 @@ The client-facing name is **Unity RUNN Preview**. The test link is
    public routing network. Then deploy. The `migrate` service applies pending
    migrations before the API starts.
 7. Save the Compose service's deployment webhook URL as the GitHub Actions
-   repository secret `DOKPLOY_COMPOSE_WEBHOOK`. The workflow calls it only after
-   all three images are published, so a push cannot deploy stale image tags.
-   Keep Dokploy's own Git-push autodeploy off to avoid a second early deploy.
+   repository secret `DOKPLOY_COMPOSE_WEBHOOK` and enable Dokploy Auto Deploy.
+   Keep its trigger type **On Tag**: Dokploy will not deploy on an early branch
+   push, while the workflow calls the Compose webhook after all three images
+   are published. The workflow sends the `client-preview` branch in its webhook
+   payload.
 
 To promote changes from `main` for client testing, fast-forward the preview
 branch and push it:

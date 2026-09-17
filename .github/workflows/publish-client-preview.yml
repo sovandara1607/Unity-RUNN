@@ -72,4 +72,8 @@ jobs:
           DOKPLOY_COMPOSE_WEBHOOK: ${{ secrets.DOKPLOY_COMPOSE_WEBHOOK }}
         run: |
           test -n "$DOKPLOY_COMPOSE_WEBHOOK"
-          curl --fail --silent --show-error --request POST "$DOKPLOY_COMPOSE_WEBHOOK"
+          curl --fail-with-body --silent --show-error --request POST \
+            --header 'Content-Type: application/json' \
+            --header 'X-GitHub-Event: push' \
+            --data "{\"ref\":\"$GITHUB_REF\",\"head_commit\":{\"id\":\"$GITHUB_SHA\",\"message\":\"Preview images published\"},\"repository\":{\"full_name\":\"$GITHUB_REPOSITORY\"},\"commits\":[]}" \
+            "$DOKPLOY_COMPOSE_WEBHOOK"
