@@ -1,5 +1,4 @@
 # One pool for all API routes, including uploads and OAuth callbacks.
-# Equal weights use Traefik's default weighted round-robin strategy.
 http:
   routers:
     api:
@@ -18,5 +17,4 @@ http:
         servers:
           - url: http://api:8080
           - url: http://api-replica:8080
-# Deliberately no retry middleware: failed payment/registration writes must
-# not be blindly replayed when a response is lost.
+# Deliberately no retry middleware: failed payment/registration 
