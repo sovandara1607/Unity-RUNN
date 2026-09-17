@@ -5,6 +5,7 @@ x-api-image: &api-image
 services:
   postgres:
     image: postgres:16-alpine
+    networks: [runn]
     restart: unless-stopped
     init: true
     mem_limit: ${POSTGRES_MEMORY_LIMIT:-512m}
@@ -44,6 +45,7 @@ services:
 
   redis:
     image: redis:7-alpine
+    networks: [runn]
     restart: unless-stopped
     init: true
     mem_limit: ${REDIS_MEMORY_LIMIT:-128m}
@@ -72,6 +74,7 @@ services:
 
   migrate:
     <<: *api-image
+    networks: [runn]
     restart: "no"
     entrypoint: ["./migrate", "up"]
     environment:
@@ -90,6 +93,7 @@ services:
   # connections, regardless of how many API replicas are running.
   pgbouncer:
     image: edoburu/pgbouncer:v1.24.1-p1
+    networks: [runn]
     restart: unless-stopped
     init: true
     mem_limit: ${PGBOUNCER_MEMORY_LIMIT:-96m}
@@ -117,6 +121,7 @@ services:
 
   api: &api-service
     <<: *api-image
+    networks: [runn]
     restart: unless-stopped
     init: true
     mem_limit: ${API_MEMORY_LIMIT:-384m}
@@ -214,6 +219,7 @@ services:
 
   api-gateway:
     image: traefik:v3.7.12
+    networks: [runn]
     restart: unless-stopped
     init: true
     mem_limit: ${GATEWAY_MEMORY_LIMIT:-128m}
@@ -249,6 +255,7 @@ services:
 
   realtime:
     image: ghcr.io/sovandara1607/unity-runn-realtime:${IMAGE_TAG:-dev-server}
+    networks: [runn]
     pull_policy: always
     restart: unless-stopped
     init: true
@@ -278,6 +285,7 @@ services:
 
   frontend:
     image: ghcr.io/sovandara1607/unity-runn-frontend:${IMAGE_TAG:-dev-server}
+    networks: [runn]
     pull_policy: always
     restart: unless-stopped
     init: true
@@ -305,6 +313,9 @@ volumes:
   postgres_data:
   redis_data:
   event_uploads:
+
+networks:
+  runn:
 
 configs:
   api-load-balancer:
