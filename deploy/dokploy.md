@@ -12,14 +12,14 @@ The client-facing name is **Unity RUNN Preview**. The test link is
 1. Point DNS records for `preview.sovandara.lol`,
    `api-preview.sovandara.lol`, and `realtime-preview.sovandara.lol` to the
    Dokploy server.
-2. Run the **Publish client preview images** GitHub Actions workflow from
-   `main`. It publishes the API, realtime, and frontend images with the
-   `client-preview` tag. The frontend image is built with the preview API and
-   realtime URLs.
+2. The **Publish client preview images** GitHub Actions workflow runs on each
+   push to `main` (and can be started manually). It publishes the API,
+   realtime, and frontend images with the `client-preview` tag. The frontend
+   image is built with the preview API and realtime URLs.
 3. Create a `Unity-RUNN` project with a `client-preview` environment in Dokploy.
    Add a Docker Compose service named `Unity RUNN Preview` from this repository's
    `main` branch. Set the Compose path to `./docker-compose.dokploy.yml` and
-   leave autodeploy off until the stack is ready. The Compose file defines a
+   leave Dokploy's Git-push autodeploy off. The Compose file defines a
    project-scoped `runn` network; leave Dokploy's deprecated isolated-deployment
    switch off.
 4. Copy [`dokploy.client-preview.env.example`](./dokploy.client-preview.env.example)
@@ -34,6 +34,10 @@ The client-facing name is **Unity RUNN Preview**. The test link is
    `runn` network, and only the three domain targets should join Dokploy's
    public routing network. Then deploy. The `migrate` service applies pending
    migrations before the API starts.
+7. Save the Compose service's deployment webhook URL as the GitHub Actions
+   repository secret `DOKPLOY_COMPOSE_WEBHOOK`. The workflow calls it only after
+   all three images are published, so a push cannot deploy stale image tags.
+   Keep Dokploy's own Git-push autodeploy off to avoid a second early deploy.
 
 PostgreSQL and Redis bind only to the Dokploy server's loopback interface for
 SSH tunneling. Do not bind their ports to a public interface. Dokploy routes

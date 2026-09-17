@@ -1,6 +1,8 @@
 name: Publish client preview images
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -58,3 +60,15 @@ jobs:
           build-args: ${{ matrix.build_args }}
           cache-from: type=gha,scope=client-preview-${{ matrix.service }}
           cache-to: type=gha,mode=max,scope=client-preview-${{ matrix.service }}
+
+  deploy:
+    name: Deploy client preview
+    needs: publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Dokploy after all images are published
+        env:
+          DOKPLOY_COMPOSE_WEBHOOK: ${{ secrets.DOKPLOY_COMPOSE_WEBHOOK }}
+        run: |
+          test -n "$DOKPLOY_COMPOSE_WEBHOOK"
+          curl --fail --silent --show-error --request POST "$DOKPLOY_COMPOSE_WEBHOOK"
