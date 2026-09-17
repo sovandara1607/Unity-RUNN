@@ -3,25 +3,32 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"log"
 	"os"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/crypto/bcrypt"
 )
 
-const seedSlug = "unity-founders-run-2025"
-
 var errNoDatabaseURL = errors.New("DATABASE_URL is not set")
+var errDemoUsersOutsideDevelopment = errors.New("demo users can only be seeded in development; use -events-only")
 
 func main() {
-	if err := run(); err != nil {
+	eventsOnly := flag.Bool("events-only", false, "seed the sample event without demo accounts")
+	flag.Parse()
+	if err := run(*eventsOnly); err != nil {
 		log.Fatal(err)
 	}
 }
 
-func run() error {
+func run(eventsOnly bool) error {
+	if !eventsOnly && os.Getenv("APP_ENV") != "" && os.Getenv("APP_ENV") != "development" {
+		return errDemoUsersOutsideDevelopment
+	}
+
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
 		return errNoDatabaseURL
@@ -30,7 +37,12 @@ func run() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	pool, err := pgxpool.New(ctx, dbURL)
+	poolConfig, err := pgxpool.ParseConfig(dbURL)
+	if err != nil {
+		return err
+	}
+	poolConfig.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeCacheDescribe
+	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
 	if err != nil {
 		return err
 	}
@@ -48,6 +60,14 @@ func run() error {
 	registrationOpenAt := now.AddDate(0, 0, -7)
 	registrationCloseAt := now.AddDate(0, 0, 85)
 	categoryDeadline := registrationCloseAt
+	seedSlug := "unity-founders-run-2025"
+	eventName := "Unity Founders Run 2025"
+	eventDescription := "The run that started it all — Unity Run Club's inaugural community run through Phnom Penh, celebrating our first year of bringing runners together."
+	if eventsOnly {
+		seedSlug = "unity-preview-run"
+		eventName = "Unity RUNN Preview Run"
+		eventDescription = "A sample event for testing registration and race-day flows."
+	}
 
 	var eventID string
 	err = tx.QueryRow(ctx, `
@@ -55,21 +75,21 @@ func run() error {
 			name, slug, description, cover_image, event_date, start_time, location,
 			latitude, longitude, registration_open_at, registration_close_at, status
 		) VALUES (
-			'Unity Founders Run 2025', $1,
-			'The run that started it all — Unity Run Club''s inaugural community run through Phnom Penh, celebrating our first year of bringing runners together.',
+			$1, $2, $3,
 			'/images/club/race-start.jpg',
-			$2, '06:00', 'Diamond Island, Phnom Penh',
+			$4, '06:00', 'Diamond Island, Phnom Penh',
 			11.5564, 104.9282,
-			$3, $4,
+			$5, $6,
 			'REGISTRATION_OPEN'
 		)
 		ON CONFLICT (slug) DO UPDATE SET
 			name = EXCLUDED.name,
+			description = EXCLUDED.description,
 			event_date = EXCLUDED.event_date,
 			registration_open_at = EXCLUDED.registration_open_at,
 			registration_close_at = EXCLUDED.registration_close_at,
 			status = EXCLUDED.status
-		RETURNING id`, seedSlug, eventDate, registrationOpenAt, registrationCloseAt).Scan(&eventID)
+		RETURNING id`, eventName, seedSlug, eventDescription, eventDate, registrationOpenAt, registrationCloseAt).Scan(&eventID)
 	if err != nil {
 		return err
 	}
@@ -132,6 +152,9 @@ func run() error {
 	}
 
 	log.Printf("seeded event %q (id=%s)", seedSlug, eventID)
+	if eventsOnly {
+		return nil
+	}
 
 	// Seed default accounts (admin, staff, runner)
 	type seedUser struct {

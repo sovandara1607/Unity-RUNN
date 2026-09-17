@@ -35,18 +35,22 @@ The client-facing name is **Unity RUNN Preview**. The test link is
    public routing network. Then deploy. The `migrate` service applies pending
    migrations before the API starts.
 
-Do not publish host ports for PostgreSQL, Redis, API, worker, gateway, or
-realtime. Dokploy routes the three public services through Traefik, while
-database traffic stays on the isolated Compose network.
+PostgreSQL and Redis bind only to the Dokploy server's loopback interface for
+SSH tunneling. Do not bind their ports to a public interface. Dokploy routes
+the three public services through Traefik; API and worker ports stay private.
 
 ## Make the preview testable
 
-The new database has no events or administrator account. Register an operator
-account through the site, promote that account to `SUPER_ADMIN` through the
-private database console, then create a test event in the admin panel. Do not
-run `./seed` on this public preview: it creates accounts with fixed demo
-passwords. Give client testers their own accounts and keep test payments on the
-mock provider.
+The new database has no events or administrator account. From the running
+`api` container's terminal in Dokploy, run `./seed -events-only` to create or
+refresh the **Unity RUNN Preview Run** sample event without creating users.
+The ordinary `./seed` command creates accounts with fixed demo passwords and
+is blocked outside development. Give client testers their own accounts and
+keep test payments on the mock provider.
+
+Register an operator account through the site, then promote that account to
+`SUPER_ADMIN` through the private database console before using the admin
+panel to create more events.
 
 From the `postgres` container's terminal, connect with
 `psql -U unity -d unity_run_club` and run this once, replacing the email with
@@ -97,6 +101,23 @@ for `pg_dump`.
 
 For durable media independent of this server, set `OBJECT_STORAGE_PROVIDER=r2`
 and fill in all `R2_*` values. Until then, uploads persist in `event_uploads`.
+
+## Remote database access
+
+The Dokploy host listens on `127.0.0.1:15432` for PostgreSQL and
+`127.0.0.1:16379` for Redis. These ports are not reachable directly from the
+internet. From a laptop with SSH access to the server, keep this tunnel open:
+
+```sh
+ssh -N -L 15432:127.0.0.1:15432 -L 16379:127.0.0.1:16379 <ssh-user>@2.28.16.106
+```
+
+Connect a local database client to PostgreSQL at `127.0.0.1:15432` with
+database `unity_run_club`, user `unity`, and the staging `POSTGRES_PASSWORD`.
+Connect a Redis client to `127.0.0.1:16379` with the staging `REDIS_PASSWORD`.
+The default host ports can be changed with `POSTGRES_TUNNEL_PORT` and
+`REDIS_TUNNEL_PORT` in Dokploy's Compose environment; update the tunnel command
+to match. Never share the staging passwords with client testers.
 
 ## Production deployment
 
