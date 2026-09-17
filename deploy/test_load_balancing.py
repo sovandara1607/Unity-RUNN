@@ -30,13 +30,13 @@ def main():
     env = {k: os.environ[k] for k in ("PATH", "HOME", "TMPDIR", "SYSTEMROOT") if k in os.environ}
     env["LC_ALL"] = "C"
     ports = []
-    while len(ports) < 6:
+    while len(ports) < 9:
         with socket.socket() as sock:
             sock.bind(("127.0.0.1", 0))
             port = sock.getsockname()[1]
             if port not in ports:
                 ports.append(port)
-    pg, redis, api, replica, worker, gateway = ports
+    pg, redis, api, replica, worker, gateway, api_metrics, replica_metrics, worker_metrics = ports
 
     def run(*args, extra=None):
         return subprocess.run(args, cwd=ROOT / "backend", env=env | (extra or {}),
@@ -108,11 +108,13 @@ def main():
         run("go", "run", "./cmd/migrate", "up", extra=app_env)
         run("go", "test", "-tags=integration", "./internal/registrations", "-run", "^TestLockReleasePreservesNewOwner$", "-count=1",
             extra=app_env | {"REDIS_TEST_ADDR": f"127.0.0.1:{redis}"})
-        for name, port in (("api", api), ("replica", replica)):
-            start(name, str(work / "server"), extra=app_env | {"PORT": str(port), "PROCESS_ROLE": "api"})
+        for name, port, metrics_port in (("api", api, api_metrics), ("replica", replica, replica_metrics)):
+            start(name, str(work / "server"), extra=app_env | {
+                "PORT": str(port), "METRICS_PORT": str(metrics_port), "PROCESS_ROLE": "api"})
             wait_for(lambda p=port: request(p)[0] == 200, name)
         assert run("redis-cli", "-p", str(redis), "exists", "notifications:worker:heartbeat") == "0", "API started background jobs"
-        start("worker", str(work / "server"), extra=app_env | {"PORT": str(worker), "PROCESS_ROLE": "worker"})
+        start("worker", str(work / "server"), extra=app_env | {
+            "PORT": str(worker), "METRICS_PORT": str(worker_metrics), "PROCESS_ROLE": "worker"})
         wait_for(lambda: request(worker)[0] == 200, "worker")
         wait_for(lambda: run("redis-cli", "-p", str(redis), "exists", "notifications:worker:heartbeat") == "1", "worker heartbeat")
         assert request(worker, "/api/v1/stats")[0] == 404
@@ -148,7 +150,8 @@ def main():
         traffic()
         wait_for(lambda: backends_since(offset) == {f"http://127.0.0.1:{replica}"}, "failover")
         print("PASS: requests continue through the surviving instance", flush=True)
-        start("api", str(work / "server"), extra=app_env | {"PORT": str(api), "PROCESS_ROLE": "api"})
+        start("api", str(work / "server"), extra=app_env | {
+            "PORT": str(api), "METRICS_PORT": str(api_metrics), "PROCESS_ROLE": "api"})
         wait_for(lambda: request(api)[0] == 200, "restarted API")
         time.sleep(8)
         offset = len((work / "gateway.log").read_text())
