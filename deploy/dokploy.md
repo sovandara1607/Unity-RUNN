@@ -13,12 +13,12 @@ The client-facing name is **Unity RUNN Preview**. The test link is
    `api-preview.sovandara.lol`, and `realtime-preview.sovandara.lol` to the
    Dokploy server.
 2. The **Publish client preview images** GitHub Actions workflow runs on each
-   push to `main` (and can be started manually). It publishes the API,
+   push to `client-preview` (and can be started manually). It publishes the API,
    realtime, and frontend images with the `client-preview` tag. The frontend
    image is built with the preview API and realtime URLs.
 3. Create a `Unity-RUNN` project with a `client-preview` environment in Dokploy.
    Add a Docker Compose service named `Unity RUNN Preview` from this repository's
-   `main` branch. Set the Compose path to `./docker-compose.dokploy.yml` and
+   `client-preview` branch. Set the Compose path to `./docker-compose.dokploy.yml` and
    leave Dokploy's Git-push autodeploy off. The Compose file defines a
    project-scoped `runn` network; leave Dokploy's deprecated isolated-deployment
    switch off.
@@ -38,6 +38,19 @@ The client-facing name is **Unity RUNN Preview**. The test link is
    repository secret `DOKPLOY_COMPOSE_WEBHOOK`. The workflow calls it only after
    all three images are published, so a push cannot deploy stale image tags.
    Keep Dokploy's own Git-push autodeploy off to avoid a second early deploy.
+
+To promote changes from `main` for client testing, fast-forward the preview
+branch and push it:
+
+```sh
+git fetch origin
+git switch client-preview
+git merge --ff-only origin/main
+git push origin client-preview
+```
+
+That push publishes all three images and triggers Dokploy only after they are
+ready. Pushes to `main` alone do not change the client preview.
 
 PostgreSQL and Redis bind only to the Dokploy server's loopback interface for
 SSH tunneling. Do not bind their ports to a public interface. Dokploy routes

@@ -2,7 +2,7 @@ name: Publish client preview images
 
 on:
   push:
-    branches: [main]
+    branches: [client-preview]
   workflow_dispatch:
 
 permissions:
@@ -16,6 +16,7 @@ concurrency:
 jobs:
   publish:
     name: Publish ${{ matrix.service }}
+    if: github.ref == 'refs/heads/client-preview'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
