@@ -468,6 +468,20 @@ export const api = {
 		return request<PaymentVerificationResult>(`/api/v1/registrations/${id}/payment/verify`, { method: "POST" });
 	},
 
+	async submitRegistrationPayment(id: string, reference: string): Promise<PaymentCheckout> {
+		return request<PaymentCheckout>(`/api/v1/registrations/${id}/payment/submit`, {
+			method: "POST",
+			body: { reference },
+		});
+	},
+
+	async adminReviewPayment(id: string, decision: "APPROVE" | "REJECT"): Promise<Registration> {
+		return request<Registration>(`/api/v1/admin/registrations/${id}/payment`, {
+			method: "PATCH",
+			body: { decision },
+		});
+	},
+
   async cancelRegistration(registrationId: string): Promise<void> {
     return request<void>(`/api/v1/registrations/${registrationId}/cancel`, { method: "POST" });
   },

@@ -39,6 +39,17 @@ func TestMaskIdentifier(t *testing.T) {
 	}
 }
 
+func TestBuildPaymentStatusForManualQR(t *testing.T) {
+	configured := buildPaymentStatus(&config.Config{PaymentProvider: "manual", ManualPaymentQRString: "bank-qr-payload"})
+	if configured.Status != "configured" || configured.Provider != "Static bank QR" {
+		t.Fatalf("configured status = %#v", configured)
+	}
+	missing := buildPaymentStatus(&config.Config{PaymentProvider: "manual"})
+	if missing.Status != "unavailable" {
+		t.Fatalf("missing status = %#v", missing)
+	}
+}
+
 func TestClassifyWorkerHeartbeat(t *testing.T) {
 	now := time.Date(2026, 8, 26, 10, 0, 0, 0, time.UTC)
 	tests := []struct {

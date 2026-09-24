@@ -36,9 +36,11 @@ var ErrAlreadyCancelled = errors.New("registrations: already cancelled")
 var ErrCannotCancelCheckedIn = errors.New("registrations: checked-in registration cannot be cancelled")
 
 var (
-	ErrPaymentUnavailable = errors.New("registrations: payment is unavailable")
-	ErrPaymentMismatch    = errors.New("registrations: settled payment does not match the registration")
-	ErrPaymentExpired     = errors.New("registrations: payment has expired")
+	ErrPaymentUnavailable      = errors.New("registrations: payment is unavailable")
+	ErrPaymentMismatch         = errors.New("registrations: settled payment does not match the registration")
+	ErrPaymentExpired          = errors.New("registrations: payment has expired")
+	ErrPaymentFailed           = errors.New("registrations: payment failed")
+	ErrInvalidPaymentReference = errors.New("registrations: a valid bank transaction reference is required")
 )
 
 type regRepository interface {
@@ -138,6 +140,7 @@ type PaymentCheckout struct {
 	RegistrationID string     `json:"registration_id"`
 	Provider       string     `json:"provider"`
 	Status         string     `json:"status"`
+	Reference      string     `json:"reference,omitempty"`
 	AmountCents    int        `json:"amount_cents"`
 	Currency       string     `json:"currency"`
 	QRString       string     `json:"qr_string,omitempty"`
@@ -148,6 +151,13 @@ type PaymentCheckout struct {
 type paymentRepository interface {
 	GetPaymentForRegistration(context.Context, uuid.UUID) (*Payment, error)
 	ConfirmStoredPayment(context.Context, uuid.UUID, uuid.UUID, string) (*Registration, bool, error)
+}
+
+type manualPaymentRepository interface {
+	paymentRepository
+	SubmitManualPayment(context.Context, uuid.UUID, string) error
+	ApproveManualPayment(context.Context, uuid.UUID, uuid.UUID, string) (*Registration, bool, error)
+	FailManualPayment(context.Context, uuid.UUID) (uuid.UUID, error)
 }
 
 type paymentReconciliationRepository interface {
@@ -549,7 +559,97 @@ func (s *Service) GetPayment(ctx context.Context, callerID uuid.UUID, callerRole
 		}
 	}
 	view := &PaymentCheckout{RegistrationID: reg.ID.String(), Provider: p.Provider, Status: p.Status, AmountCents: p.AmountCents, Currency: p.Currency, QRString: checkout.QRString, DeepLink: checkout.DeepLink, ExpiresAt: p.ExpiresAt}
+	if p.Provider == "manual" && p.Status == string(payments.StatusProcessing) {
+		view.Reference = p.ProviderReference
+	}
 	return view, nil
+}
+
+func (s *Service) SubmitManualPayment(ctx context.Context, callerID uuid.UUID, callerRole auth.Role, registrationID uuid.UUID, reference string) (*PaymentCheckout, error) {
+	reference = strings.TrimSpace(reference)
+	if len(reference) < 4 || len(reference) > 100 {
+		return nil, ErrInvalidPaymentReference
+	}
+	reg, err := s.GetByID(ctx, callerID, callerRole, registrationID)
+	if err != nil {
+		return nil, err
+	}
+	if reg.Status != StatusPending {
+		return nil, ErrPaymentUnavailable
+	}
+	pr, ok := s.repo.(manualPaymentRepository)
+	if !ok {
+		return nil, ErrPaymentUnavailable
+	}
+	payment, err := pr.GetPaymentForRegistration(ctx, registrationID)
+	if err != nil {
+		return nil, err
+	}
+	if payment.Provider != "manual" || payment.Status != string(payments.StatusPending) {
+		return nil, ErrPaymentUnavailable
+	}
+	if payment.ExpiresAt != nil && s.now().After(*payment.ExpiresAt) {
+		metrics.PaymentFailureTotal.Inc()
+		_ = s.expirePendingPayments(ctx)
+		return nil, ErrPaymentExpired
+	}
+	if err := pr.SubmitManualPayment(ctx, registrationID, reference); err != nil {
+		return nil, err
+	}
+	return s.GetPayment(ctx, callerID, callerRole, registrationID)
+}
+
+func (s *Service) ReviewManualPayment(ctx context.Context, registrationID uuid.UUID, approved bool) (*Registration, error) {
+	pr, ok := s.repo.(manualPaymentRepository)
+	if !ok {
+		return nil, ErrPaymentUnavailable
+	}
+	stored, err := pr.GetPaymentForRegistration(ctx, registrationID)
+	if err != nil {
+		return nil, err
+	}
+	if stored.Provider != "manual" || stored.Status != string(payments.StatusProcessing) {
+		return nil, ErrPaymentUnavailable
+	}
+	reg, err := s.repo.GetByID(ctx, registrationID)
+	if err != nil {
+		return nil, err
+	}
+	if reg.Status != StatusPending {
+		return nil, ErrPaymentUnavailable
+	}
+	if !approved {
+		categoryID, err := pr.FailManualPayment(ctx, registrationID)
+		if err != nil {
+			return nil, err
+		}
+		if s.availCache != nil {
+			_ = s.availCache.Invalidate(ctx, categoryID)
+		}
+		s.broadcastRegistrationsChanged(ctx)
+		reg.Status = StatusExpired
+		return reg, nil
+	}
+	_, tokenHash, err := generateTicketToken()
+	if err != nil {
+		return nil, err
+	}
+	confirmed, newlyConfirmed, err := pr.ApproveManualPayment(ctx, registrationID, stored.ID, tokenHash)
+	if err != nil {
+		return nil, err
+	}
+	if s.availCache != nil {
+		_ = s.availCache.Invalidate(ctx, confirmed.EventCategoryID)
+	}
+	if newlyConfirmed {
+		metrics.PaymentSuccessTotal.Inc()
+		if s.notifier != nil {
+			s.notifier.NotifyRegistrationConfirmed(ctx, *confirmed)
+			s.notifier.NotifyPaymentConfirmed(ctx, *confirmed, stored.AmountCents)
+		}
+		s.broadcastRegistrationsChanged(ctx)
+	}
+	return confirmed, nil
 }
 
 func (s *Service) VerifyPayment(ctx context.Context, callerID uuid.UUID, callerRole auth.Role, registrationID uuid.UUID) (*RegisterResult, error) {
@@ -571,6 +671,24 @@ func (s *Service) VerifyPayment(ctx context.Context, callerID uuid.UUID, callerR
 	stored, err := pr.GetPaymentForRegistration(ctx, registrationID)
 	if err != nil {
 		return nil, err
+	}
+	if stored.Provider == "manual" {
+		checkout.Status = stored.Status
+		switch stored.Status {
+		case string(payments.StatusPending):
+			if stored.ExpiresAt != nil && s.now().After(*stored.ExpiresAt) {
+				metrics.PaymentFailureTotal.Inc()
+				_ = s.expirePendingPayments(ctx)
+				return nil, ErrPaymentExpired
+			}
+			return &RegisterResult{Registration: *reg, Payment: checkout}, nil
+		case string(payments.StatusProcessing):
+			return &RegisterResult{Registration: *reg, Payment: checkout}, nil
+		case string(payments.StatusFailed):
+			return nil, ErrPaymentFailed
+		default:
+			return nil, ErrPaymentUnavailable
+		}
 	}
 	// Ask the provider before trusting the local expiry clock. A payment that settles
 	// close to its TTL must be confirmed, not cancelled -- Bakong has no refund path,

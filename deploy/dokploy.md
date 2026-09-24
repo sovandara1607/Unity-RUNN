@@ -142,6 +142,6 @@ to match. Never share the staging passwords with client testers.
 
 Keep this client-preview environment on `APP_ENV=staging` with
 `PAYMENT_PROVIDER=mock`. For a real launch, create a separate production
-environment with its own database and secrets, configure Bakong and SMTP, and
+environment with its own database and secrets, configure the bank QR and SMTP, and
 verify the Telegram webhook and Google OAuth callback URLs against its public
 domains.

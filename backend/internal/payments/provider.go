@@ -14,10 +14,11 @@ var (
 type Status string
 
 const (
-	StatusPending   Status = "PENDING"
-	StatusSucceeded Status = "SUCCEEDED"
-	StatusFailed    Status = "FAILED"
-	StatusRefunded  Status = "REFUNDED"
+	StatusPending    Status = "PENDING"
+	StatusProcessing Status = "PROCESSING"
+	StatusSucceeded  Status = "SUCCEEDED"
+	StatusFailed     Status = "FAILED"
+	StatusRefunded   Status = "REFUNDED"
 )
 
 type Payment struct {

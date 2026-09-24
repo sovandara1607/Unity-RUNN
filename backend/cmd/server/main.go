@@ -394,6 +394,12 @@ func buildPaymentProvider(cfg *config.Config) (payments.Provider, error) {
 	if cfg.PaymentProvider == "mock" {
 		return payments.NewMockProvider(), nil
 	}
+	if cfg.PaymentProvider == "manual" {
+		return payments.NewManualProvider(payments.ManualConfig{
+			QRString: cfg.ManualPaymentQRString,
+			TTL:      cfg.ManualPaymentTTL,
+		})
+	}
 	return payments.NewBakongProvider(payments.BakongConfig{
 		BaseURL: cfg.BakongBaseURL, Token: cfg.BakongToken, PaymentTTL: cfg.BakongPaymentTTL,
 		Merchant: payments.KHQRMerchant{

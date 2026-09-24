@@ -113,7 +113,7 @@ export type Availability = {
   taken: number;
   available: number;
 };
-export type RegistrationStatus = "PENDING" | "CONFIRMED" | "CANCELLED" | "REFUNDED";
+export type RegistrationStatus = "PENDING" | "CONFIRMED" | "CANCELLED" | "REFUNDED" | "EXPIRED";
 export type Registration = {
   id: string;
   registration_number: string;
@@ -167,7 +167,8 @@ export type LiveActivityRecord = {
 export type PaymentCheckout = {
   registration_id: string;
   provider: string;
-  status: "PENDING" | "SUCCEEDED" | "FAILED";
+  status: "PENDING" | "PROCESSING" | "SUCCEEDED" | "FAILED";
+  reference?: string;
   amount_cents: number;
   currency: "USD" | "KHR";
   qr_string?: string;

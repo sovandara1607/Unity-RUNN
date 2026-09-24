@@ -13,7 +13,7 @@ import {
 import { colors, fonts } from "../../constants/theme";
 import { useApi } from "../../services/api/provider";
 import { eventDate, eventTime, money } from "../events/format";
-import { BakongPayment } from "../payment/BakongPayment";
+import { BankQRPayment } from "../payment/BakongPayment";
 import {
   fetchRegistrationPayment,
   useCancelRegistration,
@@ -75,7 +75,7 @@ export default function RegistrationDetailScreen() {
     >
       <Stack.Screen options={{ title: "Your entry" }} />
       {payment && (
-        <BakongPayment
+        <BankQRPayment
           checkout={payment}
           eventName={entry.event_name || entry.event?.name || "Your race"}
           onPaid={() => {

@@ -36,7 +36,7 @@ import {
   useMyRegistrations,
   useRegisterForEvent,
 } from "../registrations/queries";
-import { BakongPayment } from "../payment/BakongPayment";
+import { BankQRPayment } from "../payment/BakongPayment";
 import { ApiError } from "../../services/api/client";
 import {
   money,
@@ -297,7 +297,7 @@ export default function RegisterScreen() {
     >
       <Stack.Screen options={{ title: "Claim your place" }} />
       {payment && (
-        <BakongPayment
+        <BankQRPayment
           checkout={payment}
           eventName={event.name}
           onPaid={() => {

@@ -8,6 +8,8 @@ import {
   Mail,
   X,
   FileSpreadsheet,
+  CheckCircle2,
+  CircleX,
   LoaderCircle,
   ShieldCheck,
 } from "lucide-react";
@@ -17,7 +19,7 @@ import { withMinSkeleton } from "../../../lib/withMinSkeleton";
 import { RegistrationStatusBadge } from "../../../components/admin/RegistrationStatusBadge";
 import { useAlerts } from "../../../components/alerts/AlertSystem";
 import { api } from "../../../lib/api";
-import type { Registration, Event } from "../../../types";
+import type { Registration, Event, PaymentCheckout } from "../../../types";
 
 export default function AdminRegistrationsPage() {
   const { notify } = useAlerts();
@@ -28,6 +30,10 @@ export default function AdminRegistrationsPage() {
   const [selectedStatus, setSelectedStatus] = useState<string>("ALL");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedReg, setSelectedReg] = useState<Registration | null>(null);
+  const [selectedPayment, setSelectedPayment] = useState<PaymentCheckout | null>(null);
+  const [paymentLoading, setPaymentLoading] = useState(false);
+  const [paymentReviewing, setPaymentReviewing] = useState<"APPROVE" | "REJECT" | null>(null);
+  const [canReviewPayments, setCanReviewPayments] = useState(false);
   const [total, setTotal] = useState(0);
   const [loadingMore, setLoadingMore] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
@@ -44,6 +50,42 @@ export default function AdminRegistrationsPage() {
       notify({ tone: "error", title: "Events unavailable", message: "The event filter could not be loaded." });
     });
   }, [notify]);
+
+  useEffect(() => {
+    void api.getMe().then((me) => setCanReviewPayments(me.role === "ADMIN" || me.role === "SUPER_ADMIN")).catch(() => setCanReviewPayments(false));
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    setSelectedPayment(null);
+    if (!selectedReg || selectedReg.status !== "PENDING") return () => { active = false; };
+    setPaymentLoading(true);
+    void api.getRegistrationPayment(selectedReg.id)
+      .then((payment) => { if (active) setSelectedPayment(payment); })
+      .catch(() => { if (active) setSelectedPayment(null); })
+      .finally(() => { if (active) setPaymentLoading(false); });
+    return () => { active = false; };
+  }, [selectedReg]);
+
+  const reviewPayment = async (decision: "APPROVE" | "REJECT") => {
+    if (!selectedReg) return;
+    setPaymentReviewing(decision);
+    try {
+      const updated = await api.adminReviewPayment(selectedReg.id, decision);
+      setSelectedReg(updated);
+      setRegistrations((current) => current.map((registration) => registration.id === updated.id ? updated : registration));
+      setSelectedPayment((current) => current ? { ...current, status: decision === "APPROVE" ? "SUCCEEDED" : "FAILED" } : current);
+      notify({
+        tone: decision === "APPROVE" ? "success" : "warning",
+        title: decision === "APPROVE" ? "Payment approved" : "Payment rejected",
+        message: decision === "APPROVE" ? "The runner's ticket is now ready." : "The runner will see that the payment failed.",
+      });
+    } catch (caught) {
+      notify({ tone: "error", title: "Review not saved", message: caught instanceof Error ? caught.message : "Try again." });
+    } finally {
+      setPaymentReviewing(null);
+    }
+  };
 
   useEffect(() => {
     let active = true;
@@ -94,7 +136,7 @@ export default function AdminRegistrationsPage() {
   return (
     <AdminLayout
       title="Runner roster"
-      subtitle="View, search, filter participants, and export attendee rosters"
+      subtitle="Review payments, search participants, and export attendee rosters"
       actions={
         <button
           onClick={() => total > 0 ? setExportOpen(true) : notify({ tone: "warning", title: "Nothing to export", message: "Adjust the filters or wait for registrations before downloading a roster." })}
@@ -310,6 +352,42 @@ export default function AdminRegistrationsPage() {
                   <span className="font-semibold text-slate-800">{selectedReg.gender || "Not specified"}</span>
                 </div>
               </div>
+
+              {selectedReg.status === "PENDING" && (
+                <div>
+                  <h4 className="mb-2 font-semibold text-slate-900">Payment review</h4>
+                  <div className="rounded-xl border border-slate-200 p-3.5">
+                    {paymentLoading ? (
+                      <p className="flex items-center gap-2 text-slate-500"><LoaderCircle className="h-3.5 w-3.5 animate-spin" /> Loading payment</p>
+                    ) : !selectedPayment ? (
+                      <p className="text-slate-500">Payment details are not available.</p>
+                    ) : selectedPayment.provider !== "manual" ? (
+                      <p className="text-slate-500">This payment is handled automatically by {selectedPayment.provider}.</p>
+                    ) : selectedPayment.status === "PENDING" ? (
+                      <p className="text-slate-500">The runner has not submitted a bank transaction reference yet.</p>
+                    ) : selectedPayment.status === "PROCESSING" ? (
+                      <>
+                        <p className="text-[10px] font-bold uppercase tracking-[.1em] text-slate-400">Bank transaction reference</p>
+                        <p className="mt-1 break-all font-mono text-sm font-bold text-slate-900">{selectedPayment.reference || "Not provided"}</p>
+                        <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-3">
+                          <span className="text-slate-500">Expected amount</span>
+                          <strong className="font-mono text-slate-900">{selectedPayment.currency === "USD" ? `$${(selectedPayment.amount_cents / 100).toFixed(2)}` : `${selectedPayment.amount_cents.toLocaleString()} KHR`}</strong>
+                        </div>
+                        {canReviewPayments ? (
+                          <div className="mt-4 grid grid-cols-2 gap-2">
+                            <button type="button" disabled={paymentReviewing !== null} onClick={() => void reviewPayment("REJECT")} className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 font-bold text-rose-700 disabled:opacity-50"><CircleX className="h-4 w-4" />{paymentReviewing === "REJECT" ? "Rejecting" : "Reject"}</button>
+                            <button type="button" disabled={paymentReviewing !== null} onClick={() => void reviewPayment("APPROVE")} className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-3 font-bold text-white disabled:opacity-50"><CheckCircle2 className="h-4 w-4" />{paymentReviewing === "APPROVE" ? "Approving" : "Approve"}</button>
+                          </div>
+                        ) : (
+                          <p className="mt-3 text-[11px] text-slate-500">An admin must approve or reject this payment.</p>
+                        )}
+                      </>
+                    ) : (
+                      <p className="font-semibold text-slate-700">Payment {selectedPayment.status.toLowerCase()}.</p>
+                    )}
+                  </div>
+                </div>
+              )}
 
               <div>
                 <h4 className="font-semibold text-slate-900 mb-2">Contact Details</h4>

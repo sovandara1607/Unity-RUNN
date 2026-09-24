@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import { SportFooter, SportHeader } from "../../../components/SportHeader";
 import { Skeleton } from "../../../components/Skeleton";
-import { BakongPayment } from "../../../components/BakongPayment";
+import { BankQRPayment } from "../../../components/BakongPayment";
 import { AlertBanner } from "../../../components/alerts/AlertSystem";
 import { useSiteConfig } from "../../../components/site/SiteConfigProvider";
 import { api } from "../../../lib/api";
@@ -212,7 +212,7 @@ export default function EventRegisterPage() {
 
   return (
     <div className="min-h-screen bg-[#efefe9] text-[#111]">
-		{payment && <BakongPayment
+		{payment && <BankQRPayment
 			checkout={payment}
 			eventName={event.name}
 			restartHref={`/events/${event.slug}/register${selectedCategory ? `?category=${selectedCategory}` : ""}`}

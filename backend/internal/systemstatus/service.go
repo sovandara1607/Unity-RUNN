@@ -221,7 +221,7 @@ func (s *Service) Snapshot(ctx context.Context) Snapshot {
 			RefreshTokenTTL: s.cfg.RefreshTokenTTL.String(), BcryptCost: s.cfg.BcryptCost,
 			SecureCookies: s.cfg.AppEnv != "development", AllowedOrigins: append([]string(nil), s.cfg.CORSAllowedOrigins...),
 			OAuthSecretConfigured: s.cfg.GoogleOAuthClientSecret != "", StorageSecretConfigured: s.cfg.R2SecretAccessKey != "",
-			SMTPSecretConfigured: s.cfg.SMTPPassword != "", PaymentSecretConfigured: s.cfg.BakongToken != "",
+			SMTPSecretConfigured: s.cfg.SMTPPassword != "", PaymentSecretConfigured: paymentConfigurationPresent(s.cfg),
 		},
 		Workers: Workers{
 			NotificationStatus: workerRuntime.NotificationStatus, NotificationDetail: workerRuntime.NotificationDetail,
@@ -391,12 +391,25 @@ func buildPaymentStatus(cfg *config.Config) IntegrationStatus {
 	if cfg.PaymentProvider == "mock" {
 		return IntegrationStatus{Status: "attention", Provider: "Mock", Detail: "Development payment simulator is active; no real funds are settled"}
 	}
+	if cfg.PaymentProvider == "manual" {
+		if strings.TrimSpace(cfg.ManualPaymentQRString) == "" {
+			return IntegrationStatus{Status: "unavailable", Provider: "Static bank QR", Detail: "Manual payment is selected but the bank QR payload is missing"}
+		}
+		return IntegrationStatus{Status: "configured", Provider: "Static bank QR", Detail: "Bank references require admin review before ticket issuance"}
+	}
 	configured := cfg.BakongToken != "" && cfg.BakongAccountID != "" && cfg.BakongMerchantID != ""
 	status, detail := "configured", "Bakong KHQR is configured for payment verification"
 	if !configured {
 		status, detail = "unavailable", "Bakong is selected but required credentials are missing"
 	}
 	return IntegrationStatus{Status: status, Provider: "Bakong KHQR", Detail: detail, Endpoint: safeURLHost(cfg.BakongBaseURL), Identity: maskIdentifier(cfg.BakongMerchantID)}
+}
+
+func paymentConfigurationPresent(cfg *config.Config) bool {
+	if cfg.PaymentProvider == "manual" {
+		return strings.TrimSpace(cfg.ManualPaymentQRString) != ""
+	}
+	return cfg.BakongToken != ""
 }
 
 func buildApplication(cfg *config.Config, startedAt time.Time) Application {

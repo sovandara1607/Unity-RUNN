@@ -55,7 +55,8 @@ export type RegistrationStatus =
   | "PENDING"
   | "CONFIRMED"
   | "CANCELLED"
-  | "REFUNDED";
+  | "REFUNDED"
+  | "EXPIRED";
 
 export interface User {
   id: string;
@@ -294,7 +295,8 @@ export interface Payment {
 export interface PaymentCheckout {
 	registration_id: string;
 	provider: string;
-	status: "PENDING" | "SUCCEEDED" | "FAILED";
+	status: "PENDING" | "PROCESSING" | "SUCCEEDED" | "FAILED";
+	reference?: string;
 	amount_cents: number;
 	currency: string;
 	qr_string?: string;

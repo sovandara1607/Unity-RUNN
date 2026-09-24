@@ -148,6 +148,40 @@ func (f *fakeRegRepo) GetPaymentForRegistration(ctx context.Context, registratio
 	return nil, ErrNotFound
 }
 
+func (f *fakeRegRepo) SubmitManualPayment(_ context.Context, registrationID uuid.UUID, reference string) error {
+	for i := range f.payments {
+		if f.payments[i].RegistrationID == registrationID && f.payments[i].Provider == "manual" && f.payments[i].Status == string(payments.StatusPending) {
+			f.payments[i].ProviderReference = reference
+			f.payments[i].Status = string(payments.StatusProcessing)
+			return nil
+		}
+	}
+	return ErrPaymentUnavailable
+}
+
+func (f *fakeRegRepo) FailManualPayment(_ context.Context, registrationID uuid.UUID) (uuid.UUID, error) {
+	reg, ok := f.regs[registrationID]
+	if !ok || reg.Status != StatusPending {
+		return uuid.Nil, ErrPaymentUnavailable
+	}
+	for i := range f.payments {
+		if f.payments[i].RegistrationID == registrationID && f.payments[i].Provider == "manual" && f.payments[i].Status == string(payments.StatusProcessing) {
+			f.payments[i].Status = string(payments.StatusFailed)
+			reg.Status = StatusExpired
+			return reg.EventCategoryID, nil
+		}
+	}
+	return uuid.Nil, ErrPaymentUnavailable
+}
+
+func (f *fakeRegRepo) ApproveManualPayment(ctx context.Context, registrationID, paymentID uuid.UUID, ticketTokenHash string) (*Registration, bool, error) {
+	payment, err := f.GetPaymentForRegistration(ctx, registrationID)
+	if err != nil || payment.ID != paymentID || payment.Provider != "manual" || payment.Status != string(payments.StatusProcessing) {
+		return nil, false, ErrPaymentUnavailable
+	}
+	return f.ConfirmStoredPayment(ctx, registrationID, paymentID, ticketTokenHash)
+}
+
 func (f *fakeRegRepo) ConfirmStoredPayment(ctx context.Context, registrationID, paymentID uuid.UUID, ticketTokenHash string) (*Registration, bool, error) {
 	reg, ok := f.regs[registrationID]
 	if !ok {
@@ -322,11 +356,56 @@ func (f *fakePaymentProvider) RefundPayment(ctx context.Context, ref string, amo
 	return nil
 }
 
-func newTestSetup(provider *fakePaymentProvider) (*Service, *fakeRegRepo, *fakeEventsReader) {
+func newTestSetup(provider payments.Provider) (*Service, *fakeRegRepo, *fakeEventsReader) {
 	repo := newFakeRegRepo()
 	er := newFakeEventsReader()
 	svc := NewService(repo, er, provider, nil, nil, nil, nil, nil, nil, nil) // no Redis/notifier/idempotency in unit tests
 	return svc, repo, er
+}
+
+func TestService_ManualPaymentApprovalAndRejection(t *testing.T) {
+	provider, err := payments.NewManualProvider(payments.ManualConfig{QRString: "bank-qr-payload", TTL: time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc, repo, er := newTestSetup(provider)
+	eventID, categoryID := seedEventAndCategory(er, 2500, 10)
+
+	approvedUser := uuid.New()
+	approved, err := svc.Register(context.Background(), approvedUser, eventID, validRegisterReq(categoryID), "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkout, err := svc.SubmitManualPayment(context.Background(), approvedUser, auth.RoleUser, approved.Registration.ID, "BANK-REF-001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if checkout.Status != string(payments.StatusProcessing) || checkout.Reference != "BANK-REF-001" {
+		t.Fatalf("submitted checkout = %#v", checkout)
+	}
+	confirmed, err := svc.ReviewManualPayment(context.Background(), approved.Registration.ID, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if confirmed.Status != StatusConfirmed {
+		t.Fatalf("approved status = %q", confirmed.Status)
+	}
+
+	rejectedUser := uuid.New()
+	rejected, err := svc.Register(context.Background(), rejectedUser, eventID, validRegisterReq(categoryID), "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.SubmitManualPayment(context.Background(), rejectedUser, auth.RoleUser, rejected.Registration.ID, "BANK-REF-002"); err != nil {
+		t.Fatal(err)
+	}
+	failed, err := svc.ReviewManualPayment(context.Background(), rejected.Registration.ID, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if failed.Status != StatusExpired || repo.payments[1].Status != string(payments.StatusFailed) {
+		t.Fatalf("rejected registration=%q payment=%q", failed.Status, repo.payments[1].Status)
+	}
 }
 
 type fakeRegistrationNotifier struct {

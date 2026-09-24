@@ -29,6 +29,12 @@ const regStatusConfig: Record<
     text: "text-slate-700",
     dot: "bg-slate-400",
   },
+  EXPIRED: {
+    label: "Expired",
+    bg: "bg-slate-100 text-slate-500 border-slate-200",
+    text: "text-slate-500",
+    dot: "bg-slate-400",
+  },
 };
 
 export function RegistrationStatusBadge({

@@ -68,18 +68,20 @@ type Config struct {
 	NotificationSweepInterval time.Duration
 	NotificationMaxAttempts   int
 
-	PaymentProvider     string
-	BakongBaseURL       string
-	BakongToken         string
-	BakongAccountID     string
-	BakongMerchantID    string
-	BakongAcquiringBank string
-	BakongMerchantName  string
-	BakongMerchantCity  string
-	BakongMCC           string
-	BakongStoreLabel    string
-	BakongTerminalLabel string
-	BakongPaymentTTL    time.Duration
+	PaymentProvider       string
+	BakongBaseURL         string
+	BakongToken           string
+	BakongAccountID       string
+	BakongMerchantID      string
+	BakongAcquiringBank   string
+	BakongMerchantName    string
+	BakongMerchantCity    string
+	BakongMCC             string
+	BakongStoreLabel      string
+	BakongTerminalLabel   string
+	BakongPaymentTTL      time.Duration
+	ManualPaymentQRString string
+	ManualPaymentTTL      time.Duration
 
 	ShutdownTimeout time.Duration
 
@@ -116,6 +118,7 @@ func Load() (*Config, error) {
 		BakongStoreLabel:          "UNITY RUNN CLUB",
 		BakongTerminalLabel:       "WEB",
 		BakongPaymentTTL:          10 * time.Minute,
+		ManualPaymentTTL:          24 * time.Hour,
 		ShutdownTimeout:           10 * time.Second,
 		UploadDir:                 "uploads",
 		ObjectStorageProvider:     "local",
@@ -255,6 +258,7 @@ func Load() (*Config, error) {
 	cfg.BakongMCC = getEnv("BAKONG_MCC", cfg.BakongMCC)
 	cfg.BakongStoreLabel = getEnv("BAKONG_STORE_LABEL", cfg.BakongStoreLabel)
 	cfg.BakongTerminalLabel = getEnv("BAKONG_TERMINAL_LABEL", cfg.BakongTerminalLabel)
+	cfg.ManualPaymentQRString = strings.TrimSpace(os.Getenv("MANUAL_PAYMENT_QR_STRING"))
 	if v := os.Getenv("BAKONG_PAYMENT_TTL"); v != "" {
 		d, err := time.ParseDuration(v)
 		if err != nil {
@@ -262,8 +266,15 @@ func Load() (*Config, error) {
 		}
 		cfg.BakongPaymentTTL = d
 	}
-	if cfg.PaymentProvider != "mock" && cfg.PaymentProvider != "bakong" {
-		return nil, fmt.Errorf("config: PAYMENT_PROVIDER must be mock or bakong")
+	if v := os.Getenv("MANUAL_PAYMENT_TTL"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			return nil, fmt.Errorf("config: invalid MANUAL_PAYMENT_TTL %q: %w", v, err)
+		}
+		cfg.ManualPaymentTTL = d
+	}
+	if cfg.PaymentProvider != "mock" && cfg.PaymentProvider != "bakong" && cfg.PaymentProvider != "manual" {
+		return nil, fmt.Errorf("config: PAYMENT_PROVIDER must be mock, manual, or bakong")
 	}
 
 	if v := os.Getenv("SMTP_PORT"); v != "" {

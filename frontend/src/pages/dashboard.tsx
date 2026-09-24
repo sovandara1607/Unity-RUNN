@@ -8,7 +8,7 @@ import { withMinSkeleton } from "../lib/withMinSkeleton";
 import { formatEventDate, registrationStatusLabel } from "../lib/eventFormat";
 import { SportHeader, SportFooter } from "../components/SportHeader";
 import { Skeleton } from "../components/Skeleton";
-import { BakongPayment } from "../components/BakongPayment";
+import { BankQRPayment } from "../components/BakongPayment";
 import { AlertBanner, useAlerts } from "../components/alerts/AlertSystem";
 import { useSiteConfig } from "../components/site/SiteConfigProvider";
 import type { Event, MeResponse, PaymentCheckout, Registration } from "../types";
@@ -278,7 +278,7 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen text-white" style={{ backgroundColor: config.background_color }}>
-		{payment && <BakongPayment checkout={payment} eventName={paymentEventName} restartHref={paymentRestartHref} onPaid={finishPayment} onClose={() => setPayment(null)} />}
+		{payment && <BankQRPayment checkout={payment} eventName={paymentEventName} restartHref={paymentRestartHref} onPaid={finishPayment} onClose={() => setPayment(null)} />}
       <SportHeader active="account" accountHref="/dashboard" accountLabel="Account" />
 
       <main>

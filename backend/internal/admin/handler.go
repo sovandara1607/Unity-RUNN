@@ -25,6 +25,41 @@ import (
 type registrationsReader interface {
 	ListAll(ctx context.Context, filter registrations.AdminListFilter) ([]registrations.Registration, int, error)
 	GetByID(ctx context.Context, callerID uuid.UUID, callerRole auth.Role, id uuid.UUID) (*registrations.Registration, error)
+	ReviewManualPayment(ctx context.Context, registrationID uuid.UUID, approved bool) (*registrations.Registration, error)
+}
+
+func (h *Handler) ReviewPayment(w http.ResponseWriter, r *http.Request) {
+	actor, ok := auth.UserFromContext(r.Context())
+	if !ok || !actor.Role.AtLeast(auth.RoleAdmin) {
+		httpresponse.WriteError(w, http.StatusForbidden, "forbidden", "admin access required")
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpresponse.WriteError(w, http.StatusBadRequest, "invalid_id", "id must be a UUID")
+		return
+	}
+	var body struct {
+		Decision string `json:"decision"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || (body.Decision != "APPROVE" && body.Decision != "REJECT") {
+		httpresponse.WriteError(w, http.StatusUnprocessableEntity, "invalid_decision", "decision must be APPROVE or REJECT")
+		return
+	}
+	updated, err := h.regs.ReviewManualPayment(r.Context(), id, body.Decision == "APPROVE")
+	switch {
+	case errors.Is(err, registrations.ErrNotFound):
+		httpresponse.WriteError(w, http.StatusNotFound, "not_found", "payment not found")
+	case errors.Is(err, registrations.ErrPaymentUnavailable):
+		httpresponse.WriteError(w, http.StatusConflict, "payment_unavailable", "this payment is not waiting for manual review")
+	case err != nil:
+		httpresponse.WriteError(w, http.StatusInternalServerError, "review_failed", "payment review could not be saved")
+	default:
+		if h.recorder != nil {
+			h.recorder.Record(r.Context(), &actor.ID, "manual_payment_"+strings.ToLower(body.Decision), "registration", &id, nil)
+		}
+		httpresponse.WriteData(w, http.StatusOK, updated)
+	}
 }
 
 // auditListReader is the slice of auditlog.Repository this handler needs

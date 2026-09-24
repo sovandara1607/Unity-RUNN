@@ -155,6 +155,28 @@ func (h *Handler) VerifyPayment(w http.ResponseWriter, r *http.Request) {
 	httpresponse.WriteData(w, http.StatusOK, map[string]any{"registration": result.Registration, "payment": result.Payment})
 }
 
+func (h *Handler) SubmitPayment(w http.ResponseWriter, r *http.Request) {
+	caller, ok := auth.UserFromContext(r.Context())
+	if !ok {
+		httpresponse.WriteError(w, http.StatusUnauthorized, "unauthorized", "missing or invalid access token")
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpresponse.WriteError(w, http.StatusBadRequest, "invalid_id", "id must be a UUID")
+		return
+	}
+	var body struct {
+		Reference string `json:"reference"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		httpresponse.WriteError(w, http.StatusBadRequest, "invalid_body", "a bank transaction reference is required")
+		return
+	}
+	payment, err := h.svc.SubmitManualPayment(r.Context(), caller.ID, caller.Role, id, body.Reference)
+	writePaymentResult(w, payment, err)
+}
+
 func writePaymentResult(w http.ResponseWriter, payment *PaymentCheckout, err error) {
 	switch {
 	case errors.Is(err, ErrNotFound):
@@ -167,8 +189,12 @@ func writePaymentResult(w http.ResponseWriter, payment *PaymentCheckout, err err
 		httpresponse.WriteError(w, http.StatusConflict, "payment_unavailable", "payment is not available for this registration")
 	case errors.Is(err, ErrPaymentExpired):
 		httpresponse.WriteError(w, http.StatusGone, "payment_expired", "this payment expired; choose the event again to start a new registration")
+	case errors.Is(err, ErrPaymentFailed):
+		httpresponse.WriteError(w, http.StatusConflict, "payment_failed", "payment was rejected; check the bank reference or contact an organizer")
+	case errors.Is(err, ErrInvalidPaymentReference):
+		httpresponse.WriteError(w, http.StatusUnprocessableEntity, "invalid_payment_reference", "enter the transaction reference shown by your bank")
 	case err != nil:
-		httpresponse.WriteError(w, http.StatusBadGateway, "payment_provider_error", "could not verify payment with Bakong")
+		httpresponse.WriteError(w, http.StatusBadGateway, "payment_provider_error", "could not check the payment status")
 	default:
 		httpresponse.WriteData(w, http.StatusOK, payment)
 	}

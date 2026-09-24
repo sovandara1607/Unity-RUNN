@@ -432,6 +432,95 @@ func (r *Repository) GetPaymentForRegistration(ctx context.Context, registration
 	return &p, nil
 }
 
+func (r *Repository) SubmitManualPayment(ctx context.Context, registrationID uuid.UUID, reference string) error {
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE payments SET provider_reference=$2, status='PROCESSING', updated_at=now()
+		WHERE registration_id=$1 AND provider='manual' AND status='PENDING'
+		  AND (expires_at IS NULL OR expires_at > now())`, registrationID, reference)
+	if err != nil {
+		return fmt.Errorf("registrations: submit manual payment: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrPaymentUnavailable
+	}
+	return nil
+}
+
+func (r *Repository) FailManualPayment(ctx context.Context, registrationID uuid.UUID) (uuid.UUID, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	var categoryID uuid.UUID
+	var status Status
+	if err := tx.QueryRow(ctx, `SELECT event_category_id, status FROM registrations WHERE id=$1 FOR UPDATE`, registrationID).Scan(&categoryID, &status); err != nil {
+		return uuid.Nil, err
+	}
+	if status != StatusPending {
+		return uuid.Nil, ErrPaymentUnavailable
+	}
+	tag, err := tx.Exec(ctx, `UPDATE payments SET status='FAILED', updated_at=now() WHERE registration_id=$1 AND provider='manual' AND status='PROCESSING'`, registrationID)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	if tag.RowsAffected() == 0 {
+		return uuid.Nil, ErrPaymentUnavailable
+	}
+	if _, err := tx.Exec(ctx, `UPDATE registrations SET status='EXPIRED', updated_at=now() WHERE id=$1`, registrationID); err != nil {
+		return uuid.Nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return uuid.Nil, err
+	}
+	return categoryID, nil
+}
+
+func (r *Repository) ApproveManualPayment(ctx context.Context, registrationID, paymentID uuid.UUID, ticketTokenHash string) (*Registration, bool, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	var reg Registration
+	err = tx.QueryRow(ctx, `
+		SELECT id, registration_number, user_id, event_id, event_category_id, status,
+		       full_name, email, phone, date_of_birth, gender, emergency_contact_name,
+		       emergency_contact_phone, tshirt_size, created_at, updated_at
+		FROM registrations WHERE id=$1 FOR UPDATE`, registrationID,
+	).Scan(&reg.ID, &reg.RegistrationNumber, &reg.UserID, &reg.EventID, &reg.EventCategoryID, &reg.Status,
+		&reg.FullName, &reg.Email, &reg.Phone, &reg.DateOfBirth, &reg.Gender,
+		&reg.EmergencyContactName, &reg.EmergencyContactPhone, &reg.TshirtSize, &reg.CreatedAt, &reg.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, false, ErrNotFound
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	if reg.Status != StatusPending {
+		return nil, false, ErrPaymentUnavailable
+	}
+	tag, err := tx.Exec(ctx, `
+		UPDATE payments SET status='SUCCEEDED', verified_at=now(), updated_at=now()
+		WHERE id=$1 AND registration_id=$2 AND provider='manual' AND status='PROCESSING'`, paymentID, registrationID)
+	if err != nil {
+		return nil, false, err
+	}
+	if tag.RowsAffected() == 0 {
+		return nil, false, ErrPaymentUnavailable
+	}
+	if err := tx.QueryRow(ctx, `UPDATE registrations SET status='CONFIRMED', updated_at=now() WHERE id=$1 RETURNING status, updated_at`, registrationID).Scan(&reg.Status, &reg.UpdatedAt); err != nil {
+		return nil, false, err
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO tickets (registration_id, token_hash) VALUES ($1,$2) ON CONFLICT (registration_id) DO NOTHING`, registrationID, ticketTokenHash); err != nil {
+		return nil, false, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, false, err
+	}
+	return &reg, true, nil
+}
+
 func (r *Repository) ClaimPendingPayments(ctx context.Context, workerID string, now time.Time, lease time.Duration, limit int) ([]Payment, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 25
@@ -439,7 +528,7 @@ func (r *Repository) ClaimPendingPayments(ctx context.Context, workerID string, 
 	rows, err := r.pool.Query(ctx, `
 		WITH candidates AS (
 			SELECT id FROM payments
-			WHERE status='PENDING' AND reconcile_after <= $1
+			WHERE status='PENDING' AND provider <> 'manual' AND reconcile_after <= $1
 			  AND (reconcile_lease_until IS NULL OR reconcile_lease_until < $1)
 			ORDER BY reconcile_after, created_at
 			FOR UPDATE SKIP LOCKED

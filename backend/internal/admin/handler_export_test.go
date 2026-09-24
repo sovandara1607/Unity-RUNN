@@ -33,6 +33,9 @@ func (f *exportRegistrationReader) ListAll(_ context.Context, filter registratio
 func (f *exportRegistrationReader) GetByID(context.Context, uuid.UUID, auth.Role, uuid.UUID) (*registrations.Registration, error) {
 	return nil, registrations.ErrNotFound
 }
+func (f *exportRegistrationReader) ReviewManualPayment(context.Context, uuid.UUID, bool) (*registrations.Registration, error) {
+	return nil, registrations.ErrPaymentUnavailable
+}
 
 func TestExportRegistrationsIncludesAllPagesAndNeutralizesFormulas(t *testing.T) {
 	eventID := uuid.New()

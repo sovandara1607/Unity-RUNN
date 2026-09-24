@@ -257,6 +257,7 @@ func NewRouter(deps Deps) http.Handler {
 			reg.Use(auth.RequireAuth(deps.Tokens, auth.RoleUser))
 			reg.Get("/{id}", deps.RegistrationsHandler.GetByID)
 			reg.Get("/{id}/payment", deps.RegistrationsHandler.Payment)
+			reg.Post("/{id}/payment/submit", deps.RegistrationsHandler.SubmitPayment)
 			reg.With(paymentVerifyRateLimit(deps)).Post("/{id}/payment/verify", deps.RegistrationsHandler.VerifyPayment)
 			reg.Post("/{id}/cancel", deps.RegistrationsHandler.Cancel)
 			reg.Post("/{id}/ticket", deps.RegistrationsHandler.Ticket)
@@ -278,6 +279,7 @@ func NewRouter(deps Deps) http.Handler {
 			a.Get("/registrations", deps.AdminHandler.ListRegistrations)
 			a.Get("/registrations/export.csv", deps.AdminHandler.ExportRegistrations)
 			a.Get("/registrations/{id}", deps.AdminHandler.GetRegistration)
+			a.With(auth.RequireAuth(deps.Tokens, auth.RoleAdmin)).Patch("/registrations/{id}/payment", deps.AdminHandler.ReviewPayment)
 			a.With(auth.RequireAuth(deps.Tokens, auth.RoleAdmin)).Get("/audit-logs", deps.AdminHandler.ListAuditLogs)
 			if deps.AutomationHandler != nil {
 				a.With(auth.RequireAuth(deps.Tokens, auth.RoleAdmin)).Get("/automations", deps.AutomationHandler.Snapshot)
